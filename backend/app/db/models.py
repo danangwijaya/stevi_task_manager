@@ -6,6 +6,7 @@ from app.db.session import Base
 
 class UserRole(str, enum.Enum):
     ADMIN = "admin"
+    DOSEN = "dosen"
     ANNOTATOR = "annotator"
 
 class TaskStatus(str, enum.Enum):

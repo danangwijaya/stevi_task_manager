@@ -11,11 +11,11 @@
           <h1 class="text-xl font-extrabold text-slate-900 tracking-tight">Quality Control (QC) & Review Studio</h1>
           <span
             class="text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider border shadow-2xs flex items-center gap-1.5"
-            :class="authStore.isAdmin ? 'bg-amber-50 text-amber-800 border-amber-300' : 'bg-rose-50 text-rose-700 border-rose-200'"
+            :class="authStore.isReviewer ? 'bg-amber-50 text-amber-800 border-amber-300' : 'bg-rose-50 text-rose-700 border-rose-200'"
           >
-            <ShieldCheck v-if="authStore.isAdmin" :size="13" class="text-amber-600" />
+            <ShieldCheck v-if="authStore.isReviewer" :size="13" class="text-amber-600" />
             <Eye v-else :size="13" class="text-rose-600" />
-            <span>{{ authStore.isAdmin ? 'Akses Reviewer (Admin)' : 'Mode Lihat Kontributor' }}</span>
+            <span>{{ authStore.isReviewer ? (authStore.isAdmin ? 'Akses Reviewer (Admin)' : 'Akses Reviewer (Dosen)') : 'Mode Lihat Kontributor' }}</span>
           </span>
         </div>
         <p class="text-xs text-slate-500 max-w-2xl leading-relaxed">
@@ -38,11 +38,11 @@
       </div>
     </div>
 
-    <!-- Informational Banner for Non-Admin -->
-    <div v-if="!authStore.isAdmin" class="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex items-center justify-between gap-3 shadow-2xs">
+    <!-- Informational Banner for Non-Reviewer -->
+    <div v-if="!authStore.isReviewer" class="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex items-center justify-between gap-3 shadow-2xs">
       <div class="flex items-center gap-2">
         <Info :size="16" class="text-amber-700 shrink-0" />
-        <span><b>Mode Pantau Kontributor:</b> Anda dapat melihat visualisasi peta dan status antrean QC. Hak persetujuan (Approve) dan permintaan revisi hanya dimiliki oleh akun Administrator/Reviewer.</span>
+        <span><b>Mode Pantau Kontributor:</b> Anda dapat melihat visualisasi peta dan status antrean QC. Hak persetujuan (Approve) dan permintaan revisi hanya dimiliki oleh Dosen / Administrator Reviewer.</span>
       </div>
     </div>
 
@@ -302,7 +302,7 @@
             <!-- Review Actions & Decision Form (7 cols) -->
             <div class="lg:col-span-7 space-y-3">
               <!-- Quick Feedback Template Buttons -->
-              <div v-if="authStore.isAdmin" class="space-y-1">
+              <div v-if="authStore.isReviewer" class="space-y-1">
                 <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
                   <Zap :size="12" class="text-amber-500 fill-amber-500" />
                   <span>Template Catatan Reviewer:</span>
@@ -338,7 +338,7 @@
                   v-model="reviewerNotes"
                   rows="2"
                   placeholder="Tuliskan catatan evaluasi atau instruksi perbaikan..."
-                  :disabled="!authStore.isAdmin"
+                  :disabled="!authStore.isReviewer"
                   class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-rose-500 focus:bg-white shadow-2xs font-sans"
                 ></textarea>
               </div>
@@ -347,7 +347,7 @@
               <div class="flex items-center justify-end gap-2.5 pt-1">
                 <button
                   @click="rejectWithNotes"
-                  :disabled="loadingAction || !authStore.isAdmin"
+                  :disabled="loadingAction || !authStore.isReviewer"
                   class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-bold px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 disabled:opacity-50 shadow-2xs cursor-pointer"
                 >
                   <RotateCcw :size="13" />
@@ -356,7 +356,7 @@
 
                 <button
                   @click="approveTask"
-                  :disabled="loadingAction || !authStore.isAdmin"
+                  :disabled="loadingAction || !authStore.isReviewer"
                   class="bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-bold px-5 py-2 rounded-xl shadow-md shadow-emerald-600/20 transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                 >
                   <CheckCircle2 :size="14" />
@@ -528,6 +528,12 @@ const initOrUpdateQCMap = (task, features) => {
     })
 
     L.control.zoom({ position: 'bottomright' }).addTo(qcMap)
+    L.control.scale({
+      position: 'bottomleft',
+      metric: true,
+      imperial: false,
+      maxWidth: 150
+    }).addTo(qcMap)
     qcFeatureGroup = L.featureGroup().addTo(qcMap)
   }
 

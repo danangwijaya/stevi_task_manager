@@ -66,6 +66,7 @@ export default {
   createUser: (userData) => api.post('/auth/users', userData),
   updateUser: (userId, userData) => api.put(`/auth/users/${userId}`, userData),
   deleteUser: (userId) => api.delete(`/auth/users/${userId}`),
+  resetPassword: (userId, data) => api.post(`/auth/users/${userId}/reset-password`, data),
 
   // Projects & Tasks
   getProjects: () => api.get('/tasks/projects'),

@@ -532,6 +532,22 @@
 
         <!-- Leaflet Map Container -->
         <div id="map-container" class="w-full h-full z-0"></div>
+
+        <!-- Floating Live Map Info Pill (Zoom, Representative Scale, Coordinates) -->
+        <div class="absolute bottom-3 left-48 z-10 hidden sm:flex items-center gap-2 pointer-events-none">
+          <div class="bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-300/90 shadow-md text-[11px] font-mono font-bold text-slate-700 flex items-center gap-2 pointer-events-auto select-none">
+            <span class="flex items-center gap-1 text-slate-500">
+              <Compass :size="12" class="text-rose-600" />
+              <span>Z{{ mapZoom }}</span>
+            </span>
+            <span class="text-slate-300">•</span>
+            <span class="text-slate-900 font-black" title="Estimasi Skala Representatif Peta">Skala {{ mapScaleRatio }}</span>
+            <template v-if="cursorCoords.lat">
+              <span class="text-slate-300">•</span>
+              <span class="text-[10px] text-slate-500" title="Koordinat Kursor (WGS84)">{{ cursorCoords.lat }}°, {{ cursorCoords.lng }}°</span>
+            </template>
+          </div>
+        </div>
       </div>
 
       <!-- Toast Notification -->
@@ -810,7 +826,8 @@ import {
   Redo2,
   MousePointer,
   Eye,
-  EyeOff
+  EyeOff,
+  Compass
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useTasksStore } from '../stores/tasks'
@@ -1198,6 +1215,31 @@ onUnmounted(() => {
   }
 })
 
+// ── Map Scale & Coordinate Tracking ──────────────────────────────────────────
+const mapZoom = ref(13)
+const mapScaleRatio = ref('1:50,000')
+const cursorCoords = ref({ lat: null, lng: null })
+
+function updateMapScaleInfo() {
+  if (!map) return
+  mapZoom.value = map.getZoom()
+  const centerLat = map.getCenter().lat
+  // Resolution in meters/pixel: 156543.03392 * cos(lat) / 2^zoom
+  const metersPerPixel = 156543.03392 * Math.cos((centerLat * Math.PI) / 180) / Math.pow(2, mapZoom.value)
+  // At 96 DPI: 1 m = 3779.528 px
+  const scaleDenom = Math.round(metersPerPixel * (96 / 0.0254))
+  mapScaleRatio.value = `1:${scaleDenom.toLocaleString('id-ID')}`
+}
+
+function onMapMouseMove(e) {
+  if (e && e.latlng) {
+    cursorCoords.value = {
+      lat: e.latlng.lat.toFixed(5),
+      lng: e.latlng.lng.toFixed(5)
+    }
+  }
+}
+
 const initMap = () => {
   if (map) return
 
@@ -1208,6 +1250,19 @@ const initMap = () => {
   })
 
   L.control.zoom({ position: 'bottomright' }).addTo(map)
+
+  // Leaflet Graphical Scale Bar (Metric: m & km)
+  L.control.scale({
+    position: 'bottomleft',
+    metric: true,
+    imperial: false,
+    maxWidth: 160
+  }).addTo(map)
+
+  // Event Listeners for Dynamic Scale and Coordinates
+  map.on('zoomend moveend', updateMapScaleInfo)
+  map.on('mousemove', onMapMouseMove)
+  updateMapScaleInfo()
 
   // Satellite Basemap
   updateTileLayer()
@@ -2066,5 +2121,25 @@ const getStatusBadgeClass = (status) => {
 }
 .custom-gis-popup .leaflet-popup-tip {
   background-color: #ffffff !important;
+}
+
+/* Leaflet Scale Bar (Professional GIS Styling) */
+.leaflet-control-scale {
+  margin-bottom: 12px !important;
+  margin-left: 14px !important;
+}
+.leaflet-control-scale-line {
+  border: 2px solid #0f172a !important;
+  border-top: none !important;
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(8px) !important;
+  color: #0f172a !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  padding: 3px 6px 2px !important;
+  border-radius: 0 0 5px 5px !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.15) !important;
+  letter-spacing: 0.025em !important;
 }
 </style>

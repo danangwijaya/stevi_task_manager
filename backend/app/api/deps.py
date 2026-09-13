@@ -34,9 +34,21 @@ def get_current_user(
 def get_current_active_admin(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    if current_user.role != "admin":
+    if (current_user.role or "").strip().lower() != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The user doesn't have enough privileges (Admin required)"
+        )
+    return current_user
+
+def get_current_active_reviewer(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Allows either Admin or Dosen (Reviewer/QC access)"""
+    role = (current_user.role or "").strip().lower()
+    if role not in ["admin", "dosen"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The user doesn't have enough privileges (Admin or Dosen reviewer required)"
         )
     return current_user

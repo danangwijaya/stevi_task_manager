@@ -1,5 +1,6 @@
 import json
 import logging
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal, engine, Base
 from app.db.models import User, StudyArea, TaskGrid, Annotation, LandCoverClass, UserRole, TaskStatus
@@ -9,6 +10,24 @@ from app.services.grid_generator import generate_spatial_grids
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def sync_postgres_sequences(db: Session):
+    """Synchronize primary key sequences with MAX(id) to avoid duplicate key violations."""
+    if engine.dialect.name == "postgresql":
+        logger.info("Synchronizing PostgreSQL ID sequences...")
+        tables = [
+            ("users", "users_id_seq"),
+            ("study_areas", "study_areas_id_seq"),
+            ("task_grids", "task_grids_id_seq"),
+            ("annotations", "annotations_id_seq"),
+            ("land_cover_classes", "land_cover_classes_id_seq")
+        ]
+        for table, seq in tables:
+            try:
+                db.execute(text(f"SELECT setval('{seq}', COALESCE((SELECT MAX(id) FROM {table}), 1), true);"))
+            except Exception as e:
+                logger.debug(f"Could not sync sequence {seq} for table {table}: {e}")
+        db.commit()
 
 def seed_database():
     Base.metadata.create_all(bind=engine)
@@ -63,6 +82,9 @@ def seed_database():
             logger.info("Database initialized.")
         else:
             logger.info(f"Database contains {existing_grids_count} task grids. Retaining user data without resetting.")
+
+        # 4. Synchronize all PostgreSQL sequences to MAX(id)
+        sync_postgres_sequences(db)
     except Exception as e:
         logger.error(f"Error seeding database: {e}")
         db.rollback()

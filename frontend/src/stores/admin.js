@@ -52,18 +52,28 @@ export const useAdminStore = defineStore('admin', () => {
   }
 
   async function deleteUser(userId) {
-    await axios.delete(`${API}/api/v1/auth/users/${userId}`, {
+    const { data } = await axios.delete(`${API}/api/v1/auth/users/${userId}`, {
       headers: authHeaders()
     })
-    users.value = users.value.filter(u => u.id !== userId)
+    if (data?.action === 'deactivated') {
+      const idx = users.value.findIndex(u => u.id === userId)
+      if (idx !== -1) users.value[idx].is_active = false
+    } else {
+      users.value = users.value.filter(u => u.id !== userId)
+    }
+    return data
   }
 
   async function toggleUserActive(userId, isActive) {
     return updateUser(userId, { is_active: isActive })
   }
 
-  async function resetPassword(userId, newPassword) {
-    return updateUser(userId, { password: newPassword })
+  async function resetPassword(userId, newPassword = null) {
+    const payload = newPassword ? { password: newPassword } : {}
+    const { data } = await axios.post(`${API}/api/v1/auth/users/${userId}/reset-password`, payload, {
+      headers: authHeaders()
+    })
+    return data
   }
 
   // ── PROJECT ACTIONS ───────────────────────────────────────────────────────

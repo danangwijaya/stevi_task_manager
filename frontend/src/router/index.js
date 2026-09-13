@@ -47,7 +47,7 @@ const routes = [
     path: '/qc',
     name: 'qc',
     component: AdminQCView,
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, requiresReviewer: true }
   },
   {
     path: '/admin',
@@ -80,15 +80,29 @@ router.beforeEach((to, from, next) => {
     return
   }
 
-  if (to.meta.requiresAdmin) {
+  if (to.meta.requiresReviewer) {
     try {
       const user = userRaw ? JSON.parse(userRaw) : null
-      if (!user || user.role !== 'admin') {
-        next('/')
+      const role = (user?.role || '').toLowerCase()
+      if (!user || !['admin', 'dosen'].includes(role)) {
+        next('/dashboard')
         return
       }
     } catch {
-      next('/')
+      next('/dashboard')
+      return
+    }
+  }
+
+  if (to.meta.requiresAdmin) {
+    try {
+      const user = userRaw ? JSON.parse(userRaw) : null
+      if (!user || (user.role || '').toLowerCase() !== 'admin') {
+        next('/dashboard')
+        return
+      }
+    } catch {
+      next('/dashboard')
       return
     }
   }

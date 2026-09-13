@@ -8,7 +8,7 @@ from sqlalchemy import func
 
 from app.db.session import get_db
 from app.db.models import TaskGrid, User, StudyArea, Annotation, TaskStatus
-from app.api.deps import get_current_user, get_current_active_admin
+from app.api.deps import get_current_user, get_current_active_admin, get_current_active_reviewer
 from app.services.grid_generator import generate_spatial_grids
 
 router = APIRouter()
@@ -662,7 +662,7 @@ def assign_task(
     task_id: int,
     assign_req: TaskAssignRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_admin)
+    current_user: User = Depends(get_current_active_reviewer)
 ) -> Any:
     task = db.query(TaskGrid).filter(TaskGrid.id == task_id).first()
     if not task:
@@ -704,11 +704,12 @@ def update_task_status(
         "IN_PROGRESS": ["SUBMITTED"],
         "SUBMITTED": ["APPROVED", "REVISION_NEEDED"],
         "REVISION_NEEDED": ["IN_PROGRESS", "SUBMITTED"],
-        "APPROVED": ["REVISION_NEEDED"],  # Admin can reopen
+        "APPROVED": ["REVISION_NEEDED"],  # Admin/Dosen can reopen
     }
 
     # Permissions check
-    if current_user.role != "admin":
+    user_role = (current_user.role or "").strip().lower()
+    if user_role not in ["admin", "dosen"]:
         if task.assigned_user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Hanya dapat mengubah status grid milik sendiri")
         # Contributors can only: IN_PROGRESS->SUBMITTED, REVISION_NEEDED->SUBMITTED
@@ -723,7 +724,7 @@ def update_task_status(
                 detail=f"Kontributor hanya dapat submit grid (status saat ini: {old_status})"
             )
     else:
-        # Admin: validate transition is logical
+        # Admin or Dosen Reviewer: validate transition is logical
         allowed = VALID_TRANSITIONS.get(old_status, [])
         if new_status not in allowed and new_status != "UNASSIGNED":
             raise HTTPException(

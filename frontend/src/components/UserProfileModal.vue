@@ -68,7 +68,7 @@
         <div v-if="activeTab === 'info'" class="space-y-5">
           <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div class="flex items-center gap-4 text-center sm:text-left">
-              <div class="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl text-white shadow-md" :class="authStore.isAdmin ? 'bg-amber-500' : 'bg-rose-600'">
+              <div class="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl text-white shadow-md" :class="authStore.isAdmin ? 'bg-amber-500' : (authStore.isDosen ? 'bg-indigo-600' : 'bg-rose-600')">
                 {{ authStore.user?.full_name?.charAt(0) || 'U' }}
               </div>
               <div>
@@ -77,9 +77,13 @@
                 <div class="mt-1 flex items-center gap-2 justify-center sm:justify-start">
                   <span
                     class="px-2 py-0.5 rounded-full font-bold text-[10px] uppercase tracking-wider"
-                    :class="authStore.isAdmin ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-rose-100 text-rose-700 border border-rose-300'"
+                    :class="authStore.isAdmin
+                      ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                      : (authStore.isDosen
+                        ? 'bg-indigo-100 text-indigo-800 border border-indigo-300'
+                        : 'bg-rose-100 text-rose-700 border border-rose-300')"
                   >
-                    {{ authStore.isAdmin ? 'Lead Administrator' : 'Kontributor / Mapper' }}
+                    {{ authStore.roleTitle }}
                   </span>
                   <span class="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-bold text-[10px]">
                     ● Aktif
@@ -129,7 +133,7 @@
               </router-link>
 
               <router-link
-                v-if="authStore.isAdmin"
+                v-if="authStore.isReviewer"
                 to="/qc"
                 @click="closeModal"
                 class="p-2.5 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-xl text-left flex flex-col justify-between transition-colors shadow-2xs group"
@@ -138,8 +142,8 @@
                   <ClipboardCheck :size="16" />
                   <span class="text-[9px] font-mono font-bold bg-orange-200 px-1 py-0.2 rounded">QC</span>
                 </div>
-                <div class="mt-2 font-bold text-slate-800 text-xs group-hover:text-orange-700">Review QC</div>
-                <div class="text-[10px] text-slate-500">Validasi Mutu Digitasi</div>
+                <div class="mt-2 font-bold text-slate-800 text-xs group-hover:text-orange-700">QC Review</div>
+                <div class="text-[10px] text-slate-500">Validasi Anotasi Grid</div>
               </router-link>
 
               <router-link
@@ -183,6 +187,27 @@
         <!-- TAB 3: CRUD PENGGUNA (Admin / Dosen Only) -->
         <div v-if="activeTab === 'crud_users' && authStore.isAdmin" class="space-y-4">
           
+          <!-- Banner link to Full Admin Panel -->
+          <div class="p-3.5 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-2xl flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5">
+              <div class="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+                <Shield :size="16" />
+              </div>
+              <div>
+                <div class="font-black text-xs text-purple-900">Suite Manajemen Pengguna 2026 Tersedia</div>
+                <div class="text-[11px] text-purple-700">Akses statistik KPI, filter peran/status, password generator, dan tampilan kartu di Panel Admin.</div>
+              </div>
+            </div>
+            <router-link
+              to="/admin"
+              @click="closeModal"
+              class="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition-colors shrink-0 flex items-center gap-1 shadow-xs"
+            >
+              <span>Buka Panel Admin</span>
+              <ExternalLink :size="12" />
+            </router-link>
+          </div>
+
           <div class="flex items-center justify-between pb-2 border-b border-slate-100">
             <div>
               <h3 class="font-extrabold text-slate-900 text-sm">Manajemen Pengguna (CRUD)</h3>
@@ -223,7 +248,11 @@
                     <td class="p-3">
                       <span
                         class="px-2 py-0.5 rounded-full font-bold text-[10px] uppercase tracking-wider"
-                        :class="u.role?.toLowerCase() === 'admin' ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-700 border border-slate-200'"
+                        :class="u.role?.toLowerCase() === 'admin'
+                          ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                          : (u.role?.toLowerCase() === 'dosen'
+                            ? 'bg-indigo-100 text-indigo-800 border border-indigo-300'
+                            : 'bg-emerald-100 text-emerald-800 border border-emerald-300')"
                       >
                         {{ u.role }}
                       </span>
@@ -323,8 +352,9 @@
               v-model="userForm.role"
               class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-rose-500 focus:bg-white font-medium"
             >
-              <option value="ANNOTATOR">Kontributor / Mapper (Annotator)</option>
-              <option value="admin">Administrator / Reviewer (Admin)</option>
+              <option value="annotator">Kontributor / Mapper (Annotator)</option>
+              <option value="dosen">Dosen / QC Reviewer (Dosen)</option>
+              <option value="admin">Administrator (Admin)</option>
             </select>
           </div>
 
@@ -389,7 +419,8 @@ import {
   Trash2,
   Box,
   Grid,
-  ClipboardCheck
+  ClipboardCheck,
+  ExternalLink
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 
@@ -416,7 +447,7 @@ const userForm = reactive({
   full_name: '',
   username: '',
   email: '',
-  role: 'ANNOTATOR',
+  role: 'annotator',
   password: '',
   is_active: true
 })
@@ -437,7 +468,7 @@ const openAddUserModal = () => {
   userForm.full_name = ''
   userForm.username = ''
   userForm.email = ''
-  userForm.role = 'ANNOTATOR'
+  userForm.role = 'annotator'
   userForm.password = ''
   userForm.is_active = true
   showUserFormModal.value = true
@@ -449,7 +480,7 @@ const openEditUserModal = (user) => {
   userForm.full_name = user.full_name
   userForm.username = user.username
   userForm.email = user.email
-  userForm.role = user.role
+  userForm.role = (user.role || 'annotator').toLowerCase()
   userForm.password = ''
   userForm.is_active = user.is_active
   showUserFormModal.value = true

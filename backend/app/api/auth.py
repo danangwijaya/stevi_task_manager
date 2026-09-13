@@ -1,11 +1,14 @@
-from datetime import timedelta
+from datetime import timedelta, datetime
+import secrets
+import string
 from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.db.session import get_db
-from app.db.models import User
+from app.db.models import User, TaskGrid, Annotation, TaskStatus
 from app.core.security import verify_password, create_access_token, get_password_hash
 from app.core.config import settings
 from app.api.deps import get_current_user, get_current_active_admin
@@ -27,6 +30,9 @@ class UserResponse(BaseModel):
     full_name: str
     role: str
     is_active: bool
+    created_at: Optional[datetime] = None
+    assigned_tasks_count: Optional[int] = 0
+    annotations_count: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -52,13 +58,16 @@ class CreateUserRequest(BaseModel):
     full_name: str
     email: str
     password: str
-    role: Optional[str] = "ANNOTATOR"
+    role: Optional[str] = "annotator"
 
 class UpdateUserRequest(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    password: Optional[str] = None
+
+class ResetPasswordRequest(BaseModel):
     password: Optional[str] = None
 
 @router.post("/login", response_model=Token)
@@ -85,7 +94,7 @@ def login(
         "user_id": user.id,
         "username": user.username,
         "full_name": user.full_name,
-        "role": user.role
+        "role": (user.role or "annotator").lower()
     }
 
 @router.post("/signup", response_model=Token)
@@ -104,11 +113,11 @@ def signup(
         )
     
     new_user = User(
-        username=signup_data.username,
-        full_name=signup_data.full_name,
-        email=signup_data.email,
+        username=signup_data.username.strip(),
+        full_name=signup_data.full_name.strip(),
+        email=signup_data.email.strip(),
         hashed_password=get_password_hash(signup_data.password),
-        role="ANNOTATOR",
+        role="annotator",
         is_active=True
     )
     db.add(new_user)
@@ -122,7 +131,7 @@ def signup(
         "user_id": new_user.id,
         "username": new_user.username,
         "full_name": new_user.full_name,
-        "role": new_user.role
+        "role": "annotator"
     }
 
 @router.post("/oauth", response_model=Token)
@@ -143,7 +152,7 @@ def oauth_login(
             full_name=full_name,
             email=email,
             hashed_password=get_password_hash(f"oauth_{provider_prefix}_2026"),
-            role="ANNOTATOR",
+            role="annotator",
             is_active=True
         )
         db.add(user)
@@ -157,22 +166,62 @@ def oauth_login(
         "user_id": user.id,
         "username": user.username,
         "full_name": user.full_name,
-        "role": user.role
+        "role": (user.role or "annotator").lower()
     }
 
 @router.get("/me", response_model=UserResponse)
 def read_user_me(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
-    return current_user
+    tasks_count = db.query(TaskGrid).filter(TaskGrid.assigned_user_id == current_user.id).count()
+    annotations_count = db.query(Annotation).filter(Annotation.user_id == current_user.id).count()
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "role": (current_user.role or "annotator").lower(),
+        "is_active": current_user.is_active,
+        "created_at": current_user.created_at,
+        "assigned_tasks_count": tasks_count,
+        "annotations_count": annotations_count
+    }
 
 @router.get("/users", response_model=List[UserResponse])
 def read_all_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
-    """List all users (students & instructors)"""
-    return db.query(User).order_by(User.id.asc()).all()
+    """List all users (students & instructors) with task & annotation counts"""
+    users = db.query(User).order_by(User.id.asc()).all()
+    
+    task_counts = dict(
+        db.query(TaskGrid.assigned_user_id, func.count(TaskGrid.id))
+        .filter(TaskGrid.assigned_user_id.isnot(None))
+        .group_by(TaskGrid.assigned_user_id)
+        .all()
+    )
+    annotation_counts = dict(
+        db.query(Annotation.user_id, func.count(Annotation.id))
+        .group_by(Annotation.user_id)
+        .all()
+    )
+    
+    results = []
+    for u in users:
+        results.append({
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "full_name": u.full_name,
+            "role": (u.role or "annotator").lower(),
+            "is_active": u.is_active,
+            "created_at": u.created_at,
+            "assigned_tasks_count": task_counts.get(u.id, 0),
+            "annotations_count": annotation_counts.get(u.id, 0),
+        })
+    return results
 
 @router.post("/users", response_model=UserResponse)
 def create_user_by_admin(
@@ -182,23 +231,37 @@ def create_user_by_admin(
 ) -> Any:
     """Admin creates a new user account"""
     existing = db.query(User).filter(
-        (User.username == user_in.username) | (User.email == user_in.email)
+        (User.username == user_in.username.strip()) | (User.email == user_in.email.strip())
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail="Username atau email sudah digunakan")
     
+    clean_role = (user_in.role or "annotator").strip().lower()
+    if clean_role not in ["admin", "dosen", "annotator"]:
+        clean_role = "annotator"
+
     new_user = User(
-        username=user_in.username,
-        full_name=user_in.full_name,
-        email=user_in.email,
+        username=user_in.username.strip(),
+        full_name=user_in.full_name.strip(),
+        email=user_in.email.strip(),
         hashed_password=get_password_hash(user_in.password),
-        role=user_in.role or "ANNOTATOR",
+        role=clean_role,
         is_active=True
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return new_user
+    return {
+        "id": new_user.id,
+        "username": new_user.username,
+        "email": new_user.email,
+        "full_name": new_user.full_name,
+        "role": new_user.role,
+        "is_active": new_user.is_active,
+        "created_at": new_user.created_at,
+        "assigned_tasks_count": 0,
+        "annotations_count": 0
+    }
 
 @router.put("/users/{user_id}", response_model=UserResponse)
 def update_user_by_admin(
@@ -212,20 +275,80 @@ def update_user_by_admin(
     if not user:
         raise HTTPException(status_code=404, detail="User tidak ditemukan")
     
+    # Check duplicate email if changed
+    if user_in.email is not None and user_in.email.strip() != user.email:
+        existing_email = db.query(User).filter(User.email == user_in.email.strip(), User.id != user_id).first()
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email sudah digunakan oleh akun lain")
+        user.email = user_in.email.strip()
+
     if user_in.full_name is not None:
-        user.full_name = user_in.full_name
-    if user_in.email is not None:
-        user.email = user_in.email
+        user.full_name = user_in.full_name.strip()
+
     if user_in.role is not None:
-        user.role = user_in.role
+        clean_role = user_in.role.strip().lower()
+        if clean_role in ["admin", "dosen", "annotator"]:
+            # Prevent demoting the last admin
+            if (user.role or "").lower() == "admin" and clean_role != "admin":
+                active_admins = db.query(User).filter(func.lower(User.role) == "admin", User.is_active == True).count()
+                if active_admins <= 1:
+                    raise HTTPException(status_code=400, detail="Tidak dapat mengubah role admin terakhir di sistem")
+            user.role = clean_role
+
     if user_in.is_active is not None:
+        if (user.role or "").lower() == "admin" and not user_in.is_active:
+            active_admins = db.query(User).filter(func.lower(User.role) == "admin", User.is_active == True).count()
+            if active_admins <= 1:
+                raise HTTPException(status_code=400, detail="Tidak dapat menonaktifkan admin terakhir di sistem")
         user.is_active = user_in.is_active
+
     if user_in.password:
         user.hashed_password = get_password_hash(user_in.password)
     
     db.commit()
     db.refresh(user)
-    return user
+
+    tasks_count = db.query(TaskGrid).filter(TaskGrid.assigned_user_id == user.id).count()
+    annotations_count = db.query(Annotation).filter(Annotation.user_id == user.id).count()
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": (user.role or "annotator").lower(),
+        "is_active": user.is_active,
+        "created_at": user.created_at,
+        "assigned_tasks_count": tasks_count,
+        "annotations_count": annotations_count
+    }
+
+@router.post("/users/{user_id}/reset-password")
+def reset_password_by_admin(
+    user_id: int,
+    req: Optional[ResetPasswordRequest] = None,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_active_admin)
+) -> Any:
+    """Admin resets user password with custom or auto-generated strong password"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User tidak ditemukan")
+    
+    new_password = req.password.strip() if (req and req.password and req.password.strip()) else None
+    if not new_password:
+        chars = string.ascii_letters + string.digits
+        random_part = ''.join(secrets.choice(chars) for _ in range(8))
+        new_password = f"GeoAI-{random_part}"
+    
+    user.hashed_password = get_password_hash(new_password)
+    db.commit()
+    
+    return {
+        "message": f"Password untuk user {user.username} berhasil di-reset",
+        "new_password": new_password,
+        "user_id": user.id,
+        "username": user.username
+    }
 
 @router.delete("/users/{user_id}")
 def delete_user_by_admin(
@@ -233,13 +356,41 @@ def delete_user_by_admin(
     db: Session = Depends(get_db),
     admin: User = Depends(get_current_active_admin)
 ) -> Any:
-    """Admin deletes a user account"""
+    """Admin deletes or deactivates a user account with smart safety checks"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User tidak ditemukan")
     if user.id == admin.id:
         raise HTTPException(status_code=400, detail="Tidak dapat menghapus akun admin sendiri yang sedang aktif")
     
+    # Prevent deleting the last active admin
+    if (user.role or "").lower() == "admin":
+        active_admins = db.query(User).filter(func.lower(User.role) == "admin", User.is_active == True).count()
+        if active_admins <= 1:
+            raise HTTPException(status_code=400, detail="Tidak dapat menghapus admin terakhir yang aktif di sistem")
+
+    # Check annotations
+    annotations_count = db.query(Annotation).filter(Annotation.user_id == user.id).count()
+    if annotations_count > 0:
+        # User has digitized polygons! Deactivate (soft delete) to protect training dataset
+        user.is_active = False
+        db.commit()
+        return {
+            "message": f"Akun {user.username} dinonaktifkan (memiliki {annotations_count} poligon anotasi data latih agar dataset tetap utuh).",
+            "action": "deactivated",
+            "annotations_count": annotations_count
+        }
+    
+    # If user has assigned tasks without annotations, release/unassign them cleanly
+    assigned_tasks = db.query(TaskGrid).filter(TaskGrid.assigned_user_id == user.id).all()
+    for task in assigned_tasks:
+        task.assigned_user_id = None
+        if task.status in [TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS]:
+            task.status = TaskStatus.UNASSIGNED
+    
     db.delete(user)
     db.commit()
-    return {"message": f"User {user.username} berhasil dihapus"}
+    return {
+        "message": f"User {user.username} berhasil dihapus permanen",
+        "action": "deleted"
+    }
