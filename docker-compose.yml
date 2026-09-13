@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # Database Spasial: PostgreSQL 16 + PostGIS 3.4
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: geoai_postgis
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: geoai_password_2026
+      POSTGRES_DB: geoai_landcover
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+
+  # Backend: Python FastAPI GeoAI Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: geoai_backend
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://postgres:geoai_password_2026@postgis:5432/geoai_landcover
+      GEE_SERVICE_ACCOUNT: ${GEE_SERVICE_ACCOUNT:-}
+      GEE_PRIVATE_KEY_PATH: ${GEE_PRIVATE_KEY_PATH:-}
+      GEE_PROJECT_ID: ${GEE_PROJECT_ID:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgis
+    volumes:
+      - ./backend/exports:/app/exports
+
+  # Frontend: Vue 3 + Quasar Studio
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: geoai_frontend
+    restart: always
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgis_data:

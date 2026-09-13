@@ -1,0 +1,31 @@
+{
+  "name": "geoai-sentinel2-training-platform",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@geoman-io/leaflet-geoman-free": "^2.14.2",
+    "@quasar/extras": "^1.16.11",
+    "@turf/turf": "^7.4.0",
+    "axios": "^1.6.8",
+    "esri-leaflet": "^3.0.19",
+    "leaflet": "^1.9.4",
+    "lucide-vue-next": "^0.363.0",
+    "pinia": "^2.1.7",
+    "polygon-clipping": "^0.15.7",
+    "quasar": "^2.15.2",
+    "vue": "^3.4.21",
+    "vue-router": "^4.3.0"
+  },
+  "devDependencies": {
+    "@quasar/vite-plugin": "^1.6.0",
+    "@vitejs/plugin-vue": "^5.0.4",
+    "sass": "^1.103.1",
+    "vite": "^5.1.6"
+  }
+}

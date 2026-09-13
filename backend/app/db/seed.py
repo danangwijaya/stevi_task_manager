@@ -1,0 +1,73 @@
+import json
+import logging
+from sqlalchemy.orm import Session
+from app.db.session import SessionLocal, engine, Base
+from app.db.models import User, StudyArea, TaskGrid, Annotation, LandCoverClass, UserRole, TaskStatus
+from app.core.security import get_password_hash
+from app.core.config import settings
+from app.services.grid_generator import generate_spatial_grids
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def seed_database():
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    
+    try:
+        # 1. Seed Classes
+        existing_classes = db.query(LandCoverClass).count()
+        if existing_classes == 0:
+            logger.info("Seeding 12 Land Cover Classes...")
+            for c in settings.LAND_COVER_CLASSES:
+                db.add(LandCoverClass(
+                    class_id=c["id"],
+                    name=c["name"],
+                    color_hex=c["color"],
+                    description=c["description"],
+                    is_active=True
+                ))
+            db.commit()
+
+        # 2. Seed Initial Admin Account
+        admin_user = db.query(User).filter(User.username == "admin").first()
+        if not admin_user:
+            logger.info("Seeding Initial Administrator Account...")
+            admin_user = User(
+                username="admin",
+                email="admin@geoai.ac.id",
+                full_name="Lead Administrator / Reviewer",
+                hashed_password=get_password_hash("admin123"),
+                role="admin",
+                is_active=True
+            )
+            db.add(admin_user)
+            db.commit()
+
+        # 3. Study Areas & Task Grids (Only seed if database is empty)
+        existing_grids_count = db.query(TaskGrid).count()
+        if existing_grids_count == 0:
+            logger.info("Database empty, initializing Study Area...")
+            sa_sumbar = db.query(StudyArea).first()
+            if not sa_sumbar:
+                sa_sumbar = StudyArea(
+                    name="Provinsi Sumatera Barat (Seluruh Wilayah)",
+                    description="Kawasan pemetaan data latih tutupan lahan se-Sumatera Barat (19 Kab/Kota, Pesisir, Pegunungan Bukit Barisan, dan Mentawai).",
+                    center_lat=-0.750,
+                    center_lon=100.500,
+                    default_zoom=8
+                )
+                db.add(sa_sumbar)
+                db.commit()
+                db.refresh(sa_sumbar)
+            logger.info("Database initialized.")
+        else:
+            logger.info(f"Database contains {existing_grids_count} task grids. Retaining user data without resetting.")
+    except Exception as e:
+        logger.error(f"Error seeding database: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    seed_database()

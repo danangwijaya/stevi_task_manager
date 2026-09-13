@@ -1,0 +1,50 @@
+# ==========================================
+# GeoAI Training Platform - Git Ignore Rules
+# ==========================================
+
+# 1. Large Raster Datasets (Total ~7.8GB)
+# MUST NOT be committed to Git. Transfer directly to VPS via rsync/scp.
+backend/data/raster/
+data/raster/
+*.tif
+*.tiff
+*.aux.xml
+
+# 2. Python Virtual Environments & Caches
+venv/
+backend/venv/
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+
+# 3. Node.js & Frontend Build Outputs
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 4. Local Environment Variables & Secrets
+.env
+backend/.env
+frontend/.env.local
+*.env
+
+# 5. Local Databases & Exports
+*.db
+backend/geoai_landcover.db
+backend/training_sample.db
+backend/exports/
+exports/
+*.sql
+
+# 6. Operating System Files
+.DS_Store
+*/.DS_Store
+Thumbs.db
