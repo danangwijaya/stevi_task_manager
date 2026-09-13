@@ -24,6 +24,7 @@ services:
     restart: always
     environment:
       DATABASE_URL: postgresql://postgres:geoai_password_2026@postgis:5432/geoai_landcover
+      RASTER_BASE_DIR: /app/data/raster
       GEE_SERVICE_ACCOUNT: ${GEE_SERVICE_ACCOUNT:-}
       GEE_PRIVATE_KEY_PATH: ${GEE_PRIVATE_KEY_PATH:-}
       GEE_PROJECT_ID: ${GEE_PROJECT_ID:-}
@@ -33,6 +34,8 @@ services:
       - postgis
     volumes:
       - ./backend/exports:/app/exports
+      - ./backend/data/raster:/app/data/raster:ro
+      - ./backend/data/vector:/app/data/vector:ro
 
   # Frontend: Vue 3 + Quasar Studio
   frontend:

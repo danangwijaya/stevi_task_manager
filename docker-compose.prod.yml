@@ -30,6 +30,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://geoai_user:geoai_password_2026@postgis:5432/geoai_landcover}
       SECRET_KEY: ${SECRET_KEY:-geoai_super_secret_jwt_key_2026_landcover_unet_sample}
+      RASTER_BASE_DIR: /app/data/raster
       GEE_SERVICE_ACCOUNT: ${GEE_SERVICE_ACCOUNT:-}
       GEE_PRIVATE_KEY_PATH: ${GEE_PRIVATE_KEY_PATH:-}
       GEE_PROJECT_ID: ${GEE_PROJECT_ID:-}
@@ -38,6 +39,8 @@ services:
         condition: service_healthy
     volumes:
       - exports_data:/app/exports
+      - ./backend/data/raster:/app/data/raster:ro
+      - ./backend/data/vector:/app/data/vector:ro
 
   # Frontend: Vue 3 + Nginx Reverse Proxy
   frontend:
