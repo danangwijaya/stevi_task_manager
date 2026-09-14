@@ -252,7 +252,7 @@
 
         <div class="text-[#8c96a5] text-center md:text-right">
           <div>© 2026 STEVI Task Manager</div>
-          <div class="text-[10px] text-[#616b7c]">Powered by GeoAI Training System & Leaflet HOT OSM Grid</div>
+          <div class="text-xs text-[#616b7c] mt-0.5">Powered by GeoAI Training System & STEVI Grid Engine</div>
         </div>
       </div>
     </footer>
