@@ -1,30 +1,30 @@
 <template>
   <div class="h-[calc(100vh-57px)] w-full flex flex-col md:flex-row bg-slate-100 relative overflow-hidden font-sans">
     <!-- Left Sidebar: Tasking Manager Controls & Grid Inspector -->
-    <div class="w-full md:w-[440px] bg-white border-r border-slate-200 flex flex-col z-20 shadow-lg overflow-y-auto shrink-0">
+    <div class="w-full md:w-[390px] bg-white border-r border-slate-200 flex flex-col z-20 shadow-lg overflow-y-auto shrink-0">
       
       <!-- Project / AOI Header -->
-      <div class="p-4.5 border-b border-slate-200 space-y-3.5 bg-slate-50/80">
+      <div class="p-3.5 border-b border-slate-200 space-y-2.5 bg-slate-50/70">
         <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 border border-rose-200/80 flex items-center justify-center font-bold shadow-xs">
-              <Grid :size="20" />
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-xl bg-rose-100 text-rose-600 border border-rose-200 flex items-center justify-center font-bold text-sm shadow-2xs">
+              <Grid :size="16" />
             </div>
             <div>
-              <h2 class="text-base font-black text-slate-900 tracking-tight">Tasking Manager Grid</h2>
-              <p class="text-xs text-slate-600 font-medium mt-0.5">Pilih patch 1024px (~10.24km) untuk digitasi data training</p>
+              <h2 class="text-sm font-black text-slate-900 tracking-tight">Tasking Manager Grid</h2>
+              <p class="text-xs text-slate-500 font-medium">Pilih patch 1024px (~10.24km) untuk digitasi</p>
             </div>
           </div>
-          <span class="text-xs bg-slate-200/70 text-slate-700 font-bold px-2.5 py-1 rounded-full border border-slate-300/80 uppercase tracking-wider font-mono">
+          <span class="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-md border border-slate-200 uppercase tracking-wider font-mono">
             STEVI
           </span>
         </div>
 
         <!-- Dynamic Area of Interest (AOI) Switcher -->
-        <div class="space-y-1.5">
+        <div class="space-y-1">
           <div class="flex items-center justify-between">
-            <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Proyek Wilayah Kajian (AOI):</label>
-            <span v-if="tasksStore.projects.length" class="text-xs font-mono text-slate-500 font-semibold">
+            <label class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Proyek Wilayah Kajian (AOI):</label>
+            <span v-if="tasksStore.projects.length" class="text-[11px] font-mono text-slate-400 font-medium">
               {{ tasksStore.projects.length }} Proyek
             </span>
           </div>
@@ -33,84 +33,84 @@
             <select
               v-model="activeAreaId"
               @change="onProjectSelectChange"
-              class="w-full px-3.5 py-2.5 text-sm font-bold text-[#1f242e] bg-white border border-slate-300 rounded-xl focus:outline-none focus:border-rose-600 shadow-2xs appearance-none pr-9 cursor-pointer"
+              class="w-full px-3 py-2 text-xs font-bold text-[#1f242e] bg-white border border-slate-300 rounded-xl focus:outline-none focus:border-rose-600 shadow-2xs appearance-none pr-8 cursor-pointer"
             >
               <option v-for="proj in tasksStore.projects" :key="proj.id" :value="proj.id">
                 📍 {{ proj.name }} ({{ proj.total_tasks }} grid)
               </option>
             </select>
-            <ChevronDown :size="14" class="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <ChevronDown :size="12" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           </div>
         </div>
 
         <!-- Search Bar Grid Code -->
-        <div class="space-y-1.5">
+        <div class="space-y-1">
           <div class="relative">
             <input
               v-model="searchQuery"
               @keyup.enter="searchAndFlyToGrid"
               type="text"
               placeholder="Cari kode grid (cth: SB_015, KL_040)..."
-              class="w-full pl-9 pr-22 py-2.5 text-sm text-[#1f242e] bg-white border border-slate-300 rounded-xl focus:outline-none focus:border-rose-600 placeholder-slate-400 shadow-2xs font-medium"
+              class="w-full pl-8 pr-18 py-2 text-xs text-[#1f242e] bg-white border border-slate-300 rounded-xl focus:outline-none focus:border-rose-600 placeholder-slate-400 shadow-2xs font-medium"
             />
-            <Search :size="15" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <button
               @click="searchAndFlyToGrid"
-              class="absolute right-1.5 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+              class="absolute right-1 top-1/2 -translate-y-1/2 px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
             >
               Cari
             </button>
           </div>
-          <div v-if="searchFeedback" class="text-xs font-semibold text-rose-600 px-1">
+          <div v-if="searchFeedback" class="text-xs font-medium text-rose-600 px-1">
             {{ searchFeedback }}
           </div>
         </div>
 
         <!-- Filter Pills Bar -->
-        <div class="flex items-center gap-1.5 overflow-x-auto pb-0.5 pt-1">
+        <div class="flex items-center gap-1.5 overflow-x-auto pb-0.5 pt-0.5">
           <button
             v-for="flt in filterPills"
             :key="flt.id"
             @click="activeStatusFilter = flt.id; renderGridTilesOnMap()"
-            class="px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 cursor-pointer"
+            class="px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1 cursor-pointer"
             :class="activeStatusFilter === flt.id
               ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
               : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'"
           >
-            <component :is="flt.icon" :size="12" />
+            <component :is="flt.icon" :size="11" />
             <span>{{ flt.label }}</span>
           </button>
         </div>
 
         <!-- Year Toggle & Random Button -->
-        <div class="flex items-center justify-between pt-1 gap-2">
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-bold text-slate-600 uppercase tracking-wider">Tahun:</span>
-            <div class="flex items-center bg-white p-1 rounded-xl border border-slate-200 shadow-xs gap-0.5">
+        <div class="flex items-center justify-between pt-0.5 gap-2">
+          <div class="flex items-center gap-1.5">
+            <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Tahun:</span>
+            <div class="flex items-center bg-white p-0.5 rounded-lg border border-slate-200 shadow-2xs gap-0.5">
               <button
                 @click="switchYear(null)"
-                class="px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
                 :class="selectedYear === null ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
               >
                 Semua
               </button>
               <button
                 @click="switchYear(2017)"
-                class="px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
                 :class="selectedYear === 2017 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
               >
                 2017
               </button>
               <button
                 @click="switchYear(2021)"
-                class="px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
                 :class="selectedYear === 2021 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
               >
                 2021
               </button>
               <button
                 @click="switchYear(2025)"
-                class="px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
                 :class="selectedYear === 2025 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
               >
                 2025
@@ -121,27 +121,27 @@
           <!-- Random Task Button -->
           <button
             @click="pickRandomTask"
-            class="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+            class="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-2xs cursor-pointer"
             title="Pilihkan satu grid acak yang belum dikerjakan"
           >
-            <Dice5 :size="16" class="text-amber-600" />
+            <Dice5 :size="13" class="text-amber-600" />
             <span>Grid Acak</span>
           </button>
         </div>
       </div>
 
       <!-- Overall Progress Bar & Breakdown -->
-      <div class="p-4.5 border-b border-slate-200 space-y-3 bg-white">
-        <div class="flex justify-between text-sm font-bold text-slate-800">
+      <div class="p-3.5 border-b border-slate-200 space-y-2 bg-white">
+        <div class="flex justify-between text-xs font-bold text-slate-800">
           <span class="flex items-center gap-2">
-            <TrendingUp :size="16" class="text-slate-500" />
+            <TrendingUp :size="14" class="text-slate-500" />
             <span>Progres Pemetaan Area</span>
           </span>
-          <span class="text-emerald-600 font-mono font-black text-sm">{{ progressPercent }}% Selesai</span>
+          <span class="text-emerald-600 font-mono font-extrabold text-xs">{{ progressPercent }}% Selesai</span>
         </div>
 
         <!-- Multi-colored segment progress bar -->
-        <div class="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden flex shadow-inner border border-slate-200">
+        <div class="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden flex shadow-inner border border-slate-200">
           <div :style="{ width: `${approvedPercent}%` }" class="bg-emerald-500 transition-all" title="Approved (Disetujui)"></div>
           <div :style="{ width: `${submittedPercent}%` }" class="bg-orange-500 transition-all" title="Submitted (Menunggu Review)"></div>
           <div :style="{ width: `${inProgressPercent}%` }" class="bg-amber-400 transition-all" title="In Progress (Dikerjakan)"></div>
@@ -149,80 +149,80 @@
         </div>
 
         <!-- Progress stats breakdown cards -->
-        <div class="grid grid-cols-4 gap-2 text-center pt-1">
-          <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-            <div class="text-slate-500 font-medium text-xs">Tersedia</div>
-            <div class="font-black text-slate-800 text-sm mt-0.5">{{ unassignedCount }}</div>
+        <div class="grid grid-cols-4 gap-1.5 text-center pt-0.5">
+          <div class="bg-slate-50 p-2 rounded-xl border border-slate-200">
+            <div class="text-slate-500 font-medium text-[11px]">Tersedia</div>
+            <div class="font-black text-slate-800 text-xs mt-0.5">{{ unassignedCount }}</div>
           </div>
-          <div class="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200">
-            <div class="text-amber-700 font-medium text-xs">Dikerjakan</div>
-            <div class="font-black text-amber-800 text-sm mt-0.5">{{ inProgressCount }}</div>
+          <div class="bg-amber-50/70 p-2 rounded-xl border border-amber-200">
+            <div class="text-amber-700 font-medium text-[11px]">Dikerjakan</div>
+            <div class="font-black text-amber-800 text-xs mt-0.5">{{ inProgressCount }}</div>
           </div>
-          <div class="bg-orange-50/70 p-2.5 rounded-xl border border-orange-200">
-            <div class="text-orange-700 font-medium text-xs">Review</div>
-            <div class="font-black text-orange-800 text-sm mt-0.5">{{ submittedCount }}</div>
+          <div class="bg-orange-50/70 p-2 rounded-xl border border-orange-200">
+            <div class="text-orange-700 font-medium text-[11px]">Review</div>
+            <div class="font-black text-orange-800 text-xs mt-0.5">{{ submittedCount }}</div>
           </div>
-          <div class="bg-emerald-50/70 p-2.5 rounded-xl border border-emerald-200">
-            <div class="text-emerald-700 font-medium text-xs">Approved</div>
-            <div class="font-black text-emerald-800 text-sm mt-0.5">{{ approvedCount }}</div>
+          <div class="bg-emerald-50/70 p-2 rounded-xl border border-emerald-200">
+            <div class="text-emerald-700 font-medium text-[11px]">Approved</div>
+            <div class="font-black text-emerald-800 text-xs mt-0.5">{{ approvedCount }}</div>
           </div>
         </div>
       </div>
 
       <!-- Selected Grid Tile Inspector Panel -->
-      <div class="flex-1 p-4.5 space-y-4">
-        <div v-if="!selectedTask" class="text-center py-12 text-slate-400 text-sm flex flex-col items-center gap-3">
-          <div class="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shadow-xs">
-            <Grid :size="28" />
+      <div class="flex-1 p-3.5 space-y-3">
+        <div v-if="!selectedTask" class="text-center py-10 text-slate-400 text-xs flex flex-col items-center gap-2.5">
+          <div class="w-12 h-12 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shadow-xs">
+            <Grid :size="24" />
           </div>
-          <span class="font-medium max-w-[260px] text-slate-600 leading-relaxed">
+          <span class="font-medium max-w-[240px] text-slate-600 leading-relaxed">
             Ketik kode grid di pencarian atau klik salah satu kotak pada peta untuk mulai digitasi!
           </span>
         </div>
 
-        <div v-else class="space-y-4">
+        <div v-else class="space-y-3">
           <!-- Grid Detail Card -->
-          <div class="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 shadow-xs">
+          <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 shadow-xs">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <span class="font-mono text-base font-black text-slate-900">{{ selectedTask.grid_code }}</span>
-                <span class="text-xs text-slate-600 font-mono font-bold bg-white px-2.5 py-0.5 rounded border border-slate-200">
+                <span class="font-mono text-sm font-black text-slate-900">{{ selectedTask.grid_code }}</span>
+                <span class="text-[11px] text-slate-600 font-mono font-bold bg-white px-2 py-0.5 rounded border border-slate-200">
                   Thn {{ selectedTask.year }}
                 </span>
               </div>
               <span
-                class="text-xs font-extrabold px-3 py-1 rounded-full border shadow-xs"
+                class="text-xs font-bold px-2.5 py-0.5 rounded-full border shadow-xs"
                 :class="getStatusBadgeClass(selectedTask.status)"
               >
                 {{ formatStatus(selectedTask.status) }}
               </span>
             </div>
 
-            <div class="text-sm text-slate-800 font-extrabold">{{ selectedTask.study_area_name }}</div>
+            <div class="text-xs text-slate-800 font-bold">{{ selectedTask.study_area_name }}</div>
             
-            <div class="text-xs text-slate-600 space-y-2 pt-2.5 border-t border-slate-200">
+            <div class="text-xs text-slate-600 space-y-1.5 pt-2 border-t border-slate-200">
               <div class="flex justify-between items-center">
                 <span class="text-slate-500 font-medium">Penanggung Jawab:</span>
-                <b class="text-slate-900 font-bold bg-white px-2.5 py-1 rounded border border-slate-200">
+                <b class="text-slate-900 font-bold bg-white px-2 py-0.5 rounded border border-slate-200">
                   {{ selectedTask.assigned_user_name || 'Belum Diambil (Tersedia)' }}
                 </b>
               </div>
               <div class="flex justify-between items-center">
                 <span class="text-slate-500 font-medium">Jumlah Poligon:</span>
-                <b class="text-purple-700 font-mono font-bold bg-purple-50 px-2.5 py-1 rounded border border-purple-200">
+                <b class="text-purple-700 font-mono font-bold bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
                   {{ selectedTask.annotation_count }} Poligon
                 </b>
               </div>
               <div class="flex justify-between items-center">
                 <span class="text-slate-500 font-medium">Ukuran Patch:</span>
-                <span class="text-slate-700 font-mono font-semibold">10.24km × 10.24km (1024px)</span>
+                <span class="text-slate-700 font-mono font-medium">10.24km × 10.24km (1024px)</span>
               </div>
             </div>
 
             <!-- Notes if any -->
-            <div v-if="selectedTask.reviewer_notes" class="text-xs text-amber-900 bg-amber-50 border border-amber-200 p-3 rounded-xl mt-2 space-y-1">
+            <div v-if="selectedTask.reviewer_notes" class="text-xs text-amber-900 bg-amber-50 border border-amber-200 p-2.5 rounded-xl mt-2 space-y-0.5">
               <div class="font-bold flex items-center gap-1.5 text-amber-800">
-                <MessageSquare :size="14" />
+                <MessageSquare :size="13" />
                 <span>Catatan Reviewer QC:</span>
               </div>
               <p class="italic text-amber-900/90 leading-relaxed">"{{ selectedTask.reviewer_notes }}"</p>
@@ -230,24 +230,24 @@
           </div>
 
           <!-- Action Buttons -->
-          <div class="space-y-2.5 pt-1">
+          <div class="space-y-2 pt-0.5">
             <!-- If task is UNASSIGNED → allow claim -->
             <button
               v-if="selectedTask.status === 'UNASSIGNED'"
               @click="claimSelectedTask"
               :disabled="actionLoading"
-              class="w-full bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white text-sm font-extrabold py-3 px-4 rounded-xl shadow-md shadow-rose-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              class="w-full bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-md shadow-rose-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
-              <Rocket :size="16" />
+              <Rocket :size="14" />
               <span>Ambil & Kerjakan Grid Ini</span>
             </button>
 
             <!-- If grid is locked (not UNASSIGNED) and not mine → show locked info -->
             <div
               v-if="selectedTask.status !== 'UNASSIGNED' && selectedTask.assigned_user_id && selectedTask.assigned_user_id !== authStore.user?.id && !authStore.isAdmin"
-              class="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-2.5 leading-relaxed"
+              class="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-2 leading-relaxed"
             >
-              <Lock :size="16" class="text-amber-600 shrink-0" />
+              <Lock :size="14" class="text-amber-600 shrink-0" />
               <span>Grid ini sedang dikerjakan oleh <b>{{ selectedTask.assigned_user_name }}</b>. Pilih grid lain yang berstatus "Tersedia".</span>
             </div>
 
@@ -255,9 +255,9 @@
             <button
               v-if="selectedTask.assigned_user_id === authStore.user?.id || authStore.isAdmin"
               @click="openInStudio"
-              class="w-full bg-slate-900 hover:bg-slate-800 text-white text-sm font-extrabold py-3 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
+              class="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
-              <Shapes :size="16" />
+              <Shapes :size="14" />
               <span>Buka di Studio Digitasi</span>
             </button>
 
@@ -265,9 +265,9 @@
             <button
               v-if="authStore.isAdmin && (selectedTask.status === 'SUBMITTED' || selectedTask.status === 'REVISION_NEEDED')"
               @click="router.push('/qc')"
-              class="w-full bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-sm font-extrabold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+              class="w-full bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-xs font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
-              <ClipboardCheck :size="16" />
+              <ClipboardCheck :size="14" />
               <span>Periksa & Review di Menu QC</span>
             </button>
 
@@ -276,9 +276,9 @@
               v-if="authStore.isAdmin && selectedTask.assigned_user_id"
               @click="unclaimSelectedTask"
               :disabled="actionLoading"
-              class="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+              class="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
-              <LockOpen :size="15" />
+              <LockOpen :size="14" />
               <span>Lepas Grid ke Antrean Umum (Admin)</span>
             </button>
           </div>
@@ -291,33 +291,33 @@
       <div id="hot-map-container" class="w-full h-full z-0"></div>
 
       <!-- Floating Status Legend (Light Mode) -->
-      <div class="absolute bottom-6 right-6 z-10 bg-white/95 border border-slate-200 p-4 rounded-2xl shadow-xl backdrop-blur-md space-y-2.5 min-w-[220px]">
-        <div class="text-xs font-black text-slate-800 uppercase tracking-wider pb-2 border-b border-slate-100 flex items-center justify-between">
+      <div class="absolute bottom-6 right-6 z-10 bg-white/95 border border-slate-200 p-3.5 rounded-2xl shadow-xl backdrop-blur-md space-y-2 min-w-[200px]">
+        <div class="text-xs font-black text-slate-800 uppercase tracking-wider pb-1.5 border-b border-slate-100 flex items-center justify-between">
           <span class="flex items-center gap-2">
-            <Palette :size="15" class="text-slate-400" />
+            <Palette :size="14" class="text-slate-400" />
             <span>Legenda Status Grid</span>
           </span>
-          <span class="text-xs text-slate-500 font-mono font-bold">STEVI</span>
+          <span class="text-[11px] text-slate-500 font-mono font-bold">STEVI</span>
         </div>
-        <div class="space-y-2 text-xs font-semibold">
+        <div class="space-y-1.5 text-xs font-medium">
           <div class="flex items-center gap-2.5">
-            <div class="w-4 h-4 rounded-sm bg-slate-100 border border-slate-400 shadow-2xs"></div>
+            <div class="w-3.5 h-3.5 rounded-sm bg-slate-100 border border-slate-400 shadow-2xs"></div>
             <span class="text-slate-700">Tersedia (Ready)</span>
           </div>
           <div class="flex items-center gap-2.5">
-            <div class="w-4 h-4 rounded-sm bg-amber-300 border border-amber-500 shadow-2xs"></div>
+            <div class="w-3.5 h-3.5 rounded-sm bg-amber-300 border border-amber-500 shadow-2xs"></div>
             <span class="text-slate-700">Sedang Dikerjakan</span>
           </div>
           <div class="flex items-center gap-2.5">
-            <div class="w-4 h-4 rounded-sm bg-orange-400 border border-orange-600 shadow-2xs"></div>
+            <div class="w-3.5 h-3.5 rounded-sm bg-orange-400 border border-orange-600 shadow-2xs"></div>
             <span class="text-slate-700">Menunggu Review</span>
           </div>
           <div class="flex items-center gap-2.5">
-            <div class="w-4 h-4 rounded-sm bg-emerald-400 border border-emerald-600 shadow-2xs"></div>
+            <div class="w-3.5 h-3.5 rounded-sm bg-emerald-400 border border-emerald-600 shadow-2xs"></div>
             <span class="text-slate-700">Disetujui (Approved)</span>
           </div>
           <div class="flex items-center gap-2.5">
-            <div class="w-4 h-4 rounded-sm bg-rose-400 border border-rose-600 shadow-2xs"></div>
+            <div class="w-3.5 h-3.5 rounded-sm bg-rose-400 border border-rose-600 shadow-2xs"></div>
             <span class="text-slate-700">Perlu Revisi</span>
           </div>
         </div>
@@ -667,10 +667,10 @@ const getStatusBadgeClass = (status) => {
   background-color: #ffffff !important;
   color: #0f172a !important;
   border: 1px solid #cbd5e1 !important;
-  border-radius: 12px !important;
-  font-size: 13px !important;
-  font-weight: 700 !important;
-  padding: 6px 12px !important;
+  border-radius: 10px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  padding: 5px 10px !important;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15) !important;
 }
 .hot-osm-light-tooltip::before {
