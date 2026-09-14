@@ -1149,7 +1149,7 @@
         class="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
         @click.self="closeUserModal"
       >
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl border border-slate-200 overflow-hidden my-auto">
           <!-- Modal header -->
           <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
             <div class="flex items-center gap-3">
@@ -1172,7 +1172,7 @@
           </div>
 
           <!-- Form Body -->
-          <div class="p-6 space-y-4 overflow-y-auto flex-1">
+          <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
             <!-- Full Name -->
             <div class="space-y-1">
               <label class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
