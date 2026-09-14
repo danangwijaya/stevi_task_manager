@@ -29,6 +29,13 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Profil & Administrasi Dokumen (Opsional)
+    phone = Column(String(50), nullable=True)
+    institution = Column(String(255), nullable=True)
+    department = Column(String(255), nullable=True)
+    nim_nip = Column(String(100), nullable=True)
+    address = Column(Text, nullable=True)
+
     # Relationships
     assigned_tasks = relationship("TaskGrid", back_populates="assignee", foreign_keys="TaskGrid.assigned_user_id")
     annotations = relationship("Annotation", back_populates="author")

@@ -138,6 +138,27 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
+    async updateProfile(profileData) {
+      this.loading = true
+      this.error = null
+      try {
+        const response = await api.updateMe(profileData)
+        const updated = response.data
+        this.user = {
+          ...this.user,
+          ...updated
+        }
+        localStorage.setItem('geoai_user', JSON.stringify(this.user))
+        return updated
+      } catch (err) {
+        console.error('Failed to update profile:', err)
+        this.error = err.response?.data?.detail || err.message || 'Gagal memperbarui profil'
+        throw err
+      } finally {
+        this.loading = false
+      }
+    },
+
     logout() {
       this.token = null
       this.user = null

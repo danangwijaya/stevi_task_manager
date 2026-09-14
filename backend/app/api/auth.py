@@ -33,6 +33,12 @@ class UserResponse(BaseModel):
     created_at: Optional[datetime] = None
     assigned_tasks_count: Optional[int] = 0
     annotations_count: Optional[int] = 0
+    # Optional Administrative Fields
+    phone: Optional[str] = None
+    institution: Optional[str] = None
+    department: Optional[str] = None
+    nim_nip: Optional[str] = None
+    address: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -59,6 +65,11 @@ class CreateUserRequest(BaseModel):
     email: str
     password: str
     role: Optional[str] = "annotator"
+    phone: Optional[str] = None
+    institution: Optional[str] = None
+    department: Optional[str] = None
+    nim_nip: Optional[str] = None
+    address: Optional[str] = None
 
 class UpdateUserRequest(BaseModel):
     full_name: Optional[str] = None
@@ -66,6 +77,21 @@ class UpdateUserRequest(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
+    phone: Optional[str] = None
+    institution: Optional[str] = None
+    department: Optional[str] = None
+    nim_nip: Optional[str] = None
+    address: Optional[str] = None
+
+class UpdateProfileRequest(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+    phone: Optional[str] = None
+    institution: Optional[str] = None
+    department: Optional[str] = None
+    nim_nip: Optional[str] = None
+    address: Optional[str] = None
 
 class ResetPasswordRequest(BaseModel):
     password: Optional[str] = None
@@ -185,7 +211,68 @@ def read_user_me(
         "is_active": current_user.is_active,
         "created_at": current_user.created_at,
         "assigned_tasks_count": tasks_count,
-        "annotations_count": annotations_count
+        "annotations_count": annotations_count,
+        "phone": current_user.phone,
+        "institution": current_user.institution,
+        "department": current_user.department,
+        "nim_nip": current_user.nim_nip,
+        "address": current_user.address
+    }
+
+@router.put("/me", response_model=UserResponse)
+def update_user_me(
+    profile_in: UpdateProfileRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Current logged-in user updates their own profile details"""
+    if profile_in.email is not None and profile_in.email.strip() != current_user.email:
+        existing_email = db.query(User).filter(User.email == profile_in.email.strip(), User.id != current_user.id).first()
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email sudah digunakan oleh akun lain")
+        current_user.email = profile_in.email.strip()
+
+    if profile_in.full_name is not None and profile_in.full_name.strip():
+        current_user.full_name = profile_in.full_name.strip()
+
+    if profile_in.phone is not None:
+        current_user.phone = profile_in.phone.strip() if profile_in.phone.strip() else None
+
+    if profile_in.institution is not None:
+        current_user.institution = profile_in.institution.strip() if profile_in.institution.strip() else None
+
+    if profile_in.department is not None:
+        current_user.department = profile_in.department.strip() if profile_in.department.strip() else None
+
+    if profile_in.nim_nip is not None:
+        current_user.nim_nip = profile_in.nim_nip.strip() if profile_in.nim_nip.strip() else None
+
+    if profile_in.address is not None:
+        current_user.address = profile_in.address.strip() if profile_in.address.strip() else None
+
+    if profile_in.password and profile_in.password.strip():
+        current_user.hashed_password = get_password_hash(profile_in.password.strip())
+
+    db.commit()
+    db.refresh(current_user)
+
+    tasks_count = db.query(TaskGrid).filter(TaskGrid.assigned_user_id == current_user.id).count()
+    annotations_count = db.query(Annotation).filter(Annotation.user_id == current_user.id).count()
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "role": (current_user.role or "annotator").lower(),
+        "is_active": current_user.is_active,
+        "created_at": current_user.created_at,
+        "assigned_tasks_count": tasks_count,
+        "annotations_count": annotations_count,
+        "phone": current_user.phone,
+        "institution": current_user.institution,
+        "department": current_user.department,
+        "nim_nip": current_user.nim_nip,
+        "address": current_user.address
     }
 
 @router.get("/users", response_model=List[UserResponse])
@@ -220,6 +307,11 @@ def read_all_users(
             "created_at": u.created_at,
             "assigned_tasks_count": task_counts.get(u.id, 0),
             "annotations_count": annotation_counts.get(u.id, 0),
+            "phone": u.phone,
+            "institution": u.institution,
+            "department": u.department,
+            "nim_nip": u.nim_nip,
+            "address": u.address
         })
     return results
 
@@ -246,7 +338,12 @@ def create_user_by_admin(
         email=user_in.email.strip(),
         hashed_password=get_password_hash(user_in.password),
         role=clean_role,
-        is_active=True
+        is_active=True,
+        phone=user_in.phone.strip() if (user_in.phone and user_in.phone.strip()) else None,
+        institution=user_in.institution.strip() if (user_in.institution and user_in.institution.strip()) else None,
+        department=user_in.department.strip() if (user_in.department and user_in.department.strip()) else None,
+        nim_nip=user_in.nim_nip.strip() if (user_in.nim_nip and user_in.nim_nip.strip()) else None,
+        address=user_in.address.strip() if (user_in.address and user_in.address.strip()) else None
     )
     db.add(new_user)
     db.commit()
@@ -260,7 +357,12 @@ def create_user_by_admin(
         "is_active": new_user.is_active,
         "created_at": new_user.created_at,
         "assigned_tasks_count": 0,
-        "annotations_count": 0
+        "annotations_count": 0,
+        "phone": new_user.phone,
+        "institution": new_user.institution,
+        "department": new_user.department,
+        "nim_nip": new_user.nim_nip,
+        "address": new_user.address
     }
 
 @router.put("/users/{user_id}", response_model=UserResponse)
@@ -284,6 +386,21 @@ def update_user_by_admin(
 
     if user_in.full_name is not None:
         user.full_name = user_in.full_name.strip()
+
+    if user_in.phone is not None:
+        user.phone = user_in.phone.strip() if user_in.phone.strip() else None
+
+    if user_in.institution is not None:
+        user.institution = user_in.institution.strip() if user_in.institution.strip() else None
+
+    if user_in.department is not None:
+        user.department = user_in.department.strip() if user_in.department.strip() else None
+
+    if user_in.nim_nip is not None:
+        user.nim_nip = user_in.nim_nip.strip() if user_in.nim_nip.strip() else None
+
+    if user_in.address is not None:
+        user.address = user_in.address.strip() if user_in.address.strip() else None
 
     if user_in.role is not None:
         clean_role = user_in.role.strip().lower()
@@ -319,7 +436,12 @@ def update_user_by_admin(
         "is_active": user.is_active,
         "created_at": user.created_at,
         "assigned_tasks_count": tasks_count,
-        "annotations_count": annotations_count
+        "annotations_count": annotations_count,
+        "phone": user.phone,
+        "institution": user.institution,
+        "department": user.department,
+        "nim_nip": user.nim_nip,
+        "address": user.address
     }
 
 @router.post("/users/{user_id}/reset-password")

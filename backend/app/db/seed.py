@@ -29,11 +29,32 @@ def sync_postgres_sequences(db: Session):
                 logger.debug(f"Could not sync sequence {seq} for table {table}: {e}")
         db.commit()
 
+def ensure_schema_migrations(db: Session):
+    """Ensure newly added columns exist in postgres without breaking existing data."""
+    if engine.dialect.name == "postgresql":
+        logger.info("Ensuring users table schema migrations...")
+        cols = [
+            ("phone", "VARCHAR(50)"),
+            ("institution", "VARCHAR(255)"),
+            ("department", "VARCHAR(255)"),
+            ("nim_nip", "VARCHAR(100)"),
+            ("address", "TEXT"),
+        ]
+        for col_name, col_type in cols:
+            try:
+                db.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_name} {col_type};"))
+            except Exception as e:
+                logger.debug(f"Schema migration note for {col_name}: {e}")
+        db.commit()
+
 def seed_database():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     
     try:
+        # 0. Ensure schema migrations
+        ensure_schema_migrations(db)
+
         # 1. Seed Classes
         existing_classes = db.query(LandCoverClass).count()
         if existing_classes == 0:

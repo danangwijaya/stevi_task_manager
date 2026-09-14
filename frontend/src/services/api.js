@@ -62,6 +62,7 @@ export default {
   signup: (userData) => api.post('/auth/signup', userData),
   oauthLogin: (oauthData) => api.post('/auth/oauth', oauthData),
   getMe: () => api.get('/auth/me'),
+  updateMe: (profileData) => api.put('/auth/me', profileData),
   getUsers: () => api.get('/auth/users'),
   createUser: (userData) => api.post('/auth/users', userData),
   updateUser: (userId, userData) => api.put(`/auth/users/${userId}`, userData),

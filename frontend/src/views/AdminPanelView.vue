@@ -714,6 +714,19 @@
                           <span v-if="user.created_at" class="text-slate-300">•</span>
                           <span v-if="user.created_at" class="text-slate-400 text-[10px]">{{ formatDate(user.created_at) }}</span>
                         </div>
+                        <div v-if="user.institution || user.department || user.phone || user.nim_nip" class="flex flex-wrap items-center gap-1.5 mt-1.5">
+                          <span v-if="user.institution" class="inline-flex items-center gap-1 text-[10px] font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md">
+                            <Building2 :size="10" class="text-slate-400" />
+                            <span>{{ user.institution }}</span>
+                            <span v-if="user.department" class="text-slate-400">• {{ user.department }}</span>
+                          </span>
+                          <span v-if="user.nim_nip" class="text-[10px] font-mono bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-md font-bold">
+                            ID: {{ user.nim_nip }}
+                          </span>
+                          <span v-if="user.phone" class="text-[10px] font-mono bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-1">
+                            <Phone :size="9" /> {{ user.phone }}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -904,6 +917,22 @@
                     <CheckCheck v-if="copyFeedback[`email_card_${user.id}`]" :size="12" class="text-emerald-600" />
                     <Copy v-else :size="12" />
                   </button>
+                </div>
+
+                <!-- Administrative & Academic Info Strip (Optional) -->
+                <div v-if="user.institution || user.department || user.phone || user.nim_nip" class="bg-slate-50/80 p-2.5 rounded-2xl border border-slate-200/60 space-y-1 text-[11px] text-slate-600">
+                  <div v-if="user.institution" class="flex items-center gap-1.5 font-medium text-slate-800 truncate">
+                    <Building2 :size="12" class="text-slate-400 shrink-0" />
+                    <span class="truncate">{{ user.institution }}</span>
+                  </div>
+                  <div v-if="user.department" class="flex items-center gap-1.5 text-[10px] text-slate-500 truncate pl-4">
+                    <span>{{ user.department }}</span>
+                    <span v-if="user.nim_nip" class="font-mono text-blue-600">({{ user.nim_nip }})</span>
+                  </div>
+                  <div v-if="user.phone" class="flex items-center gap-1.5 text-[10px] font-mono text-emerald-700 pt-0.5">
+                    <Phone :size="10" class="text-emerald-600" />
+                    <span>{{ user.phone }}</span>
+                  </div>
                 </div>
 
                 <!-- Workload Metrics Strip -->
@@ -1329,6 +1358,87 @@
               </p>
             </div>
 
+            <!-- Data Administrasi & Kontak (Opsional) -->
+            <div class="space-y-3 p-4 bg-slate-50/80 rounded-2xl border border-slate-200/80">
+              <div class="flex items-center justify-between border-b border-slate-200/70 pb-2">
+                <div class="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                  <FileText :size="14" class="text-rose-600" />
+                  <span>Data Administrasi & Kontak</span>
+                </div>
+                <span class="text-[10px] font-bold text-slate-400 uppercase bg-slate-200/60 px-2 py-0.5 rounded-full">Opsional</span>
+              </div>
+
+              <!-- Baris: No Telp/WA & NIM/NIP -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                    <Phone :size="12" class="text-slate-400" />
+                    <span>No. WhatsApp / Telepon</span>
+                  </label>
+                  <input
+                    v-model="userForm.phone"
+                    type="text"
+                    placeholder="Contoh: 081234567890"
+                    class="w-full px-3 py-2 text-xs text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-500 bg-white font-sans"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                    <FileText :size="12" class="text-slate-400" />
+                    <span>NIM / NIP / ID Identitas</span>
+                  </label>
+                  <input
+                    v-model="userForm.nim_nip"
+                    type="text"
+                    placeholder="Contoh: 211001234"
+                    class="w-full px-3 py-2 text-xs text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-500 bg-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <!-- Baris: Universitas & Prodi -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                    <Building2 :size="12" class="text-slate-400" />
+                    <span>Universitas / Lembaga</span>
+                  </label>
+                  <input
+                    v-model="userForm.institution"
+                    type="text"
+                    placeholder="Contoh: Universitas Andalas / KLHK"
+                    class="w-full px-3 py-2 text-xs text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-500 bg-white font-sans"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                    <GraduationCap :size="12" class="text-slate-400" />
+                    <span>Program Studi / Jurusan</span>
+                  </label>
+                  <input
+                    v-model="userForm.department"
+                    type="text"
+                    placeholder="Contoh: S1 Geografi"
+                    class="w-full px-3 py-2 text-xs text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-500 bg-white font-sans"
+                  />
+                </div>
+              </div>
+
+              <!-- Baris: Alamat -->
+              <div class="space-y-1">
+                <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                  <MapPin :size="12" class="text-slate-400" />
+                  <span>Alamat Lengkap / Domisili</span>
+                </label>
+                <textarea
+                  v-model="userForm.address"
+                  rows="2"
+                  placeholder="Contoh: Jl. Sudirman No. 12, Padang, Sumatera Barat"
+                  class="w-full px-3 py-2 text-xs text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-500 bg-white resize-none font-sans"
+                ></textarea>
+              </div>
+            </div>
+
             <!-- Active Status Toggle (only on edit) -->
             <div v-if="editingUser" class="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80">
               <div>
@@ -1578,7 +1688,11 @@ import {
   Sparkles,
   ShieldAlert,
   Shapes,
-  GraduationCap
+  GraduationCap,
+  Phone,
+  Building2,
+  MapPin,
+  FileText
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useAdminStore } from '../stores/admin'
@@ -1619,7 +1733,12 @@ const filteredUsers = computed(() => {
     list = list.filter(u =>
       u.full_name?.toLowerCase().includes(q) ||
       u.username?.toLowerCase().includes(q) ||
-      u.email?.toLowerCase().includes(q)
+      u.email?.toLowerCase().includes(q) ||
+      u.institution?.toLowerCase().includes(q) ||
+      u.department?.toLowerCase().includes(q) ||
+      u.nim_nip?.toLowerCase().includes(q) ||
+      u.phone?.toLowerCase().includes(q) ||
+      u.address?.toLowerCase().includes(q)
     )
   }
   return list
@@ -1789,7 +1908,19 @@ const showUserModal = ref(false)
 const editingUser = ref(null)
 const savingUser = ref(false)
 const showPassword = ref(false)
-const userForm = ref({ full_name: '', username: '', email: '', role: 'annotator', password: '', is_active: true })
+const userForm = ref({
+  full_name: '',
+  username: '',
+  email: '',
+  role: 'annotator',
+  password: '',
+  is_active: true,
+  phone: '',
+  institution: '',
+  department: '',
+  nim_nip: '',
+  address: ''
+})
 
 function generateRandomPasswordForForm() {
   const pass = generateSecurePassword()
@@ -1808,7 +1939,12 @@ function openUserModal(user = null) {
       email: user.email,
       role: (user.role || 'annotator').toLowerCase(),
       password: '',
-      is_active: user.is_active
+      is_active: user.is_active,
+      phone: user.phone || '',
+      institution: user.institution || '',
+      department: user.department || '',
+      nim_nip: user.nim_nip || '',
+      address: user.address || ''
     }
   } else {
     userForm.value = {
@@ -1817,7 +1953,12 @@ function openUserModal(user = null) {
       email: '',
       role: 'annotator',
       password: generateSecurePassword(),
-      is_active: true
+      is_active: true,
+      phone: '',
+      institution: '',
+      department: '',
+      nim_nip: '',
+      address: ''
     }
   }
   showUserModal.value = true
@@ -1843,7 +1984,12 @@ async function saveUser() {
         full_name: userForm.value.full_name.trim(),
         email: userForm.value.email.trim(),
         role: userForm.value.role.toLowerCase(),
-        is_active: userForm.value.is_active
+        is_active: userForm.value.is_active,
+        phone: userForm.value.phone ? userForm.value.phone.trim() : null,
+        institution: userForm.value.institution ? userForm.value.institution.trim() : null,
+        department: userForm.value.department ? userForm.value.department.trim() : null,
+        nim_nip: userForm.value.nim_nip ? userForm.value.nim_nip.trim() : null,
+        address: userForm.value.address ? userForm.value.address.trim() : null
       }
       if (userForm.value.password.trim()) payload.password = userForm.value.password.trim()
       await adminStore.updateUser(editingUser.value.id, payload)
@@ -1854,7 +2000,12 @@ async function saveUser() {
         username: userForm.value.username.trim().toLowerCase(),
         email: userForm.value.email.trim(),
         role: userForm.value.role.toLowerCase(),
-        password: userForm.value.password
+        password: userForm.value.password,
+        phone: userForm.value.phone ? userForm.value.phone.trim() : null,
+        institution: userForm.value.institution ? userForm.value.institution.trim() : null,
+        department: userForm.value.department ? userForm.value.department.trim() : null,
+        nim_nip: userForm.value.nim_nip ? userForm.value.nim_nip.trim() : null,
+        address: userForm.value.address ? userForm.value.address.trim() : null
       })
       showToast('Akun pengguna baru berhasil dibuat')
     }

@@ -101,6 +101,140 @@
             </button>
           </div>
 
+          <!-- Form Edit Profil & Data Administrasi (Opsional) -->
+          <div class="bg-slate-50/70 rounded-2xl border border-slate-200 p-5 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 class="font-extrabold text-slate-900 text-xs flex items-center gap-2">
+                  <FileText :size="15" class="text-rose-600" />
+                  <span>Data Administrasi & Profil Pengguna</span>
+                </h3>
+                <p class="text-[11px] text-slate-500 mt-0.5">Informasi pendukung dokumen, administrasi kegiatan, dan sertifikasi anotasi (opsional).</p>
+              </div>
+              <span class="text-[10px] font-bold text-slate-400 uppercase bg-slate-200/60 px-2 py-0.5 rounded-full">Opsional</span>
+            </div>
+
+            <form @submit.prevent="saveSelfProfile" class="space-y-3.5">
+              <!-- Baris 1: Nama Lengkap & Email -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <label class="text-[11px] font-bold text-slate-700">Nama Lengkap</label>
+                  <input
+                    v-model="selfProfileForm.full_name"
+                    type="text"
+                    required
+                    placeholder="Nama Lengkap & Gelar"
+                    class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] font-bold text-slate-700">Email Akun</label>
+                  <input
+                    v-model="selfProfileForm.email"
+                    type="email"
+                    required
+                    placeholder="nama@email.com"
+                    class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500"
+                  />
+                </div>
+              </div>
+
+              <!-- Baris 2: No Telpon/WA & NIM/NIP -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                    <Phone :size="12" class="text-slate-400" />
+                    <span>No. WhatsApp / Telepon</span>
+                  </label>
+                  <input
+                    v-model="selfProfileForm.phone"
+                    type="text"
+                    placeholder="Contoh: 081234567890"
+                    class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                    <FileText :size="12" class="text-slate-400" />
+                    <span>NIM / NIP / ID Identitas</span>
+                  </label>
+                  <input
+                    v-model="selfProfileForm.nim_nip"
+                    type="text"
+                    placeholder="Contoh: 211001234 atau 198501..."
+                    class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <!-- Baris 3: Universitas/Instansi & Program Studi/Jurusan -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                    <Building2 :size="12" class="text-slate-400" />
+                    <span>Universitas / Lembaga / Instansi</span>
+                  </label>
+                  <input
+                    v-model="selfProfileForm.institution"
+                    type="text"
+                    placeholder="Contoh: Universitas Andalas / KLHK"
+                    class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                    <GraduationCap :size="12" class="text-slate-400" />
+                    <span>Program Studi / Jurusan / Unit</span>
+                  </label>
+                  <input
+                    v-model="selfProfileForm.department"
+                    type="text"
+                    placeholder="Contoh: S1 Geografi / Kehutanan"
+                    class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500"
+                  />
+                </div>
+              </div>
+
+              <!-- Baris 4: Alamat Domisili -->
+              <div class="space-y-1">
+                <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                  <MapPin :size="12" class="text-slate-400" />
+                  <span>Alamat Lengkap / Domisili</span>
+                </label>
+                <textarea
+                  v-model="selfProfileForm.address"
+                  rows="2"
+                  placeholder="Contoh: Jl. Sudirman No. 12, Padang, Sumatera Barat"
+                  class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500 resize-none font-sans"
+                ></textarea>
+              </div>
+
+              <!-- Baris 5: Ganti Password (Opsional) -->
+              <div class="pt-2 border-t border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div class="w-full sm:w-1/2 space-y-1">
+                  <label class="text-[11px] font-bold text-slate-700">Ganti Password (Opsional)</label>
+                  <input
+                    v-model="selfProfileForm.password"
+                    type="password"
+                    placeholder="Kosongkan jika tidak diganti"
+                    class="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-rose-500 font-mono"
+                  />
+                </div>
+
+                <div class="w-full sm:w-auto flex justify-end pt-2 sm:pt-4">
+                  <button
+                    type="submit"
+                    :disabled="savingProfile"
+                    class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-extrabold text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Save :size="14" />
+                    <span>{{ savingProfile ? 'Menyimpan...' : 'Simpan Profil' }}</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+
           <!-- Quick Page Navigation Shortcuts -->
           <div class="space-y-2 pt-2 border-t border-slate-200">
             <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Akses Langsung Halaman Sistem</div>
@@ -404,7 +538,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import {
   X,
   User,
@@ -420,9 +554,15 @@ import {
   Box,
   Grid,
   ClipboardCheck,
-  ExternalLink
+  ExternalLink,
+  Phone,
+  Building2,
+  MapPin,
+  Save,
+  FileText
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
+import api from '../services/api'
 
 const props = defineProps({
   isOpen: {
@@ -439,6 +579,18 @@ const usersList = ref([])
 const feedbackMsg = ref('')
 const errorMsg = ref('')
 
+const savingProfile = ref(false)
+const selfProfileForm = reactive({
+  full_name: '',
+  email: '',
+  phone: '',
+  institution: '',
+  department: '',
+  nim_nip: '',
+  address: '',
+  password: ''
+})
+
 const showUserFormModal = ref(false)
 const isEditing = ref(false)
 const editingUserId = ref(null)
@@ -449,11 +601,55 @@ const userForm = reactive({
   email: '',
   role: 'annotator',
   password: '',
-  is_active: true
+  is_active: true,
+  phone: '',
+  institution: '',
+  department: '',
+  nim_nip: '',
+  address: ''
 })
 
 const closeModal = () => {
   emit('close')
+}
+
+const loadSelfProfile = () => {
+  const u = authStore.user || {}
+  selfProfileForm.full_name = u.full_name || ''
+  selfProfileForm.email = u.email || ''
+  selfProfileForm.phone = u.phone || ''
+  selfProfileForm.institution = u.institution || ''
+  selfProfileForm.department = u.department || ''
+  selfProfileForm.nim_nip = u.nim_nip || ''
+  selfProfileForm.address = u.address || ''
+  selfProfileForm.password = ''
+}
+
+const saveSelfProfile = async () => {
+  savingProfile.value = true
+  feedbackMsg.value = ''
+  errorMsg.value = ''
+  try {
+    const payload = {
+      full_name: selfProfileForm.full_name,
+      email: selfProfileForm.email,
+      phone: selfProfileForm.phone,
+      institution: selfProfileForm.institution,
+      department: selfProfileForm.department,
+      nim_nip: selfProfileForm.nim_nip,
+      address: selfProfileForm.address
+    }
+    if (selfProfileForm.password && selfProfileForm.password.trim()) {
+      payload.password = selfProfileForm.password.trim()
+    }
+    await authStore.updateProfile(payload)
+    feedbackMsg.value = 'Profil dan data administrasi Anda berhasil disimpan!'
+    selfProfileForm.password = ''
+  } catch (err) {
+    errorMsg.value = err.response?.data?.detail || 'Gagal menyimpan profil.'
+  } finally {
+    savingProfile.value = false
+  }
 }
 
 const loadUsers = async () => {
@@ -471,6 +667,11 @@ const openAddUserModal = () => {
   userForm.role = 'annotator'
   userForm.password = ''
   userForm.is_active = true
+  userForm.phone = ''
+  userForm.institution = ''
+  userForm.department = ''
+  userForm.nim_nip = ''
+  userForm.address = ''
   showUserFormModal.value = true
 }
 
@@ -483,6 +684,11 @@ const openEditUserModal = (user) => {
   userForm.role = (user.role || 'annotator').toLowerCase()
   userForm.password = ''
   userForm.is_active = user.is_active
+  userForm.phone = user.phone || ''
+  userForm.institution = user.institution || ''
+  userForm.department = user.department || ''
+  userForm.nim_nip = user.nim_nip || ''
+  userForm.address = user.address || ''
   showUserFormModal.value = true
 }
 
@@ -495,7 +701,12 @@ const submitUserForm = async () => {
         full_name: userForm.full_name,
         email: userForm.email,
         role: userForm.role,
-        is_active: userForm.is_active
+        is_active: userForm.is_active,
+        phone: userForm.phone,
+        institution: userForm.institution,
+        department: userForm.department,
+        nim_nip: userForm.nim_nip,
+        address: userForm.address
       }
       if (userForm.password) {
         payload.password = userForm.password
@@ -508,7 +719,12 @@ const submitUserForm = async () => {
         username: userForm.username,
         email: userForm.email,
         role: userForm.role,
-        password: userForm.password
+        password: userForm.password,
+        phone: userForm.phone,
+        institution: userForm.institution,
+        department: userForm.department,
+        nim_nip: userForm.nim_nip,
+        address: userForm.address
       })
       feedbackMsg.value = `Pengguna baru ${userForm.username} berhasil dibuat.`
     }
@@ -531,7 +747,24 @@ const handleDeleteUser = async (user) => {
   }
 }
 
-onMounted(() => {
+watch(() => props.isOpen, async (val) => {
+  if (val) {
+    try {
+      const { data } = await api.getMe()
+      authStore.user = { ...authStore.user, ...data }
+      localStorage.setItem('geoai_user', JSON.stringify(authStore.user))
+    } catch (e) {
+      console.warn('Could not refresh me:', e)
+    }
+    loadSelfProfile()
+    if (authStore.isAdmin && activeTab.value === 'crud_users') {
+      loadUsers()
+    }
+  }
+})
+
+onMounted(async () => {
+  loadSelfProfile()
   if (authStore.isAdmin) {
     loadUsers()
   }
