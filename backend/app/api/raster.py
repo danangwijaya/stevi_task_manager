@@ -58,8 +58,13 @@ def get_year_raster_index(year: int) -> List[Dict[str, Any]]:
         return _raster_index_cache[year]
 
     base_dir = settings.RASTER_BASE_DIR
-    year_dir = os.path.join(base_dir, f"Sumatera_Barat_{year}")
-    if not os.path.exists(year_dir):
+    year_dir = None
+    if os.path.exists(base_dir):
+        for entry in os.listdir(base_dir):
+            if os.path.isdir(os.path.join(base_dir, entry)) and str(year) in entry:
+                year_dir = os.path.join(base_dir, entry)
+                break
+    if not year_dir or not os.path.exists(year_dir):
         return []
 
     tif_files = glob.glob(os.path.join(year_dir, "*.tif"))
