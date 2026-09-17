@@ -111,6 +111,13 @@
               </div>
               <div class="flex gap-1.5 shrink-0">
                 <button
+                  @click="confirmResetProject(project)"
+                  class="w-7 h-7 rounded-lg border border-[#e4e7eb] flex items-center justify-center text-[#707a8a] hover:border-amber-400 hover:text-amber-600 hover:bg-amber-50 transition-all cursor-pointer"
+                  title="Reset seluruh pengerjaan proyek (kembalikan semua grid ke status Tersedia)"
+                >
+                  <RotateCcw :size="12" />
+                </button>
+                <button
                   @click="openProjectModal(project)"
                   class="w-7 h-7 rounded-lg border border-[#e4e7eb] flex items-center justify-center text-[#707a8a] hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-all cursor-pointer"
                   title="Edit proyek"
@@ -461,10 +468,10 @@
             </div>
           </div>
 
-          <!-- Dosen / QC Reviewers -->
+          <!-- Supervisi / QC Reviewers -->
           <div class="bg-white rounded-3xl p-5 border border-indigo-200/80 shadow-xs hover:shadow-md transition-all relative overflow-hidden group bg-gradient-to-br from-white to-indigo-50/30">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-indigo-700 uppercase tracking-wider">Dosen / Reviewer</span>
+              <span class="text-xs font-bold text-indigo-700 uppercase tracking-wider">Supervisi</span>
               <div class="w-10 h-10 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-700 group-hover:scale-105 transition-transform">
                 <GraduationCap :size="20" />
               </div>
@@ -472,7 +479,7 @@
             <div class="mt-3">
               <div class="text-3xl font-black text-indigo-900 font-heading tracking-tight">{{ dosenUsersCount }}</div>
               <p class="text-xs text-indigo-600 mt-1">
-                <span>Hak validasi & evaluasi QC</span>
+                <span>Hak validasi & supervisi QC</span>
               </p>
             </div>
           </div>
@@ -554,7 +561,7 @@
                 :class="userRoleFilter === 'dosen' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'"
               >
                 <GraduationCap :size="13" />
-                <span>Dosen</span>
+                <span>Supervisi</span>
               </button>
               <button
                 @click="userRoleFilter = 'annotator'"
@@ -752,14 +759,14 @@
                       class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] font-extrabold uppercase tracking-wider border shadow-2xs"
                       :class="user.role?.toLowerCase() === 'admin'
                         ? 'bg-purple-50 text-purple-800 border-purple-200'
-                        : (user.role?.toLowerCase() === 'dosen'
+                        : (['dosen', 'supervisi'].includes(user.role?.toLowerCase())
                           ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
                           : 'bg-emerald-50 text-emerald-800 border-emerald-200')"
                     >
                       <ShieldCheck v-if="user.role?.toLowerCase() === 'admin'" :size="12" class="text-purple-600" />
-                      <GraduationCap v-else-if="user.role?.toLowerCase() === 'dosen'" :size="12" class="text-indigo-600" />
+                      <GraduationCap v-else-if="['dosen', 'supervisi'].includes(user.role?.toLowerCase())" :size="12" class="text-indigo-600" />
                       <PenTool v-else :size="11" class="text-emerald-600" />
-                      <span>{{ user.role?.toLowerCase() === 'admin' ? 'Administrator' : (user.role?.toLowerCase() === 'dosen' ? 'Dosen (QC)' : 'Mapper') }}</span>
+                      <span>{{ user.role?.toLowerCase() === 'admin' ? 'Administrator' : (['dosen', 'supervisi'].includes(user.role?.toLowerCase()) ? 'Supervisi' : 'Mapper') }}</span>
                     </span>
                   </td>
 
@@ -895,14 +902,14 @@
                     class="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-extrabold uppercase tracking-wider border shrink-0"
                     :class="user.role?.toLowerCase() === 'admin'
                       ? 'bg-purple-50 text-purple-800 border-purple-200'
-                      : (user.role?.toLowerCase() === 'dosen'
+                      : (['dosen', 'supervisi'].includes(user.role?.toLowerCase())
                         ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
                         : 'bg-emerald-50 text-emerald-800 border-emerald-200')"
                   >
                     <ShieldCheck v-if="user.role?.toLowerCase() === 'admin'" :size="11" class="text-purple-600" />
-                    <GraduationCap v-else-if="user.role?.toLowerCase() === 'dosen'" :size="11" class="text-indigo-600" />
+                    <GraduationCap v-else-if="['dosen', 'supervisi'].includes(user.role?.toLowerCase())" :size="11" class="text-indigo-600" />
                     <PenTool v-else :size="10" class="text-emerald-600" />
-                    <span>{{ user.role?.toLowerCase() === 'admin' ? 'Admin' : (user.role?.toLowerCase() === 'dosen' ? 'Dosen' : 'Mapper') }}</span>
+                    <span>{{ user.role?.toLowerCase() === 'admin' ? 'Admin' : (['dosen', 'supervisi'].includes(user.role?.toLowerCase()) ? 'Supervisi' : 'Mapper') }}</span>
                   </span>
                 </div>
 
@@ -1250,11 +1257,11 @@
                   </div>
                 </div>
 
-                <!-- Card 2: Dosen / Reviewer -->
+                <!-- Card 2: Supervisi -->
                 <div
                   @click="userForm.role = 'dosen'"
                   class="p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between space-y-2"
-                  :class="userForm.role === 'dosen'
+                  :class="['dosen', 'supervisi'].includes(userForm.role)
                     ? 'border-indigo-500 bg-indigo-50/40 shadow-xs'
                     : 'border-slate-200 hover:border-slate-300 bg-white'"
                 >
@@ -1264,13 +1271,13 @@
                     </div>
                     <div
                       class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
-                      :class="userForm.role === 'dosen' ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'"
+                      :class="['dosen', 'supervisi'].includes(userForm.role) ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'"
                     >
-                      <div v-if="userForm.role === 'dosen'" class="w-1.5 h-1.5 rounded-full bg-white"></div>
+                      <div v-if="['dosen', 'supervisi'].includes(userForm.role)" class="w-1.5 h-1.5 rounded-full bg-white"></div>
                     </div>
                   </div>
                   <div>
-                    <div class="font-extrabold text-xs text-slate-900">Dosen / Reviewer</div>
+                    <div class="font-extrabold text-xs text-slate-900">Supervisi</div>
                     <p class="text-[10px] text-slate-500 mt-0.5 leading-snug">
                       Akses QC Review & evaluasi mutu tanpa akses kelola pengguna.
                     </p>
@@ -1633,6 +1640,51 @@
       </div>
     </Teleport>
 
+    <!-- MODAL: Konfirmasi Reset Progres Proyek -->
+    <Teleport to="body">
+      <div v-if="showResetProjectConfirm"
+        class="fixed inset-0 z-[1001] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+        @click.self="showResetProjectConfirm = false"
+      >
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md border border-slate-200 p-6 space-y-5 text-center">
+          <div class="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto shadow-xs">
+            <RotateCcw :size="28" />
+          </div>
+          <div>
+            <h3 class="font-black text-slate-900 text-base">
+              Konfirmasi Reset Proyek
+            </h3>
+            <p class="text-xs text-slate-600 mt-2 leading-relaxed text-left bg-amber-50/80 p-3.5 rounded-2xl border border-amber-200/80">
+              Apakah Anda yakin ingin mereset seluruh progres pada proyek <b class="text-slate-900 font-bold">"{{ pendingResetProject?.name }}"</b>?<br><br>
+              Tindakan ini akan:<br>
+              • Mengembalikan <b class="text-slate-800 font-bold">{{ pendingResetProject?.total_tasks || 0 }} grid tile</b> ke status <b>Tersedia (UNASSIGNED)</b>.<br>
+              • Menghapus seluruh penugasan pengguna dan catatan evaluasi review.<br>
+              • <b class="text-rose-700 font-bold">Membersihkan seluruh poligon anotasi</b> yang telah didigitasi pada proyek ini.<br><br>
+              <span class="text-slate-500 italic">Grid spasial wilayah kajian tetap aman dan siap dikerjakan ulang dari awal.</span>
+            </p>
+          </div>
+
+          <div class="flex gap-3 justify-center pt-1">
+            <button
+              @click="showResetProjectConfirm = false"
+              class="px-5 py-2.5 text-xs font-bold border border-slate-200 rounded-2xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all cursor-pointer"
+            >
+              Batal
+            </button>
+            <button
+              @click="executeResetProject"
+              :disabled="resettingProject"
+              class="px-5 py-2.5 text-xs font-extrabold disabled:opacity-50 text-white rounded-2xl transition-all shadow-md bg-amber-600 hover:bg-amber-700 shadow-amber-600/20 flex items-center gap-2 cursor-pointer"
+            >
+              <RotateCw v-if="resettingProject" :size="14" class="animate-spin" />
+              <RotateCcw v-else :size="14" />
+              <span>{{ resettingProject ? 'Mereset Progres...' : 'Ya, Reset Progres Proyek' }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Toast notification -->
     <Teleport to="body">
       <div v-if="toast.show"
@@ -1692,7 +1744,8 @@ import {
   Phone,
   Building2,
   MapPin,
-  FileText
+  FileText,
+  RotateCcw
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useAdminStore } from '../stores/admin'
@@ -1714,13 +1767,15 @@ const copyFeedback = ref({})
 // KPI Computed
 const totalUsersCount = computed(() => adminStore.users.length)
 const adminUsersCount = computed(() => adminStore.users.filter(u => (u.role || '').toLowerCase() === 'admin').length)
-const dosenUsersCount = computed(() => adminStore.users.filter(u => (u.role || '').toLowerCase() === 'dosen').length)
+const dosenUsersCount = computed(() => adminStore.users.filter(u => ['dosen', 'supervisi'].includes((u.role || '').toLowerCase())).length)
 const activeAnnotatorsCount = computed(() => adminStore.users.filter(u => (u.role || '').toLowerCase() === 'annotator' && u.is_active).length)
 const inactiveUsersCount = computed(() => adminStore.users.filter(u => !u.is_active).length)
 
 const filteredUsers = computed(() => {
   let list = adminStore.users
-  if (userRoleFilter.value !== 'all') {
+  if (userRoleFilter.value === 'dosen') {
+    list = list.filter(u => ['dosen', 'supervisi'].includes((u.role || '').toLowerCase()))
+  } else if (userRoleFilter.value !== 'all') {
     list = list.filter(u => (u.role || '').toLowerCase() === userRoleFilter.value)
   }
   if (userStatusFilter.value === 'active') {
@@ -1760,7 +1815,7 @@ function getAvatarColor(user) {
   if (role === 'admin') {
     return 'bg-gradient-to-br from-purple-600 to-indigo-700'
   }
-  if (role === 'dosen') {
+  if (role === 'dosen' || role === 'supervisi') {
     return 'bg-gradient-to-br from-indigo-500 to-blue-600'
   }
   const str = user.username || user.full_name || 'U'
@@ -2087,6 +2142,31 @@ const showDeleteConfirm = ref(false)
 const deleteConfirmMessage = ref('')
 const deleting = ref(false)
 const pendingDelete = ref({ type: null, item: null, hasAnnotations: false })
+
+// ── Reset Project Confirm ───────────────────────────────────────────────
+const showResetProjectConfirm = ref(false)
+const pendingResetProject = ref(null)
+const resettingProject = ref(false)
+
+function confirmResetProject(project) {
+  pendingResetProject.value = project
+  showResetProjectConfirm.value = true
+}
+
+async function executeResetProject() {
+  if (!pendingResetProject.value) return
+  resettingProject.value = true
+  try {
+    const res = await adminStore.resetProject(pendingResetProject.value.id)
+    showToast(res.message || `Progres proyek "${pendingResetProject.value.name}" berhasil direset`)
+    showResetProjectConfirm.value = false
+    pendingResetProject.value = null
+  } catch (e) {
+    showToast(e.response?.data?.detail || 'Gagal mereset progres proyek', 'error')
+  } finally {
+    resettingProject.value = false
+  }
+}
 
 function confirmDeleteProject(project) {
   pendingDelete.value = { type: 'project', item: project, hasAnnotations: false }

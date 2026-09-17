@@ -151,6 +151,19 @@ export const useTasksStore = defineStore('tasks', {
         console.error('Failed to assign task:', err)
         return false
       }
+    },
+
+    async resetProjectProgress(projectId) {
+      try {
+        const response = await api.resetProjectProgress(projectId)
+        await this.fetchProjects()
+        await this.fetchTasks()
+        await this.fetchStats()
+        return response.data
+      } catch (err) {
+        console.error('Failed to reset project progress:', err)
+        throw err
+      }
     }
   }
 })

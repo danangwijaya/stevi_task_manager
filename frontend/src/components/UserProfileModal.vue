@@ -384,11 +384,11 @@
                         class="px-2 py-0.5 rounded-full font-bold text-[10px] uppercase tracking-wider"
                         :class="u.role?.toLowerCase() === 'admin'
                           ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                          : (u.role?.toLowerCase() === 'dosen'
+                          : (['dosen', 'supervisi'].includes(u.role?.toLowerCase())
                             ? 'bg-indigo-100 text-indigo-800 border border-indigo-300'
                             : 'bg-emerald-100 text-emerald-800 border border-emerald-300')"
                       >
-                        {{ u.role }}
+                        {{ u.role?.toLowerCase() === 'admin' ? 'Admin' : (['dosen', 'supervisi'].includes(u.role?.toLowerCase()) ? 'Supervisi' : 'Mapper') }}
                       </span>
                     </td>
                     <td class="p-3">
@@ -487,7 +487,7 @@
               class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-rose-500 focus:bg-white font-medium"
             >
               <option value="annotator">Kontributor / Mapper (Annotator)</option>
-              <option value="dosen">Dosen / QC Reviewer (Dosen)</option>
+              <option value="dosen">Supervisi (Verifikasi & QC)</option>
               <option value="admin">Administrator (Admin)</option>
             </select>
           </div>

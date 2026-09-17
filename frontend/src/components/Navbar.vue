@@ -91,7 +91,7 @@
             </div>
             <div class="text-xs font-semibold mt-1 flex items-center gap-1.5">
               <span v-if="authStore.isAdmin" class="text-amber-700 font-bold">Administrator</span>
-              <span v-else-if="authStore.isDosen" class="text-indigo-700 font-bold">Dosen (QC)</span>
+              <span v-else-if="authStore.isDosen" class="text-indigo-700 font-bold">Supervisi</span>
               <span v-else class="text-rose-600 font-bold">Kontributor</span>
               <Settings :size="12" class="text-slate-400 group-hover:text-slate-700" />
             </div>

@@ -105,9 +105,10 @@ def render_tile_from_raster(
     utm_max_y: float,
     mode: str = "rgb",
     stretch_min: float = 150.0,
-    stretch_max: float = 2600.0
+    stretch_max: float = 2600.0,
+    gamma: float = 1.0
 ) -> Optional[bytes]:
-    """Read bounding box window from COG file, stretch colors, and return PNG bytes."""
+    """Read bounding box window from COG file, stretch colors with optional gamma correction, and return PNG bytes."""
     try:
         with rasterio.open(raster_path) as src:
             b = src.bounds
@@ -142,13 +143,21 @@ def render_tile_from_raster(
             if not np.any(valid_mask):
                 return None
 
-            # Stretch reflectance values into 0..255
-            # Clamp between stretch_min and stretch_max
-            scale = 255.0 / max(stretch_max - stretch_min, 1.0)
-            
-            ch0 = np.clip((data[0].astype(np.float32) - stretch_min) * scale, 0, 255).astype(np.uint8)
-            ch1 = np.clip((data[1].astype(np.float32) - stretch_min) * scale, 0, 255).astype(np.uint8)
-            ch2 = np.clip((data[2].astype(np.float32) - stretch_min) * scale, 0, 255).astype(np.uint8)
+            # Stretch reflectance values into 0..255 with optional gamma
+            span = max(stretch_max - stretch_min, 1.0)
+            if gamma != 1.0 and gamma > 0:
+                inv_gamma = 1.0 / gamma
+                norm0 = np.clip((data[0].astype(np.float32) - stretch_min) / span, 0.0, 1.0)
+                norm1 = np.clip((data[1].astype(np.float32) - stretch_min) / span, 0.0, 1.0)
+                norm2 = np.clip((data[2].astype(np.float32) - stretch_min) / span, 0.0, 1.0)
+                ch0 = (np.power(norm0, inv_gamma) * 255.0).astype(np.uint8)
+                ch1 = (np.power(norm1, inv_gamma) * 255.0).astype(np.uint8)
+                ch2 = (np.power(norm2, inv_gamma) * 255.0).astype(np.uint8)
+            else:
+                scale = 255.0 / span
+                ch0 = np.clip((data[0].astype(np.float32) - stretch_min) * scale, 0, 255).astype(np.uint8)
+                ch1 = np.clip((data[1].astype(np.float32) - stretch_min) * scale, 0, 255).astype(np.uint8)
+                ch2 = np.clip((data[2].astype(np.float32) - stretch_min) * scale, 0, 255).astype(np.uint8)
             
             alpha = np.where(valid_mask, 255, 0).astype(np.uint8)
 
@@ -213,6 +222,7 @@ def get_grid_tile(
     mode: str = Query("rgb", pattern="^(rgb|cir)$"),
     stretch_min: float = Query(150.0),
     stretch_max: float = Query(2600.0),
+    gamma: float = Query(1.0),
     db: Session = Depends(get_db)
 ):
     """
@@ -250,7 +260,8 @@ def get_grid_tile(
         utm_max_y=utm_max_y,
         mode=mode,
         stretch_min=stretch_min,
-        stretch_max=stretch_max
+        stretch_max=stretch_max,
+        gamma=gamma
     )
 
     if not tile_bytes:
@@ -270,7 +281,8 @@ def get_mosaic_tile(
     y: int,
     mode: str = Query("rgb", pattern="^(rgb|cir)$"),
     stretch_min: float = Query(150.0),
-    stretch_max: float = Query(2600.0)
+    stretch_max: float = Query(2600.0),
+    gamma: float = Query(1.0)
 ):
     """
     Serves a 256x256 mosaic tile for the entire province for the given year.
@@ -303,7 +315,8 @@ def get_mosaic_tile(
         utm_max_y=utm_max_y,
         mode=mode,
         stretch_min=stretch_min,
-        stretch_max=stretch_max
+        stretch_max=stretch_max,
+        gamma=gamma
     )
 
     if not tile_bytes:

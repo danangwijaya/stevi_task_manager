@@ -8,25 +8,32 @@
       <!-- Year Badge -->
       <div class="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
         <button
-          @click="$emit('update:year', 2017)"
-          class="px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors cursor-pointer"
-          :class="selectedYear === 2017 ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'"
-        >
-          2017
-        </button>
-        <button
-          @click="$emit('update:year', 2021)"
-          class="px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors cursor-pointer"
-          :class="selectedYear === 2021 ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'"
-        >
-          2021
-        </button>
-        <button
           @click="$emit('update:year', 2025)"
           class="px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors cursor-pointer"
           :class="selectedYear === 2025 ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'"
         >
           2025
+        </button>
+        <button
+          @click="$emit('update:year', 2022)"
+          class="px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors cursor-pointer"
+          :class="selectedYear === 2022 ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'"
+        >
+          2022
+        </button>
+        <button
+          @click="$emit('update:year', 2018)"
+          class="px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors cursor-pointer"
+          :class="selectedYear === 2018 ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'"
+        >
+          2018
+        </button>
+        <button
+          @click="$emit('update:year', 2017)"
+          class="px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors cursor-pointer"
+          :class="selectedYear === 2017 ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'"
+        >
+          2017
         </button>
       </div>
     </div>

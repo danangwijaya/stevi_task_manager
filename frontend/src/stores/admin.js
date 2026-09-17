@@ -126,9 +126,17 @@ export const useAdminStore = defineStore('admin', () => {
     projects.value = projects.value.filter(p => p.id !== projectId)
   }
 
+  async function resetProject(projectId) {
+    const { data } = await axios.post(`${API}/api/v1/tasks/projects/${projectId}/reset`, {}, {
+      headers: authHeaders()
+    })
+    await fetchProjects()
+    return data
+  }
+
   return {
     users, projects, loadingUsers, loadingProjects, error,
     fetchUsers, createUser, updateUser, deleteUser, toggleUserActive, resetPassword,
-    fetchProjects, createProject, updateProject, deleteProject
+    fetchProjects, createProject, updateProject, deleteProject, resetProject
   }
 })

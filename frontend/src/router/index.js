@@ -84,7 +84,7 @@ router.beforeEach((to, from, next) => {
     try {
       const user = userRaw ? JSON.parse(userRaw) : null
       const role = (user?.role || '').toLowerCase()
-      if (!user || !['admin', 'dosen'].includes(role)) {
+      if (!user || !['admin', 'dosen', 'supervisi'].includes(role)) {
         next('/dashboard')
         return
       }

@@ -218,13 +218,59 @@ def delete_project(
         raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
 
     # Cascade: delete annotations first, then grids, then area
-    task_ids = [t.id for t in db.query(TaskGrid.id).filter(TaskGrid.study_area_id == project_id).all()]
-    if task_ids:
-        db.query(Annotation).filter(Annotation.task_grid_id.in_(task_ids)).delete(synchronize_session=False)
+    db.query(Annotation).filter(
+        Annotation.task_grid_id.in_(
+            db.query(TaskGrid.id).filter(TaskGrid.study_area_id == project_id)
+        )
+    ).delete(synchronize_session=False)
     db.query(TaskGrid).filter(TaskGrid.study_area_id == project_id).delete(synchronize_session=False)
     db.delete(area)
     db.commit()
     return {"message": f"Proyek '{area.name}' dan semua grid-nya berhasil dihapus"}
+
+
+@router.post("/projects/{project_id}/reset")
+def reset_project_progress(
+    project_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_active_admin)
+) -> Any:
+    """
+    Admin resets all task progress in a project:
+    - Deletes all annotations created in the project's task grids
+    - Resets all task grids to UNASSIGNED
+    - Clears assigned_user_id, reviewer_notes, and completed_at
+    """
+    area = db.query(StudyArea).filter(StudyArea.id == project_id).first()
+    if not area:
+        raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
+
+    total_tasks_count = db.query(TaskGrid.id).filter(TaskGrid.study_area_id == project_id).count()
+    deleted_annotations_count = 0
+    if total_tasks_count > 0:
+        deleted_annotations_count = db.query(Annotation).filter(
+            Annotation.task_grid_id.in_(
+                db.query(TaskGrid.id).filter(TaskGrid.study_area_id == project_id)
+            )
+        ).delete(synchronize_session=False)
+        db.query(TaskGrid).filter(TaskGrid.study_area_id == project_id).update(
+            {
+                TaskGrid.status: TaskStatus.UNASSIGNED.value,
+                TaskGrid.assigned_user_id: None,
+                TaskGrid.reviewer_notes: None,
+                TaskGrid.completed_at: None,
+                TaskGrid.updated_at: datetime.utcnow(),
+            },
+            synchronize_session=False
+        )
+
+    db.commit()
+    return {
+        "message": f"Progres proyek '{area.name}' berhasil direset. {total_tasks_count} grid dikembalikan ke status Tersedia, dan {deleted_annotations_count} poligon anotasi dibersihkan.",
+        "project_id": project_id,
+        "reset_tasks_count": total_tasks_count,
+        "deleted_annotations_count": deleted_annotations_count
+    }
 
 
 # ─────────────────────────────────────────────
@@ -584,6 +630,56 @@ def get_task_detail(
         updated_at=task.updated_at
     )
 
+@router.get("/{task_id}/siblings")
+def get_task_siblings(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Returns corresponding tasks for this exact spatial grid in other available years."""
+    current = db.query(TaskGrid).filter(TaskGrid.id == task_id).first()
+    if not current:
+        raise HTTPException(status_code=404, detail="Task grid not found")
+        
+    parts = current.grid_code.rsplit("_", 1)
+    if len(parts) == 2 and parts[1].isdigit() and len(parts[1]) == 4:
+        base_code = parts[0]
+    else:
+        base_code = current.grid_code
+
+    query = db.query(TaskGrid).filter(
+        TaskGrid.study_area_id == current.study_area_id,
+        TaskGrid.id != current.id
+    )
+    if current.tile_key:
+        query = query.filter(
+            (TaskGrid.tile_key == current.tile_key) | (TaskGrid.grid_code.like(f"{base_code}\\_%", escape="\\"))
+        )
+    else:
+        query = query.filter(TaskGrid.grid_code.like(f"{base_code}\\_%", escape="\\"))
+
+    candidates = query.order_by(TaskGrid.year.desc()).all()
+    
+    result = []
+    for s in candidates:
+        s_parts = s.grid_code.rsplit("_", 1)
+        s_base = s_parts[0] if (len(s_parts) == 2 and s_parts[1].isdigit() and len(s_parts[1]) == 4) else s.grid_code
+        is_match = bool((current.tile_key and s.tile_key == current.tile_key) or (s_base == base_code))
+        if not is_match:
+            continue
+
+        ann_cnt = db.query(func.count(Annotation.id)).filter(Annotation.task_grid_id == s.id).scalar() or 0
+        assignee_name = s.assignee.full_name if s.assignee else None
+        result.append({
+            "id": s.id,
+            "grid_code": s.grid_code,
+            "year": s.year,
+            "status": s.status,
+            "annotation_count": ann_cnt,
+            "assigned_user_name": assignee_name
+        })
+    return result
+
 @router.post("/{task_id}/claim")
 def claim_task(
     task_id: int,
@@ -709,7 +805,7 @@ def update_task_status(
 
     # Permissions check
     user_role = (current_user.role or "").strip().lower()
-    if user_role not in ["admin", "dosen"]:
+    if user_role not in ["admin", "dosen", "supervisi"]:
         if task.assigned_user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Hanya dapat mengubah status grid milik sendiri")
         # Contributors can only: IN_PROGRESS->SUBMITTED, REVISION_NEEDED->SUBMITTED

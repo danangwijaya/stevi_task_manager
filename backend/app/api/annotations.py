@@ -162,8 +162,10 @@ def copy_annotations_from_task(
         db.add(new_ann)
         cloned.append(new_ann)
 
-    if target_task.status in ["ASSIGNED", "REVISION_NEEDED"]:
+    if target_task.status in ["UNASSIGNED", "ASSIGNED", "REVISION_NEEDED"]:
         target_task.status = "IN_PROGRESS"
+        if target_task.assigned_user_id is None:
+            target_task.assigned_user_id = current_user.id
 
     db.commit()
     return {
@@ -466,6 +468,25 @@ def update_annotation_class(
     }
 
 
+def _extend_line(line, factor=0.2):
+    """Extend line slightly at both ends so split() cuts across polygon boundaries reliably"""
+    from shapely.geometry import LineString
+    try:
+        coords = list(line.coords)
+        if len(coords) < 2:
+            return line
+        dx0 = coords[0][0] - coords[1][0]
+        dy0 = coords[0][1] - coords[1][1]
+        p0_ext = (coords[0][0] + dx0 * factor, coords[0][1] + dy0 * factor)
+        
+        dx1 = coords[-1][0] - coords[-2][0]
+        dy1 = coords[-1][1] - coords[-2][1]
+        p1_ext = (coords[-1][0] + dx1 * factor, coords[-1][1] + dy1 * factor)
+        return LineString([p0_ext] + coords[1:-1] + [p1_ext])
+    except Exception:
+        return line
+
+
 @router.post("/split-by-polygon")
 def split_by_polygon(
     req: SplitByPolygonRequest,
@@ -475,6 +496,7 @@ def split_by_polygon(
     """
     True Semantic Segmentation Cut: Splits existing polygon(s) using a cutting polygon.
     Both the Inside (Intersection) and Outside (Difference) pieces are preserved!
+    Works seamlessly on populated or fresh/empty grids.
     """
     from shapely.geometry import shape, mapping
     
@@ -489,6 +511,23 @@ def split_by_polygon(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid cutting geometry: {str(e)}")
 
+    task_poly = None
+    if task.geom_geojson:
+        try:
+            task_poly = shape(json.loads(task.geom_geojson))
+            if not task_poly.is_valid:
+                task_poly = task_poly.buffer(0)
+        except Exception:
+            task_poly = None
+
+    # Clip cutter to task grid boundary if task_poly exists
+    if task_poly:
+        if not cutter.intersects(task_poly):
+            raise HTTPException(status_code=400, detail="Area pemotong berada di luar batas grid task.")
+        cutter_in_grid = cutter.intersection(task_poly)
+    else:
+        cutter_in_grid = cutter
+
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
     new_class_id = req.new_class_id if req.new_class_id in classes_dict else 0
     new_class_name = classes_dict.get(new_class_id, "Belum Terklasifikasi")
@@ -502,56 +541,132 @@ def split_by_polygon(
     split_occurred = False
     new_created_count = 0
 
-    for ann in annotations:
-        try:
-            poly = shape(json.loads(ann.geom_geojson))
-            if not poly.is_valid:
-                poly = poly.buffer(0)
-                
-            if not poly.intersects(cutter):
-                continue
-
-            intersection = poly.intersection(cutter)
-            difference = poly.difference(cutter)
-
-            inter_polys = _extract_polygons(intersection)
-            diff_polys = _extract_polygons(difference)
-
-            if inter_polys and diff_polys:
-                split_occurred = True
-                # Remove original polygon record
-                db.delete(ann)
-
-                # Add difference pieces (keeping original class)
-                for dp in diff_polys:
-                    dp_geojson = mapping(dp)
-                    area_sqm = dp.area * (111320.0 ** 2)
-                    new_dp = Annotation(
-                        task_grid_id=req.task_grid_id,
-                        user_id=current_user.id,
-                        class_id=ann.class_id,
-                        class_name=ann.class_name,
-                        geom_geojson=json.dumps(dp_geojson),
-                        area_sqm=area_sqm
-                    )
-                    db.add(new_dp)
-
+    # CASE 1: Grid has NO annotations yet! Slice directly from task grid polygon
+    if len(annotations) == 0:
+        if task_poly:
+            inter_polys = _extract_polygons(cutter_in_grid)
+            diff_polys = _extract_polygons(task_poly.difference(cutter_in_grid))
+            
+            if inter_polys:
                 # Add intersection pieces (assigned with new_class_id)
                 for ip in inter_polys:
                     ip_geojson = mapping(ip)
                     area_sqm = ip.area * (111320.0 ** 2)
-                    new_ip = Annotation(
+                    db.add(Annotation(
                         task_grid_id=req.task_grid_id,
                         user_id=current_user.id,
                         class_id=new_class_id,
                         class_name=new_class_name,
                         geom_geojson=json.dumps(ip_geojson),
                         area_sqm=area_sqm
-                    )
-                    db.add(new_ip)
+                    ))
                     new_created_count += 1
-        except Exception as e:
-            continue
+                
+                # Add difference pieces (remaining area marked as unclassified 0)
+                for dp in diff_polys:
+                    dp_geojson = mapping(dp)
+                    area_sqm = dp.area * (111320.0 ** 2)
+                    db.add(Annotation(
+                        task_grid_id=req.task_grid_id,
+                        user_id=current_user.id,
+                        class_id=0,
+                        class_name="Belum Terklasifikasi",
+                        geom_geojson=json.dumps(dp_geojson),
+                        area_sqm=area_sqm
+                    ))
+                split_occurred = True
+        else:
+            cut_polys = _extract_polygons(cutter_in_grid)
+            for cp in cut_polys:
+                area_sqm = cp.area * (111320.0 ** 2)
+                db.add(Annotation(
+                    task_grid_id=req.task_grid_id,
+                    user_id=current_user.id,
+                    class_id=new_class_id,
+                    class_name=new_class_name,
+                    geom_geojson=json.dumps(mapping(cp)),
+                    area_sqm=area_sqm
+                ))
+                new_created_count += 1
+            if new_created_count > 0:
+                split_occurred = True
+
+    # CASE 2: Grid has existing annotations
+    else:
+        for ann in annotations:
+            try:
+                poly = shape(json.loads(ann.geom_geojson))
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+                    
+                if not poly.intersects(cutter):
+                    continue
+
+                intersection = poly.intersection(cutter)
+                difference = poly.difference(cutter)
+
+                inter_polys = _extract_polygons(intersection)
+                diff_polys = _extract_polygons(difference)
+
+                if inter_polys and diff_polys:
+                    split_occurred = True
+                    # Remove original polygon record
+                    db.delete(ann)
+
+                    # Add difference pieces (keeping original class)
+                    for dp in diff_polys:
+                        dp_geojson = mapping(dp)
+                        area_sqm = dp.area * (111320.0 ** 2)
+                        new_dp = Annotation(
+                            task_grid_id=req.task_grid_id,
+                            user_id=current_user.id,
+                            class_id=ann.class_id,
+                            class_name=ann.class_name,
+                            geom_geojson=json.dumps(dp_geojson),
+                            area_sqm=area_sqm
+                        )
+                        db.add(new_dp)
+
+                    # Add intersection pieces (assigned with new_class_id)
+                    for ip in inter_polys:
+                        ip_geojson = mapping(ip)
+                        area_sqm = ip.area * (111320.0 ** 2)
+                        new_ip = Annotation(
+                            task_grid_id=req.task_grid_id,
+                            user_id=current_user.id,
+                            class_id=new_class_id,
+                            class_name=new_class_name,
+                            geom_geojson=json.dumps(ip_geojson),
+                            area_sqm=area_sqm
+                        )
+                        db.add(new_ip)
+                        new_created_count += 1
+                elif inter_polys and not diff_polys:
+                    # Polygon is completely enclosed by cutter -> reclassify
+                    split_occurred = True
+                    ann.class_id = new_class_id
+                    ann.class_name = new_class_name
+                    ann.user_id = current_user.id
+                    new_created_count += 1
+            except Exception:
+                continue
+
+        # If cutter didn't split or reclassify any polygon (e.g. drawn in unannotated open space in grid)
+        if not split_occurred:
+            cut_polys = _extract_polygons(cutter_in_grid)
+            for cp in cut_polys:
+                area_sqm = cp.area * (111320.0 ** 2)
+                db.add(Annotation(
+                    task_grid_id=req.task_grid_id,
+                    user_id=current_user.id,
+                    class_id=new_class_id,
+                    class_name=new_class_name,
+                    geom_geojson=json.dumps(mapping(cp)),
+                    area_sqm=area_sqm
+                ))
+                new_created_count += 1
+            if new_created_count > 0:
+                split_occurred = True
 
     if not split_occurred:
         raise HTTPException(status_code=400, detail="Garis pemotong tidak memotong poligon manapun atau poligon berada di luar area.")
@@ -586,6 +701,15 @@ def split_by_line(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid line geometry: {str(e)}")
 
+    task_poly = None
+    if task.geom_geojson:
+        try:
+            task_poly = shape(json.loads(task.geom_geojson))
+            if not task_poly.is_valid:
+                task_poly = task_poly.buffer(0)
+        except Exception:
+            task_poly = None
+
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
     new_class_id = req.new_class_id if req.new_class_id in classes_dict else 0
     new_class_name = classes_dict.get(new_class_id, "Belum Terklasifikasi")
@@ -596,48 +720,90 @@ def split_by_line(
     annotations = query.all()
 
     split_occurred = False
+    extended_blade = _extend_line(blade, factor=0.15)
 
-    for ann in annotations:
-        try:
-            poly = shape(json.loads(ann.geom_geojson))
-            if not poly.is_valid:
-                poly = poly.buffer(0)
-                
-            if not poly.intersects(blade):
-                continue
-
-            res = split(poly, blade)
-            pieces = _extract_polygons(res)
-
-            if len(pieces) > 1:
-                split_occurred = True
-                db.delete(ann)
-
-                # Piece 0 gets original class
-                p0 = pieces[0]
-                area_sqm = p0.area * (111320.0 ** 2)
-                db.add(Annotation(
-                    task_grid_id=req.task_grid_id,
-                    user_id=current_user.id,
-                    class_id=ann.class_id,
-                    class_name=ann.class_name,
-                    geom_geojson=json.dumps(mapping(p0)),
-                    area_sqm=area_sqm
-                ))
-
-                # Remaining pieces get new class
-                for p in pieces[1:]:
-                    area_sqm = p.area * (111320.0 ** 2)
+    # CASE 1: Grid has NO annotations yet! Slices task grid itself
+    if len(annotations) == 0 and task_poly:
+        cut_blade = blade if task_poly.intersects(blade) else extended_blade
+        if task_poly.intersects(cut_blade):
+            try:
+                res = split(task_poly, cut_blade)
+                pieces = _extract_polygons(res)
+                if len(pieces) > 1:
+                    split_occurred = True
+                    p0 = pieces[0]
+                    area_sqm = p0.area * (111320.0 ** 2)
                     db.add(Annotation(
                         task_grid_id=req.task_grid_id,
                         user_id=current_user.id,
-                        class_id=new_class_id,
-                        class_name=new_class_name,
-                        geom_geojson=json.dumps(mapping(p)),
+                        class_id=0,
+                        class_name="Belum Terklasifikasi",
+                        geom_geojson=json.dumps(mapping(p0)),
                         area_sqm=area_sqm
                     ))
-        except Exception:
-            continue
+                    for p in pieces[1:]:
+                        area_sqm = p.area * (111320.0 ** 2)
+                        db.add(Annotation(
+                            task_grid_id=req.task_grid_id,
+                            user_id=current_user.id,
+                            class_id=new_class_id,
+                            class_name=new_class_name,
+                            geom_geojson=json.dumps(mapping(p)),
+                            area_sqm=area_sqm
+                        ))
+            except Exception:
+                pass
+
+    # CASE 2: Grid has existing annotations
+    if not split_occurred and annotations:
+        for ann in annotations:
+            try:
+                poly = shape(json.loads(ann.geom_geojson))
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+                    
+                if not poly.intersects(blade) and not poly.intersects(extended_blade):
+                    continue
+
+                # Try original blade first, then extended blade
+                res = None
+                if poly.intersects(blade):
+                    res = split(poly, blade)
+                pieces = _extract_polygons(res) if res else []
+                
+                if len(pieces) <= 1 and poly.intersects(extended_blade):
+                    res = split(poly, extended_blade)
+                    pieces = _extract_polygons(res)
+
+                if len(pieces) > 1:
+                    split_occurred = True
+                    db.delete(ann)
+
+                    # Piece 0 gets original class
+                    p0 = pieces[0]
+                    area_sqm = p0.area * (111320.0 ** 2)
+                    db.add(Annotation(
+                        task_grid_id=req.task_grid_id,
+                        user_id=current_user.id,
+                        class_id=ann.class_id,
+                        class_name=ann.class_name,
+                        geom_geojson=json.dumps(mapping(p0)),
+                        area_sqm=area_sqm
+                    ))
+
+                    # Remaining pieces get new class
+                    for p in pieces[1:]:
+                        area_sqm = p.area * (111320.0 ** 2)
+                        db.add(Annotation(
+                            task_grid_id=req.task_grid_id,
+                            user_id=current_user.id,
+                            class_id=new_class_id,
+                            class_name=new_class_name,
+                            geom_geojson=json.dumps(mapping(p)),
+                            area_sqm=area_sqm
+                        ))
+            except Exception:
+                continue
 
     if not split_occurred:
         raise HTTPException(status_code=400, detail="Garis pemotong harus melintasi batas poligon dari ujung ke ujung.")

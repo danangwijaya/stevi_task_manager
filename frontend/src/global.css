@@ -1,0 +1,32 @@
+/* ==========================================================================
+   Quasar CSS Reset: Fix flex-wrap breaking Tailwind flex layouts
+   Quasar declares: .row, .column, .flex { display: flex; flex-wrap: wrap; }
+   This breaks all standard Tailwind flex layouts (e.g. flex flex-col).
+   ========================================================================== */
+.flex {
+  flex-wrap: nowrap;
+}
+
+.flex-wrap {
+  flex-wrap: wrap !important;
+}
+
+.flex-nowrap {
+  flex-wrap: nowrap !important;
+}
+
+/* Ensure scrollbars look sleek and consistent */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

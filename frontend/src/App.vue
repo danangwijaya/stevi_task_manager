@@ -1,7 +1,7 @@
 <template>
-  <div class="min-h-screen bg-slate-50 text-slate-800 flex flex-col selection:bg-rose-500 selection:text-white font-sans antialiased">
-    <Navbar v-if="$route.path !== '/login'" />
-    <main class="flex-1">
+  <div class="h-screen w-screen bg-slate-50 text-slate-800 flex flex-col flex-nowrap selection:bg-rose-500 selection:text-white font-sans antialiased overflow-hidden">
+    <Navbar v-if="$route.path !== '/login'" class="shrink-0" />
+    <main class="flex-1 flex flex-col flex-nowrap min-h-0 overflow-y-auto relative">
       <router-view />
     </main>
   </div>

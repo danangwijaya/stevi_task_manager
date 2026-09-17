@@ -13,12 +13,13 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isAuthenticated: (state) => !!state.token,
     isAdmin: (state) => (state.user?.role || '').toLowerCase() === 'admin',
-    isDosen: (state) => (state.user?.role || '').toLowerCase() === 'dosen',
-    isReviewer: (state) => ['admin', 'dosen'].includes((state.user?.role || '').toLowerCase()),
+    isDosen: (state) => ['dosen', 'supervisi'].includes((state.user?.role || '').toLowerCase()),
+    isSupervisi: (state) => ['dosen', 'supervisi'].includes((state.user?.role || '').toLowerCase()),
+    isReviewer: (state) => ['admin', 'dosen', 'supervisi'].includes((state.user?.role || '').toLowerCase()),
     roleTitle: (state) => {
       const role = (state.user?.role || '').toLowerCase()
       if (role === 'admin') return 'Lead Administrator'
-      if (role === 'dosen') return 'Dosen / QC Reviewer'
+      if (role === 'dosen' || role === 'supervisi') return 'Supervisi'
       return 'Anotator / Mapper'
     },
     userName: (state) => state.user?.full_name || state.user?.username || 'User'

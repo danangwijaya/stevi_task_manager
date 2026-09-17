@@ -15,7 +15,7 @@
           >
             <ShieldCheck v-if="authStore.isReviewer" :size="13" class="text-amber-600" />
             <Eye v-else :size="13" class="text-rose-600" />
-            <span>{{ authStore.isReviewer ? (authStore.isAdmin ? 'Akses Reviewer (Admin)' : 'Akses Reviewer (Dosen)') : 'Mode Lihat Kontributor' }}</span>
+            <span>{{ authStore.isReviewer ? (authStore.isAdmin ? 'Akses Admin' : 'Akses Supervisi') : 'Mode Lihat Kontributor' }}</span>
           </span>
         </div>
         <p class="text-xs text-slate-500 max-w-2xl leading-relaxed">
@@ -42,7 +42,7 @@
     <div v-if="!authStore.isReviewer" class="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex items-center justify-between gap-3 shadow-2xs">
       <div class="flex items-center gap-2">
         <Info :size="16" class="text-amber-700 shrink-0" />
-        <span><b>Mode Pantau Kontributor:</b> Anda dapat melihat visualisasi peta dan status antrean QC. Hak persetujuan (Approve) dan permintaan revisi hanya dimiliki oleh Dosen / Administrator Reviewer.</span>
+        <span><b>Mode Pantau Kontributor:</b> Anda dapat melihat visualisasi peta dan status antrean QC. Hak persetujuan (Approve) dan permintaan revisi hanya dimiliki oleh Tim Supervisi / Administrator.</span>
       </div>
     </div>
 

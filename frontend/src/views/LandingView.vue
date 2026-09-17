@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-full bg-white text-[#2c3038] font-sans flex flex-col selection:bg-[#d73f3f] selection:text-white">
+  <div class="min-h-full w-full bg-white text-[#2c3038] font-sans selection:bg-[#d73f3f] selection:text-white">
 
     <!-- HERO SECTION (High-Impact Satellite Imagery Banner) -->
     <section class="relative bg-[#1a1f2c] text-white min-h-[420px] lg:min-h-[460px] flex items-center overflow-hidden">

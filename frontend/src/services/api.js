@@ -74,8 +74,10 @@ export default {
   createProject: (projectData) => api.post('/tasks/projects', projectData),
   updateProject: (projectId, projectData) => api.put(`/tasks/projects/${projectId}`, projectData),
   deleteProject: (projectId) => api.delete(`/tasks/projects/${projectId}`),
+  resetProjectProgress: (projectId) => api.post(`/tasks/projects/${projectId}/reset`),
   getTasks: (params) => api.get('/tasks/', { params }),
   getTaskDetail: (taskId) => api.get(`/tasks/${taskId}`),
+  getTaskSiblings: (taskId) => api.get(`/tasks/${taskId}/siblings`),
   createTask: (taskData) => api.post('/tasks/', taskData),
   assignTask: (taskId, userId) => api.post(`/tasks/${taskId}/assign`, { user_id: userId }),
   claimTask: (taskId) => api.post(`/tasks/${taskId}/claim`),
@@ -135,8 +137,8 @@ export default {
   // Dynamic Sentinel-2 COG Raster Layer (2025, 2022, 2018+)
   getRasterYears: () => api.get('/raster/years'),
   getGridRasterInfo: (gridCode) => api.get(`/raster/info/${gridCode}`),
-  getGridRasterTileUrl: (year, gridCode, mode = 'rgb') =>
-    `${getBaseUrl()}/raster/tiles/${year}/${gridCode}/{z}/{x}/{y}.png?mode=${mode}`,
-  getMosaicRasterTileUrl: (year, mode = 'rgb') =>
-    `${getBaseUrl()}/raster/tiles/${year}/{z}/{x}/{y}.png?mode=${mode}`
+  getGridRasterTileUrl: (year, gridCode, mode = 'rgb', gamma = 1.0) =>
+    `${getBaseUrl()}/raster/tiles/${year}/${gridCode}/{z}/{x}/{y}.png?mode=${mode}&gamma=${gamma}`,
+  getMosaicRasterTileUrl: (year, mode = 'rgb', gamma = 1.0) =>
+    `${getBaseUrl()}/raster/tiles/${year}/{z}/{x}/{y}.png?mode=${mode}&gamma=${gamma}`
 }

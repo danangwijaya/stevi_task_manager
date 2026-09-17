@@ -329,7 +329,9 @@ def create_user_by_admin(
         raise HTTPException(status_code=400, detail="Username atau email sudah digunakan")
     
     clean_role = (user_in.role or "annotator").strip().lower()
-    if clean_role not in ["admin", "dosen", "annotator"]:
+    if clean_role == "supervisi":
+        clean_role = "dosen"
+    elif clean_role not in ["admin", "dosen", "annotator"]:
         clean_role = "annotator"
 
     new_user = User(
@@ -404,6 +406,8 @@ def update_user_by_admin(
 
     if user_in.role is not None:
         clean_role = user_in.role.strip().lower()
+        if clean_role == "supervisi":
+            clean_role = "dosen"
         if clean_role in ["admin", "dosen", "annotator"]:
             # Prevent demoting the last admin
             if (user.role or "").lower() == "admin" and clean_role != "admin":

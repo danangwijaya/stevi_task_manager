@@ -6,6 +6,8 @@ import { Quasar, Notify } from 'quasar'
 import '@quasar/extras/material-icons/material-icons.css'
 // Import Quasar css
 import 'quasar/dist/quasar.css'
+// Import global css override for Quasar flex reset
+import './global.css'
 
 import App from './App.vue'
 import router from './router'

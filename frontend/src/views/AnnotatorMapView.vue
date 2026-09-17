@@ -1,9 +1,9 @@
 <template>
-  <div class="h-[calc(100vh-57px)] w-full flex bg-slate-100 text-slate-800 overflow-hidden font-sans">
+  <div class="h-full min-h-full w-full flex bg-slate-100 text-slate-800 overflow-hidden font-sans">
     
     <!-- LEFT SIDEBAR: Task Selector, Sentinel-2 Layers, Settings -->
     <aside
-      class="bg-white border-r border-slate-200 flex flex-col z-10 shadow-sm shrink-0 overflow-y-auto select-none"
+      class="h-full max-h-full min-h-0 bg-white border-r border-slate-200 flex flex-col z-10 shadow-sm shrink-0 overflow-y-auto select-none"
       :style="{ width: `${leftSidebarWidth}px` }"
     >
       <!-- Task Selection Header -->
@@ -117,7 +117,7 @@
       </div>
 
       <!-- Sentinel-2 Layer Control Section -->
-      <div class="flex-1 p-3.5 space-y-3 overflow-y-auto">
+      <div class="p-3.5 space-y-3 shrink-0">
         <div class="flex items-center justify-between pb-1.5 border-b border-slate-200">
           <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
             <Satellite :size="13" class="text-slate-400" />
@@ -218,6 +218,18 @@
             </button>
           </div>
 
+          <!-- Tombol Buka Panel Citra & Spektral -->
+          <button
+            @click="showImageryPanel = !showImageryPanel"
+            class="px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-xs cursor-pointer"
+            :class="showImageryPanel ? 'bg-rose-50 text-rose-700 border-rose-300 ring-2 ring-rose-400/20' : 'bg-white text-slate-700 hover:bg-slate-50 border-slate-300'"
+            title="Buka Pengaturan Komposit Citra, Kontras, Gamma & Spektral"
+          >
+            <SlidersHorizontal :size="13" :class="showImageryPanel ? 'text-rose-600' : 'text-slate-500'" />
+            <span class="hidden md:inline">Atur Citra & Kontras</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-bold hidden lg:inline">{{ currentLayerBadge }}</span>
+          </button>
+
           <!-- Topology Check Button -->
           <button
             @click="runTopologyCheck"
@@ -302,6 +314,42 @@
         </button>
       </div>
 
+      <!-- Smart Multi-Year Copy Banner (Shown when current grid has 0 annotations, but another year has annotations) -->
+      <div
+        v-if="bestCopyCandidate && showSmartCopyBanner"
+        class="bg-indigo-50 border-b border-indigo-200 px-4 py-2.5 flex items-center justify-between text-xs text-indigo-950 z-10 shrink-0 shadow-xs animate-in fade-in duration-200"
+      >
+        <div class="flex items-center gap-2.5">
+          <div class="p-1.5 bg-indigo-100 text-indigo-700 rounded-xl shrink-0">
+            <Copy :size="15" />
+          </div>
+          <div>
+            <span class="font-bold text-indigo-950">Grid {{ currentYear }} Masih Kosong.</span>
+            <span class="text-indigo-800 text-[11px] ml-1">
+              Tersedia hasil digitasi dari tahun <b>{{ bestCopyCandidate.year }}</b> ({{ bestCopyCandidate.annotation_count }} poligon). Ingin salin sebagai acuan edit?
+            </span>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            @click="quickCopyFromSibling(bestCopyCandidate)"
+            :disabled="copyingAnnotations"
+            class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+          >
+            <RotateCw v-if="copyingAnnotations" :size="12" class="animate-spin" />
+            <Copy v-else :size="12" />
+            <span>Salin dari Tahun {{ bestCopyCandidate.year }}</span>
+          </button>
+          <button
+            @click="showSmartCopyBanner = false"
+            class="px-2.5 py-1 text-slate-500 hover:text-slate-800 text-xs font-medium cursor-pointer rounded-lg hover:bg-indigo-100/50 transition-colors"
+            title="Biarkan grid kosong untuk menggambar dari nol"
+          >
+            Mulai dari Grid Kosong
+          </button>
+        </div>
+      </div>
+
       <!-- Map & Floating Toolbox -->
       <div class="flex-1 relative w-full h-full">
         <!-- Floating Custom GIS Toolbar on Map Top-Left -->
@@ -335,7 +383,9 @@
             >
               <Scissors v-if="activeTool === 'split_line'" :size="15" class="text-rose-600" />
               <Layers v-else-if="activeTool === 'split_poly'" :size="15" class="text-rose-600" />
+              <LassoSelect v-else-if="activeTool === 'freehand_cut'" :size="15" class="text-rose-600" />
               <PenTool v-else-if="activeTool === 'draw_poly'" :size="15" class="text-rose-600" />
+              <Spline v-else-if="activeTool === 'freehand_poly'" :size="15" class="text-rose-600" />
               <Combine v-else-if="activeTool === 'merge'" :size="15" class="text-indigo-600" />
               <Edit3 v-else-if="activeTool === 'edit'" :size="15" class="text-amber-500" />
               <Trash2 v-else-if="activeTool === 'delete'" :size="15" class="text-rose-600" />
@@ -378,15 +428,37 @@
               <span class="text-[11px]">Potong Area</span>
             </button>
 
+            <!-- Tool: Freehand Cut (Lasso Cookie Cutter) -->
+            <button
+              @click="setDigitizeMode('freehand_cut')"
+              class="p-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer text-left"
+              :class="activeTool === 'freehand_cut' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'"
+              title="Potong Bebas: Tahan & lingkari area untuk memotong poligon secara instan tanpa klik berulang"
+            >
+              <LassoSelect :size="15" />
+              <span class="text-[11px]">Potong Bebas</span>
+            </button>
+
             <!-- Tool: Draw Standard Polygon -->
             <button
               @click="setDigitizeMode('draw_poly')"
               class="p-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer text-left"
               :class="activeTool === 'draw_poly' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'"
-              title="Gambar Poligon Baru"
+              title="Gambar Poligon Biasa (Klik titik demi titik, Backspace untuk batalkan titik)"
             >
               <PenTool :size="15" />
               <span class="text-[11px]">Gambar Poligon</span>
+            </button>
+
+            <!-- Tool: Freehand / Stream Polygon Draw -->
+            <button
+              @click="setDigitizeMode('freehand_poly')"
+              class="p-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer text-left"
+              :class="activeTool === 'freehand_poly' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'"
+              title="Freehand Stream: Tahan & geser mouse untuk menggambar kurva meliuk (sungai/hutan) secara mengalir & mulus"
+            >
+              <Spline :size="15" />
+              <span class="text-[11px]">Freehand Stream</span>
             </button>
 
             <!-- Tool: Merge Polygons -->
@@ -509,6 +581,18 @@
                 </button>
               </div>
             </div>
+
+            <!-- Keyboard Quick Tips (Smooth GIS Experience) -->
+            <div class="px-2 py-1.5 bg-slate-100/90 rounded-xl text-[9px] text-slate-500 leading-tight space-y-1 border border-slate-200/60">
+              <div class="flex items-center justify-between">
+                <span>Tahan <kbd class="px-1 py-0.2 bg-white rounded border border-slate-300 font-mono text-slate-700 font-bold">Spasi</kbd></span>
+                <span class="text-slate-400">Intip Citra</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span><kbd class="px-1 py-0.2 bg-white rounded border border-slate-300 font-mono text-slate-700 font-bold">⌫ Del</kbd></span>
+                <span class="text-slate-400">Undo Titik</span>
+              </div>
+            </div>
           </template>
         </div>
 
@@ -530,8 +614,344 @@
           </button>
         </div>
 
+        <!-- Floating Map Top-Right Controls: Imagery & Spectral Adjustment Panel -->
+        <div class="absolute top-4 right-4 z-20 flex flex-col flex-nowrap items-end gap-2 pointer-events-auto">
+          <!-- Trigger Button on Map -->
+          <button
+            @click="showImageryPanel = !showImageryPanel"
+            class="flex items-center gap-2 px-3 py-2 bg-white/95 hover:bg-white text-slate-800 rounded-2xl shadow-lg border border-slate-200/90 backdrop-blur-md text-xs font-bold transition-all hover:scale-102 active:scale-98 cursor-pointer"
+            :class="showImageryPanel ? 'ring-2 ring-rose-500 text-rose-600 bg-rose-50/90' : ''"
+            title="Buka Pengaturan Citra, Komposit, Kontras & Gamma"
+          >
+            <SlidersHorizontal :size="14" class="text-rose-600" />
+            <span class="font-bold">Citra & Spektral</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold border border-slate-200/80">{{ currentYear }}</span>
+          </button>
+
+          <!-- Floating Panel Citra & Spektral -->
+          <div
+            v-if="showImageryPanel"
+            class="w-[360px] sm:w-[380px] max-w-[calc(100vw-32px)] bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col flex-nowrap max-h-[80vh] text-slate-800 text-xs animate-in fade-in zoom-in-95 duration-150"
+          >
+            <!-- Panel Header -->
+            <div class="px-3.5 py-2.5 bg-slate-50/90 border-b border-slate-200 flex items-center justify-between shrink-0">
+              <div class="flex items-center gap-2 text-rose-700 font-bold">
+                <Satellite :size="15" />
+                <span class="text-xs text-slate-900 font-extrabold">Kontrol Citra & Spektral</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <button
+                  @click="resetImagerySettings"
+                  class="px-2 py-1 text-[10px] font-bold text-slate-600 hover:text-rose-600 rounded-lg hover:bg-slate-200/60 transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Reset Kontras, Kecerahan & Gamma ke Standar"
+                >
+                  <RefreshCcw :size="11" />
+                  <span>Reset Visual</span>
+                </button>
+                <button
+                  @click="showImageryPanel = false"
+                  class="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors cursor-pointer"
+                >
+                  <X :size="14" />
+                </button>
+              </div>
+            </div>
+
+            <!-- Tab Switcher -->
+            <div class="p-1.5 bg-slate-100/80 border-b border-slate-200 flex items-center gap-1 shrink-0 text-[11px] font-bold">
+              <button
+                @click="imageryActiveTab = 'layers'"
+                class="flex-1 py-1.5 rounded-lg transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer"
+                :class="imageryActiveTab === 'layers' ? 'bg-white text-rose-600 shadow-2xs' : 'text-slate-600 hover:text-slate-900'"
+              >
+                <Layers :size="13" />
+                <span>Pilihan Komposit ({{ layerOptions.length }})</span>
+              </button>
+              <button
+                @click="imageryActiveTab = 'contrast'"
+                class="flex-1 py-1.5 rounded-lg transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer"
+                :class="imageryActiveTab === 'contrast' ? 'bg-white text-rose-600 shadow-2xs' : 'text-slate-600 hover:text-slate-900'"
+              >
+                <Sliders :size="13" />
+                <span>Kontras, Gamma & Visual</span>
+              </button>
+            </div>
+
+            <!-- Panel Body (Scrollable) -->
+            <div class="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-4 flex flex-col flex-nowrap">
+              <!-- TAB 1: Pilihan Layer Komposit -->
+              <div v-if="imageryActiveTab === 'layers'" class="space-y-3">
+                <!-- Tahun Komposit -->
+                <div class="bg-slate-50/80 p-2.5 rounded-xl border border-slate-200">
+                  <div class="flex items-center justify-between mb-1.5 text-[11px]">
+                    <span class="font-bold text-slate-700">Tahun Citra Sentinel-2:</span>
+                    <span class="font-mono font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">{{ currentYear }}</span>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <button
+                      v-for="yr in availableRasterYears"
+                      :key="yr"
+                      @click="setYear(yr)"
+                      class="flex-1 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer text-center"
+                      :class="currentYear === yr ? 'bg-rose-600 text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'"
+                    >
+                      {{ yr }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Layer Choices -->
+                <div class="space-y-1.5">
+                  <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pilih Komposit Spektral:</div>
+                  <button
+                    v-for="layer in layerOptions"
+                    :key="layer.id"
+                    @click="setLayer(layer.id)"
+                    class="w-full text-left p-2.5 rounded-xl transition-all border flex items-center justify-between group cursor-pointer"
+                    :class="currentLayer === layer.id
+                      ? 'bg-rose-50/90 border-rose-400 text-rose-900 shadow-xs ring-1 ring-rose-400/50'
+                      : 'bg-white/80 border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'"
+                  >
+                    <div class="flex items-center gap-2.5">
+                      <component :is="layer.icon" :size="16" :class="layer.colorClass" class="shrink-0" />
+                      <div>
+                        <div class="text-xs font-bold leading-tight">{{ layer.name }}</div>
+                        <div class="text-[9px] text-slate-500 leading-tight mt-0.5">{{ layer.desc }}</div>
+                      </div>
+                    </div>
+                    <div
+                      class="w-3 h-3 rounded-full border shrink-0 flex items-center justify-center"
+                      :class="currentLayer === layer.id ? 'bg-rose-600 border-rose-700 text-white' : 'border-slate-300 bg-white'"
+                    >
+                      <Check v-if="currentLayer === layer.id" :size="9" class="stroke-[3]" />
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <!-- TAB 2: Kontras, Gamma & Visual Adjustments -->
+              <div v-if="imageryActiveTab === 'contrast'" class="space-y-4">
+                <!-- Preset Cepat -->
+                <div class="space-y-1.5">
+                  <div class="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                    <span class="flex items-center gap-1.5"><Sparkles :size="13" class="text-amber-500" /> Preset Spektral Cepat:</span>
+                  </div>
+                  <div class="grid grid-cols-2 gap-1.5 text-[11px]">
+                    <button
+                      @click="applyPreset('normal')"
+                      class="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold text-left flex items-center justify-between cursor-pointer"
+                    >
+                      <span>🔄 Normal</span>
+                      <span class="text-[9px] text-slate-400">100%</span>
+                    </button>
+                    <button
+                      @click="applyPreset('high_contrast')"
+                      class="p-2 rounded-xl border border-rose-200 bg-rose-50/50 hover:bg-rose-50 text-rose-700 font-bold text-left flex items-center justify-between cursor-pointer"
+                    >
+                      <span>⚡ Kontras Tinggi</span>
+                      <span class="text-[9px] text-rose-500">Tegas</span>
+                    </button>
+                    <button
+                      @click="applyPreset('vegetation')"
+                      class="p-2 rounded-xl border border-emerald-200 bg-emerald-50/50 hover:bg-emerald-50 text-emerald-800 font-bold text-left flex items-center justify-between cursor-pointer"
+                    >
+                      <span>🌲 Penguat Vegetasi</span>
+                      <span class="text-[9px] text-emerald-600">Sawit/Hutan</span>
+                    </button>
+                    <button
+                      @click="applyPreset('haze')"
+                      class="p-2 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-50 text-blue-800 font-bold text-left flex items-center justify-between cursor-pointer"
+                    >
+                      <span>⛅ Tembus Kabut</span>
+                      <span class="text-[9px] text-blue-600">Awan Tipis</span>
+                    </button>
+                    <button
+                      @click="applyPreset('water')"
+                      class="col-span-2 p-2 rounded-xl border border-cyan-200 bg-cyan-50/50 hover:bg-cyan-50 text-cyan-900 font-bold text-left flex items-center justify-between cursor-pointer"
+                    >
+                      <span>💧 Fokus Air, Sungai & Tambak</span>
+                      <span class="text-[9px] text-cyan-600">Basah</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Sliders Section -->
+                <div class="bg-slate-50/80 p-3 rounded-xl border border-slate-200 space-y-3.5">
+                  <!-- Kontras Slider -->
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between text-xs font-bold">
+                      <span class="text-slate-700 flex items-center gap-1.5">
+                        <Contrast :size="13" class="text-slate-500" />
+                        <span>Kontras (Contrast):</span>
+                      </span>
+                      <span class="font-mono text-rose-600 font-extrabold bg-white px-2 py-0.5 rounded border border-slate-200">{{ imagerySettings.contrast }}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="50"
+                      max="200"
+                      step="2"
+                      v-model.number="imagerySettings.contrast"
+                      class="w-full accent-rose-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                    />
+                    <div class="flex justify-between text-[9px] text-slate-400 font-mono">
+                      <span>50% (Lembut)</span>
+                      <span>100% (Standar)</span>
+                      <span>200% (Ekstrem)</span>
+                    </div>
+                  </div>
+
+                  <!-- Kecerahan Slider -->
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between text-xs font-bold">
+                      <span class="text-slate-700 flex items-center gap-1.5">
+                        <Sun :size="13" class="text-amber-500" />
+                        <span>Kecerahan (Brightness):</span>
+                      </span>
+                      <span class="font-mono text-amber-600 font-extrabold bg-white px-2 py-0.5 rounded border border-slate-200">{{ imagerySettings.brightness }}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="50"
+                      max="200"
+                      step="2"
+                      v-model.number="imagerySettings.brightness"
+                      class="w-full accent-amber-500 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                    />
+                    <div class="flex justify-between text-[9px] text-slate-400 font-mono">
+                      <span>50% (Gelap)</span>
+                      <span>100%</span>
+                      <span>200% (Terang)</span>
+                    </div>
+                  </div>
+
+                  <!-- Gamma Radiometrik Slider -->
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between text-xs font-bold">
+                      <span class="text-slate-700 flex items-center gap-1.5">
+                        <SlidersHorizontal :size="13" class="text-indigo-500" />
+                        <span>Koreksi Gamma:</span>
+                      </span>
+                      <span class="font-mono text-indigo-600 font-extrabold bg-white px-2 py-0.5 rounded border border-slate-200">{{ imagerySettings.gamma.toFixed(2) }}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="2.5"
+                      step="0.05"
+                      v-model.number="imagerySettings.gamma"
+                      class="w-full accent-indigo-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                    />
+                    <div class="flex justify-between text-[9px] text-slate-400 font-mono">
+                      <span>0.5x (Tekan Sorotan)</span>
+                      <span>1.0x</span>
+                      <span>2.5x (Angkat Bayangan)</span>
+                    </div>
+                  </div>
+
+                  <!-- Saturasi Warna Slider -->
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between text-xs font-bold">
+                      <span class="text-slate-700 flex items-center gap-1.5">
+                        <Palette :size="13" class="text-emerald-500" />
+                        <span>Saturasi Warna:</span>
+                      </span>
+                      <span class="font-mono text-emerald-600 font-extrabold bg-white px-2 py-0.5 rounded border border-slate-200">{{ imagerySettings.saturation }}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="250"
+                      step="5"
+                      v-model.number="imagerySettings.saturation"
+                      class="w-full accent-emerald-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                    />
+                    <div class="flex justify-between text-[9px] text-slate-400 font-mono">
+                      <span>0% (Hitam Putih)</span>
+                      <span>100%</span>
+                      <span>250% (Sangat Pekat)</span>
+                    </div>
+                  </div>
+
+                  <!-- Opasitas Citra -->
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between text-xs font-bold">
+                      <span class="text-slate-700 flex items-center gap-1.5">
+                        <Eye :size="13" class="text-slate-500" />
+                        <span>Opasitas Layer Citra:</span>
+                      </span>
+                      <span class="font-mono text-slate-700 font-extrabold bg-white px-2 py-0.5 rounded border border-slate-200">{{ imagerySettings.opacity }}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="20"
+                      max="100"
+                      step="5"
+                      v-model.number="imagerySettings.opacity"
+                      class="w-full accent-slate-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                    />
+                  </div>
+
+                  <!-- Opasitas Poligon Anotasi -->
+                  <div class="space-y-1 pt-2 border-t border-slate-200">
+                    <div class="flex items-center justify-between text-xs font-bold">
+                      <span class="text-slate-700 flex items-center gap-1.5">
+                        <Shapes :size="13" class="text-purple-500" />
+                        <span>Opasitas Poligon Anotasi:</span>
+                      </span>
+                      <span class="font-mono text-purple-600 font-extrabold bg-white px-2 py-0.5 rounded border border-slate-200">{{ Math.round(polygonOpacity * 100) }}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      v-model.number="polygonOpacity"
+                      class="w-full accent-purple-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                    />
+                    <div class="flex items-center gap-1 pt-1">
+                      <button
+                        @click="setOpacityPreset(0)"
+                        class="flex-1 py-1 rounded text-[10px] font-bold border transition-all cursor-pointer text-center"
+                        :class="polygonOpacity === 0 ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'"
+                      >
+                        0% (Garis)
+                      </button>
+                      <button
+                        @click="setOpacityPreset(0.5)"
+                        class="flex-1 py-1 rounded text-[10px] font-bold border transition-all cursor-pointer text-center"
+                        :class="polygonOpacity === 0.5 ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'"
+                      >
+                        50%
+                      </button>
+                      <button
+                        @click="setOpacityPreset(0.85)"
+                        class="flex-1 py-1 rounded text-[10px] font-bold border transition-all cursor-pointer text-center"
+                        :class="polygonOpacity === 0.85 ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'"
+                      >
+                        85%
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Leaflet Map Container -->
         <div id="map-container" class="w-full h-full z-0"></div>
+
+        <!-- SVG Gamma Filter Definition for Leaflet Tile GPU Filtering -->
+        <svg class="sr-only" aria-hidden="true" style="position: absolute; width: 0; height: 0; pointer-events: none; overflow: hidden;">
+          <filter id="raster-gamma-filter" color-interpolation-filters="sRGB">
+            <feComponentTransfer>
+              <feFuncR type="gamma" :exponent="imagerySettings.gamma ? (1 / imagerySettings.gamma).toFixed(3) : 1" amplitude="1" offset="0" />
+              <feFuncG type="gamma" :exponent="imagerySettings.gamma ? (1 / imagerySettings.gamma).toFixed(3) : 1" amplitude="1" offset="0" />
+              <feFuncB type="gamma" :exponent="imagerySettings.gamma ? (1 / imagerySettings.gamma).toFixed(3) : 1" amplitude="1" offset="0" />
+            </feComponentTransfer>
+          </filter>
+        </svg>
 
         <!-- Floating Live Map Info Pill (Zoom, Representative Scale, Coordinates) -->
         <div class="absolute bottom-3 left-48 z-10 hidden sm:flex items-center gap-2 pointer-events-none">
@@ -571,7 +991,7 @@
 
     <!-- RIGHT SIDEBAR: 12 Land Cover Classes & Polygons List -->
     <aside
-      class="bg-white border-l border-slate-200 flex flex-col z-10 shadow-sm shrink-0 overflow-y-auto select-none"
+      class="h-full max-h-full min-h-0 bg-white border-l border-slate-200 flex flex-col z-10 shadow-sm shrink-0 overflow-y-auto select-none"
       :style="{ width: `${rightSidebarWidth}px` }"
     >
       <!-- Tabs: 12 Kelas vs Poligon List -->
@@ -786,7 +1206,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import L from 'leaflet'
 import '@geoman-io/leaflet-geoman-free'
@@ -819,6 +1239,8 @@ import {
   Scissors,
   Layers,
   PenTool,
+  Spline,
+  LassoSelect,
   Combine,
   Edit3,
   Trash2,
@@ -827,8 +1249,15 @@ import {
   MousePointer,
   Eye,
   EyeOff,
-  Compass
+  Compass,
+  SlidersHorizontal,
+  Sun,
+  Contrast,
+  Sliders,
+  Sparkles,
+  RefreshCcw
 } from 'lucide-vue-next'
+import * as turf from '@turf/turf'
 import { useAuthStore } from '../stores/auth'
 import { useTasksStore } from '../stores/tasks'
 import { useAnnotationsStore } from '../stores/annotations'
@@ -848,6 +1277,22 @@ const availableRasterYears = ref([2025, 2022])
 const polygonOpacity = ref(0.6)
 const isToolboxCollapsed = ref(false)
 const rightTab = ref('classes') // 'classes' | 'polygons'
+
+// ─── IMAGERY ENHANCEMENT & SPECTRAL CONTROLS ─────────────
+const showImageryPanel = ref(false)
+const imageryActiveTab = ref('layers') // 'layers' | 'contrast'
+const imagerySettings = ref({
+  brightness: 100, // 50% - 200%
+  contrast: 100,   // 50% - 200%
+  gamma: 1.0,      // 0.5 - 2.5
+  saturation: 100, // 0% - 250%
+  opacity: 100     // 20% - 100%
+})
+
+const currentLayerBadge = computed(() => {
+  const match = layerOptions.find(l => l.id === currentLayer.value)
+  return match ? match.name.split(' ')[0] : 'S2 RGB'
+})
 
 // ─── FLEXIBLE DRAGGABLE SIDEBARS ─────────────────────────
 const leftSidebarWidth = ref(280)
@@ -892,6 +1337,8 @@ const toastMessage = ref('')
 const showCopyModal = ref(false)
 const selectedSourceTaskId = ref(null)
 const copyingAnnotations = ref(false)
+const taskSiblings = ref([])
+const showSmartCopyBanner = ref(true)
 const showGuide = ref(false)
 const clickedFeatureIdx = ref(null)
 const topologyResult = ref(null)
@@ -982,11 +1429,54 @@ const restoreFeaturesToMap = (snapshotFeatures) => {
   })
 }
 
-// Global Keyboard Shortcuts (Ctrl+Z, Ctrl+Y, Cmd+Z, Cmd+Shift+Z)
+// Global Keyboard Shortcuts & Micro-Interactions
+let isSpacePeeking = false
+let savedOpacityBeforePeek = 0.6
+
 const handleKeydown = (e) => {
+  // If user is typing in an input, textarea, or select, don't hijack shortcuts
+  const activeTag = document.activeElement?.tagName?.toLowerCase()
+  if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') {
+    return
+  }
+
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
   const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey
 
+  // 1. Quick Peek Satellite: Hold Space to temporarily hide polygons
+  if (e.code === 'Space' && !e.repeat && !isSpacePeeking) {
+    e.preventDefault()
+    isSpacePeeking = true
+    savedOpacityBeforePeek = polygonOpacity.value > 0 ? polygonOpacity.value : 0.6
+    polygonOpacity.value = 0
+    updateOpacity()
+    showToast('👁️ Tahan Spasi: Mengintip citra satelit asli (Lepas untuk kembali)')
+    return
+  }
+
+  // 2. Single-Vertex Undo: Backspace / Delete during active polygon or line drawing
+  if (e.key === 'Backspace' || e.key === 'Delete') {
+    if (map && map.pm && map.pm.Draw) {
+      const activeShape = map.pm.Draw.getActiveShape?.()
+      if (activeShape && map.pm.Draw[activeShape]?._removeLastVertex) {
+        e.preventDefault()
+        map.pm.Draw[activeShape]._removeLastVertex()
+        showToast('↩️ Titik terakhir dibatalkan (Backspace)')
+        return
+      }
+    }
+  }
+
+  // 3. Escape key: cancel active draw mode or reset to pointer
+  if (e.key === 'Escape') {
+    if (activeTool.value) {
+      setDigitizeMode(null)
+      showToast('👆 Mode dinonaktifkan (Kembali ke Pilih Poligon)')
+      return
+    }
+  }
+
+  // 4. History Undo / Redo
   if (cmdOrCtrl && e.key.toLowerCase() === 'z') {
     e.preventDefault()
     if (e.shiftKey) {
@@ -997,6 +1487,15 @@ const handleKeydown = (e) => {
   } else if (cmdOrCtrl && e.key.toLowerCase() === 'y') {
     e.preventDefault()
     redo()
+  }
+}
+
+const handleKeyup = (e) => {
+  if (e.code === 'Space' && isSpacePeeking) {
+    e.preventDefault()
+    isSpacePeeking = false
+    polygonOpacity.value = savedOpacityBeforePeek > 0 ? savedOpacityBeforePeek : 0.6
+    updateOpacity()
   }
 }
 
@@ -1073,6 +1572,55 @@ const getTileUrl = (layerType, year) => {
   }
 }
 
+const applyImageryFilter = () => {
+  const { brightness, contrast, saturation, opacity } = imagerySettings.value
+  const container = tileLayer?.getContainer?.() || arcgisLayer?.getContainer?.()
+  if (container) {
+    container.style.filter = `url(#raster-gamma-filter) brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`
+    container.style.opacity = `${opacity / 100}`
+  }
+}
+
+const resetImagerySettings = () => {
+  imagerySettings.value = {
+    brightness: 100,
+    contrast: 100,
+    gamma: 1.0,
+    saturation: 100,
+    opacity: 100
+  }
+  applyImageryFilter()
+  showToast('Pengaturan visual citra direset ke standar.')
+}
+
+const applyPreset = (preset) => {
+  if (preset === 'normal') {
+    imagerySettings.value = { brightness: 100, contrast: 100, gamma: 1.0, saturation: 100, opacity: 100 }
+    showToast('Preset: Normal')
+  } else if (preset === 'high_contrast') {
+    imagerySettings.value = { brightness: 105, contrast: 145, gamma: 0.9, saturation: 120, opacity: 100 }
+    showToast('Preset: Kontras Tinggi Aktif')
+  } else if (preset === 'vegetation') {
+    imagerySettings.value = { brightness: 102, contrast: 130, gamma: 1.15, saturation: 160, opacity: 100 }
+    showToast('Preset: Penguat Vegetasi Aktif')
+  } else if (preset === 'haze') {
+    imagerySettings.value = { brightness: 92, contrast: 160, gamma: 0.8, saturation: 115, opacity: 100 }
+    showToast('Preset: Tembus Kabut / Awan Tipis')
+  } else if (preset === 'water') {
+    imagerySettings.value = { brightness: 95, contrast: 150, gamma: 1.25, saturation: 85, opacity: 100 }
+    showToast('Preset: Fokus Air & Lahan Basah')
+  }
+  applyImageryFilter()
+}
+
+watch(
+  imagerySettings,
+  () => {
+    applyImageryFilter()
+  },
+  { deep: true }
+)
+
 const updateTileLayer = async () => {
   if (!map) return
 
@@ -1091,8 +1639,8 @@ const updateTileLayer = async () => {
     const yr = currentYear.value || 2025
     const currentGrid = tasksStore.currentTask?.grid_code
     const tileUrl = currentGrid
-      ? api.getGridRasterTileUrl(yr, currentGrid, mode)
-      : api.getMosaicRasterTileUrl(yr, mode)
+      ? api.getGridRasterTileUrl(yr, currentGrid, mode, imagerySettings.value.gamma)
+      : api.getMosaicRasterTileUrl(yr, mode, imagerySettings.value.gamma)
 
     tileLayer = L.tileLayer(tileUrl, {
       maxZoom: 20,
@@ -1100,6 +1648,7 @@ const updateTileLayer = async () => {
       attribution: `Citra Sentinel-2 Sumbar (${yr}) 10m Cloud-Optimized GeoTIFF`
     }).addTo(map)
     tileLayer.bringToBack()
+    applyImageryFilter()
     return
   }
 
@@ -1132,6 +1681,7 @@ const updateTileLayer = async () => {
       }).addTo(map)
 
       arcgisLayer.bringToBack()
+      applyImageryFilter()
       return
     } catch (err) {
       console.warn('Failed to load ArcGIS Sentinel-2 layer, falling back to EOX Sentinel-2:', err)
@@ -1139,7 +1689,7 @@ const updateTileLayer = async () => {
     }
   }
 
-  // 2. Standard Tile Layers (EOX Sentinel-2, Google Satellite, Esri World Imagery, OSM)
+  // 3. Standard Tile Layers (EOX Sentinel-2, Google Satellite, Esri World Imagery, OSM)
   const conf = getTileUrl(currentLayer.value, currentYear.value)
   tileLayer = L.tileLayer(conf.url, {
     maxZoom: 20,
@@ -1147,10 +1697,8 @@ const updateTileLayer = async () => {
     attribution: conf.attr
   }).addTo(map)
 
-  if (tileLayer.getContainer()) {
-    tileLayer.getContainer().style.filter = conf.filter
-  }
   tileLayer.bringToBack()
+  applyImageryFilter()
 }
 
 const classCounts = computed(() => {
@@ -1169,6 +1717,7 @@ const showToast = (msg) => {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('keyup', handleKeyup)
   
   // Fetch available dynamic raster years (2025, 2022, 2018+)
   try {
@@ -1184,7 +1733,12 @@ onMounted(async () => {
   }
 
   await annotationsStore.fetchClasses()
+  tasksStore.selectedYear = currentYear.value
   await tasksStore.fetchTasks()
+  if (tasksStore.tasks.length === 0) {
+    tasksStore.selectedYear = null
+    await tasksStore.fetchTasks()
+  }
 
   // Default selected class to first real class (Hutan Lahan Kering)
   const realClasses = annotationsStore.classes.filter(c => c.id !== 0)
@@ -1209,6 +1763,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('keyup', handleKeyup)
+  window.removeEventListener('mouseup', onMapMouseUp)
   if (map) {
     map.remove()
     map = null
@@ -1272,9 +1828,17 @@ const initMap = () => {
 
   map.pm.setGlobalOptions({
     snappable: true,
-    snapDistance: 15,
+    snapDistance: 22,
+    snapSegment: true,
+    snapMiddleMarkers: true,
     allowSelfIntersection: false
   })
+
+  // Freehand / Stream mode mouse bindings
+  map.on('mousedown', onMapMouseDown)
+  map.on('mousemove', onMapMouseMoveFreehand)
+  map.on('mouseup', onMapMouseUp)
+  window.addEventListener('mouseup', onMapMouseUp)
 
   // Hook creation events from Geoman
   map.on('pm:create', async (e) => {
@@ -1330,9 +1894,149 @@ const initMap = () => {
   })
 }
 
+// ── FREEHAND / STREAM CURVE DIGITIZING ───────────────────
+let isDrawingFreehand = false
+let freehandPoints = []
+let freehandPolyline = null
+
+const onMapMouseDown = (e) => {
+  if (!['freehand_poly', 'freehand_cut'].includes(activeTool.value)) return
+  if (e.originalEvent && e.originalEvent.button !== 0) return
+
+  isDrawingFreehand = true
+  if (map) map.dragging.disable()
+  freehandPoints = [e.latlng]
+
+  const currentClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
+  const strokeColor = activeTool.value === 'freehand_cut' ? '#E11D48' : (currentClass?.color || '#006400')
+
+  if (freehandPolyline && map) {
+    map.removeLayer(freehandPolyline)
+  }
+
+  freehandPolyline = L.polyline([e.latlng], {
+    color: strokeColor,
+    weight: activeTool.value === 'freehand_cut' ? 3.5 : 3,
+    dashArray: '4, 4',
+    opacity: 0.95
+  }).addTo(map)
+}
+
+const onMapMouseMoveFreehand = (e) => {
+  if (!isDrawingFreehand || (!['freehand_poly', 'freehand_cut'].includes(activeTool.value)) || !freehandPolyline || !map) return
+
+  const lastPoint = freehandPoints[freehandPoints.length - 1]
+  const p1 = map.latLngToLayerPoint(lastPoint)
+  const p2 = map.latLngToLayerPoint(e.latlng)
+
+  // Record point every 6 screen pixels for silky smooth natural curves
+  if (p1.distanceTo(p2) >= 6) {
+    freehandPoints.push(e.latlng)
+    freehandPolyline.setLatLngs(freehandPoints)
+  }
+}
+
+const onMapMouseUp = async () => {
+  if (!isDrawingFreehand || (!['freehand_poly', 'freehand_cut'].includes(activeTool.value))) return
+  isDrawingFreehand = false
+  if (map) map.dragging.enable()
+
+  if (freehandPolyline && map) {
+    map.removeLayer(freehandPolyline)
+    freehandPolyline = null
+  }
+
+  if (freehandPoints.length < 3) {
+    freehandPoints = []
+    return
+  }
+
+  try {
+    const coords = freehandPoints.map(p => [p.lng, p.lat])
+    // Close polygon ring
+    coords.push([coords[0][0], coords[0][1]])
+
+    let polyGeoJSON = turf.polygon([coords])
+    polyGeoJSON = turf.cleanCoords(polyGeoJSON)
+
+    // Unkink if there were minor self-intersections during freehand drawing
+    const unkinked = turf.unkinkPolygon(polyGeoJSON)
+    if (unkinked.features && unkinked.features.length > 0) {
+      let largest = unkinked.features[0]
+      let maxArea = turf.area(largest)
+      for (let i = 1; i < unkinked.features.length; i++) {
+        const a = turf.area(unkinked.features[i])
+        if (a > maxArea) {
+          maxArea = a
+          largest = unkinked.features[i]
+        }
+      }
+      polyGeoJSON = largest
+    }
+
+    // Micro-jitter smoothing filter: removes hand tremors while preserving true natural bounds
+    try {
+      polyGeoJSON = turf.simplify(polyGeoJSON, { tolerance: 0.00002, highQuality: true })
+    } catch (simpErr) {
+      console.warn('Simplification skipped:', simpErr)
+    }
+
+    // ── CASE 1: FREEHAND CUT (Lasso Cookie Cutter) ──
+    if (activeTool.value === 'freehand_cut') {
+      await handleSplitByPolygon(polyGeoJSON.geometry)
+      return
+    }
+
+    // ── CASE 2: FREEHAND CREATE NEW POLYGON ──
+    const currentClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
+    const layer = L.geoJSON(polyGeoJSON, {
+      style: () => ({
+        color: currentClass?.color || '#006400',
+        fillColor: currentClass?.color || '#006400',
+        fillOpacity: polygonOpacity.value,
+        weight: 2
+      })
+    }).getLayers()[0]
+
+    if (layer) {
+      layer.feature = layer.feature || { type: 'Feature', properties: {} }
+      layer.feature.properties = {
+        class_id: currentClass?.id || 1,
+        class_name: currentClass?.name || 'Hutan Lahan Kering',
+        color: currentClass?.color || '#006400'
+      }
+
+      styleLayer(layer, currentClass?.color || '#006400')
+      bindLayerEvents(layer)
+      featureGroup.addLayer(layer)
+      syncFeaturesFromMap()
+      pushHistory()
+      showToast(`✨ Poligon Freehand [${currentClass?.name}] berhasil dibuat!`)
+    }
+  } catch (err) {
+    console.error('Failed to process freehand action:', err)
+    showToast('⚠️ Gagal memproses freehand. Coba gambar kembali.')
+  } finally {
+    freehandPoints = []
+  }
+}
+
 // ─── GIS DIGITIZE TOOL MODES ─────────────────────────────
-const setDigitizeMode = (mode) => {
+const setDigitizeMode = (mode, force = false) => {
   if (!map) return
+
+  // Reset freehand drawing state
+  if (isDrawingFreehand) {
+    isDrawingFreehand = false
+    map.dragging.enable()
+  }
+  if (freehandPolyline) {
+    map.removeLayer(freehandPolyline)
+    freehandPolyline = null
+  }
+  if (map.getContainer()) {
+    map.getContainer().style.cursor = ['freehand_poly', 'freehand_cut'].includes(mode) ? 'crosshair' : ''
+  }
 
   // Always close any open popup and clear selection
   map.closePopup()
@@ -1343,7 +2047,7 @@ const setDigitizeMode = (mode) => {
   map.pm.disableGlobalRemovalMode()
   map.pm.disableGlobalDragMode()
 
-  if (activeTool.value === mode) {
+  if (!force && activeTool.value === mode) {
     activeTool.value = null
     showToast('👆 Mode Pilih Poligon Aktif')
     return
@@ -1357,11 +2061,20 @@ const setDigitizeMode = (mode) => {
       showToast('👆 Mode Pilih Poligon: Klik poligon untuk ubah kelas / inspeksi')
       break
 
+    case 'freehand_cut':
+      showToast('✂️ Mode Potong Bebas (Lasso Cut): Tahan & lingkari area untuk memotong poligon secara instan')
+      break
+
+    case 'freehand_poly':
+      showToast('〰️ Mode Freehand Stream: Klik & tahan mouse, lalu gerakkan untuk menggambar kurva mulus')
+      break
+
     case 'split_line':
       showToast('✂️ Mode Potong Garis: Tarik garis melintasi poligon dari batas ke batas')
       map.pm.enableDraw('Line', {
         snappable: true,
-        snapDistance: 15
+        snapDistance: 22,
+        snapSegment: true
       })
       break
 
@@ -1369,15 +2082,17 @@ const setDigitizeMode = (mode) => {
       showToast('🔪 Mode Potong Area: Gambar poligon untuk membagi area tanpa menghapus')
       map.pm.enableDraw('Polygon', {
         snappable: true,
-        snapDistance: 15
+        snapDistance: 22,
+        snapSegment: true
       })
       break
 
     case 'draw_poly':
-      showToast('✏️ Mode Gambar Poligon Baru')
+      showToast('✏️ Mode Gambar Poligon Baru (Klik titik demi titik, Backspace untuk batalkan titik)')
       map.pm.enableDraw('Polygon', {
         snappable: true,
-        snapDistance: 15
+        snapDistance: 22,
+        snapSegment: true
       })
       break
 
@@ -1400,6 +2115,7 @@ const setDigitizeMode = (mode) => {
 // Handle Line Split
 const handleSplitByLine = async (lineGeom) => {
   if (!selectedTaskId.value) return
+  const previousTool = activeTool.value
   showToast('Memproses pemotongan garis...')
 
   // Get active class for newly created slice
@@ -1412,13 +2128,16 @@ const handleSplitByLine = async (lineGeom) => {
   } catch (err) {
     alert(err.response?.data?.detail || 'Gagal memotong poligon. Pastikan garis melintasi batas poligon.')
   } finally {
-    setDigitizeMode('split_line') // Keep tool active for fast workflow
+    if (previousTool) {
+      setDigitizeMode(previousTool, true)
+    }
   }
 }
 
 // Handle Polygon Cut / Split
 const handleSplitByPolygon = async (cuttingGeom) => {
   if (!selectedTaskId.value) return
+  const previousTool = activeTool.value
   showToast('Memproses pemisahan area poligon...')
 
   const newClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
@@ -1430,7 +2149,9 @@ const handleSplitByPolygon = async (cuttingGeom) => {
   } catch (err) {
     alert(err.response?.data?.detail || 'Gagal memotong area. Pastikan poligon pemotong beririsan dengan poligon target.')
   } finally {
-    setDigitizeMode('split_poly')
+    if (previousTool) {
+      setDigitizeMode(previousTool, true)
+    }
   }
 }
 
@@ -1726,22 +2447,23 @@ const setYear = async (yr) => {
   tasksStore.selectedYear = yr
   await tasksStore.fetchTasks()
 
-  // Try to find the corresponding task for this same grid in the chosen year
-  if (tasksStore.currentTask) {
+  // 1. First priority: exact sibling match from preloaded taskSiblings
+  let targetSibling = taskSiblings.value.find(s => s.year === yr)
+
+  // 2. Fallback: search tasksStore.tasks matching baseCode AND chosen year
+  if (!targetSibling && tasksStore.currentTask) {
     const currentCode = tasksStore.currentTask.grid_code
-    const parts = currentCode.split('_')
-    if (parts.length >= 2) {
-      const baseCode = parts.slice(0, -1).join('_')
-      const targetCode = `${baseCode}_${yr}`
-      const siblingTask = tasksStore.tasks.find(t => t.grid_code === targetCode)
-      if (siblingTask) {
-        selectedTaskId.value = siblingTask.id
-        router.replace({ query: { taskId: siblingTask.id } })
-        await loadTaskData(siblingTask.id)
-        showToast(`Beralih ke task ${targetCode} (${yr})`)
-        return
-      }
-    }
+    const baseCode = currentCode.replace(/_\d{4}$/, '')
+    const targetCode = `${baseCode}_${yr}`
+    targetSibling = tasksStore.tasks.find(t => t.year === yr && (t.grid_code === targetCode || t.grid_code.startsWith(`${baseCode}_`)))
+  }
+
+  if (targetSibling) {
+    selectedTaskId.value = targetSibling.id
+    router.replace({ query: { taskId: targetSibling.id } })
+    await loadTaskData(targetSibling.id)
+    showToast(`Beralih ke task ${targetSibling.grid_code} (${yr})`)
+    return
   }
 
   // Update imagery layer for the chosen year
@@ -1780,7 +2502,9 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
 
   clickedFeatureIdx.value = null
   topologyResult.value = null
-  activeTool.value = null
+  if (!preserveHistory) {
+    activeTool.value = null
+  }
   selectedForMerge.value = []
 
   // 1. Remove previous layers
@@ -1862,34 +2586,18 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
         featureGroup.addLayer(l)
       })
     })
-  } else {
-    // AUTO-INIT BASE POLYGON if grid is empty and assigned to current user
-    if (task.assigned_user_id === authStore.user?.id || authStore.isAdmin) {
-      try {
-        await api.initBasePolygon(taskId)
-        showToast('Base polygon dibuat — gunakan tool Potong Garis / Area untuk memotong!')
-        showGuide.value = true
-        // Reload after init
-        const reloaded = await annotationsStore.fetchGridAnnotations(taskId)
-        features.value = reloaded
-        reloaded.forEach(feat => {
-          const geojsonLayer = L.geoJSON(feat, {
-            style: () => ({ color: '#9CA3AF', fillColor: '#9CA3AF', fillOpacity: polygonOpacity.value, weight: 2 })
-          })
-          geojsonLayer.eachLayer((l) => {
-            l.feature = feat
-            l.feature.properties.color = '#9CA3AF'
-            bindLayerEvents(l)
-            featureGroup.addLayer(l)
-          })
-        })
-      } catch (err) {
-        console.warn('Base polygon init skipped:', err.response?.data?.detail || err.message)
-      }
-    }
   }
 
-  // 5. Sync Year & Refresh Basemap Tile Layer
+  // 5. Fetch sibling task information across other available years
+  try {
+    const siblingsRes = await api.getTaskSiblings(taskId)
+    taskSiblings.value = siblingsRes.data || []
+    showSmartCopyBanner.value = true
+  } catch (err) {
+    taskSiblings.value = []
+  }
+
+  // 6. Sync Year & Refresh Basemap Tile Layer
   if (task.year) {
     currentYear.value = task.year
   }
@@ -1904,12 +2612,37 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
   }
 }
 
+const bestCopyCandidate = computed(() => {
+  if (features.value.length > 0) return null
+  return taskSiblings.value.find(s => s.annotation_count > 0) || null
+})
+
 const candidateSourceTasks = computed(() => {
+  // First priority: siblings from other years of this exact same grid that have annotations
+  const siblingsWithData = taskSiblings.value.filter(s => s.annotation_count > 0)
+  if (siblingsWithData.length > 0) return siblingsWithData
+  if (taskSiblings.value.length > 0) return taskSiblings.value
+
+  // Fallback: any other tasks with annotations in the project
   if (!tasksStore.currentTask) return []
   const currentId = tasksStore.currentTask.id
-  const baseCode = tasksStore.currentTask.grid_code.replace(/_\d{4}$/, '')
-  return tasksStore.tasks.filter(t => t.id !== currentId && (t.grid_code.startsWith(baseCode) || t.annotation_count > 0))
+  return tasksStore.tasks.filter(t => t.id !== currentId && t.annotation_count > 0)
 })
+
+const quickCopyFromSibling = async (sibling) => {
+  if (!selectedTaskId.value || !sibling) return
+  copyingAnnotations.value = true
+  try {
+    const res = await api.copyAnnotations(selectedTaskId.value, sibling.id)
+    showToast(res.data?.message || `Berhasil menyalin poligon dari tahun ${sibling.year}!`)
+    showSmartCopyBanner.value = false
+    await loadTaskData(selectedTaskId.value, true)
+  } catch (err) {
+    showToast(err.response?.data?.detail || 'Gagal menyalin anotasi')
+  } finally {
+    copyingAnnotations.value = false
+  }
+}
 
 const openCopyModal = () => {
   if (candidateSourceTasks.value.length > 0) {

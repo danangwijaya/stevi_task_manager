@@ -1,7 +1,7 @@
 <template>
-  <div class="h-[calc(100vh-57px)] w-full flex flex-col md:flex-row bg-slate-100 relative overflow-hidden font-sans">
+  <div class="h-full min-h-full w-full flex flex-col md:flex-row bg-slate-100 relative overflow-hidden font-sans">
     <!-- Left Sidebar: Tasking Manager Controls & Grid Inspector -->
-    <div class="w-full md:w-[390px] bg-white border-r border-slate-200 flex flex-col z-20 shadow-lg overflow-y-auto shrink-0">
+    <div class="w-full md:w-[390px] h-full max-h-full min-h-0 bg-white border-r border-slate-200 flex flex-col z-20 shadow-lg overflow-y-auto shrink-0">
       
       <!-- Project / AOI Header -->
       <div class="p-3.5 border-b border-slate-200 space-y-2.5 bg-slate-50/70">
@@ -24,9 +24,20 @@
         <div class="space-y-1">
           <div class="flex items-center justify-between">
             <label class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Proyek Wilayah Kajian (AOI):</label>
-            <span v-if="tasksStore.projects.length" class="text-[11px] font-mono text-slate-400 font-medium">
-              {{ tasksStore.projects.length }} Proyek
-            </span>
+            <div class="flex items-center gap-1.5">
+              <span v-if="tasksStore.projects.length" class="text-[11px] font-mono text-slate-400 font-medium">
+                {{ tasksStore.projects.length }} Proyek
+              </span>
+              <button
+                v-if="authStore.isAdmin && activeProject"
+                @click="showResetModal = true"
+                class="text-[10px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors cursor-pointer"
+                title="Reset seluruh pengerjaan proyek ini"
+              >
+                <RotateCcw :size="10" />
+                <span>Reset</span>
+              </button>
+            </div>
           </div>
 
           <div class="relative">
@@ -95,25 +106,32 @@
                 Semua
               </button>
               <button
-                @click="switchYear(2017)"
-                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
-                :class="selectedYear === 2017 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
-              >
-                2017
-              </button>
-              <button
-                @click="switchYear(2021)"
-                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
-                :class="selectedYear === 2021 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
-              >
-                2021
-              </button>
-              <button
                 @click="switchYear(2025)"
                 class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
                 :class="selectedYear === 2025 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
               >
                 2025
+              </button>
+              <button
+                @click="switchYear(2022)"
+                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
+                :class="selectedYear === 2022 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
+              >
+                2022
+              </button>
+              <button
+                @click="switchYear(2018)"
+                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
+                :class="selectedYear === 2018 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
+              >
+                2018
+              </button>
+              <button
+                @click="switchYear(2017)"
+                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
+                :class="selectedYear === 2017 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
+              >
+                2017
               </button>
             </div>
           </div>
@@ -324,6 +342,51 @@
       </div>
     </div>
   </div>
+
+  <!-- MODAL: Konfirmasi Reset Progres Proyek -->
+  <Teleport to="body">
+    <div v-if="showResetModal"
+      class="fixed inset-0 z-[1001] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+      @click.self="showResetModal = false"
+    >
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md border border-slate-200 p-6 space-y-5 text-center">
+        <div class="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto shadow-xs">
+          <RotateCcw :size="28" />
+        </div>
+        <div>
+          <h3 class="font-black text-slate-900 text-base">
+            Konfirmasi Reset Proyek
+          </h3>
+          <p class="text-xs text-slate-600 mt-2 leading-relaxed text-left bg-amber-50/80 p-3.5 rounded-2xl border border-amber-200/80">
+            Apakah Anda yakin ingin mereset seluruh progres pada proyek <b class="text-slate-900 font-bold">"{{ activeProject?.name }}"</b>?<br><br>
+            Tindakan ini akan:<br>
+            • Mengembalikan <b class="text-slate-800 font-bold">{{ activeProject?.total_tasks || 0 }} grid tile</b> ke status <b>Tersedia (UNASSIGNED)</b>.<br>
+            • Menghapus seluruh penugasan pengguna dan catatan review.<br>
+            • <b class="text-rose-700 font-bold">Membersihkan seluruh poligon anotasi</b> yang telah didigitasi pada proyek ini.<br><br>
+            <span class="text-slate-500 italic">Grid spasial wilayah kajian tetap aman dan siap dikerjakan ulang dari awal.</span>
+          </p>
+        </div>
+
+        <div class="flex gap-3 justify-center pt-1">
+          <button
+            @click="showResetModal = false"
+            class="px-5 py-2.5 text-xs font-bold border border-slate-200 rounded-2xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all cursor-pointer"
+          >
+            Batal
+          </button>
+          <button
+            @click="executeResetActiveProject"
+            :disabled="resettingActiveProject"
+            class="px-5 py-2.5 text-xs font-extrabold disabled:opacity-50 text-white rounded-2xl transition-all shadow-md bg-amber-600 hover:bg-amber-700 shadow-amber-600/20 flex items-center gap-2 cursor-pointer"
+          >
+            <RotateCw v-if="resettingActiveProject" :size="14" class="animate-spin" />
+            <RotateCcw v-else :size="14" />
+            <span>{{ resettingActiveProject ? 'Mereset...' : 'Ya, Reset Progres Proyek' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -349,7 +412,9 @@ import {
   CheckCircle2,
   Loader2,
   Clock,
-  ShieldCheck
+  ShieldCheck,
+  RotateCcw,
+  RotateCw
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useTasksStore } from '../stores/tasks'
@@ -363,6 +428,29 @@ const activeAreaId = ref(1)
 const selectedYear = ref(2025)
 const selectedTask = ref(null)
 const actionLoading = ref(false)
+
+const activeProject = computed(() => {
+  return tasksStore.projects.find(p => p.id === activeAreaId.value)
+})
+
+const showResetModal = ref(false)
+const resettingActiveProject = ref(false)
+
+async function executeResetActiveProject() {
+  if (!activeAreaId.value) return
+  resettingActiveProject.value = true
+  try {
+    const res = await tasksStore.resetProjectProgress(activeAreaId.value)
+    selectedTask.value = null
+    await renderGridTilesOnMap()
+    showResetModal.value = false
+    alert(res?.message || 'Progres proyek berhasil direset!')
+  } catch (err) {
+    alert(err.response?.data?.detail || 'Gagal mereset proyek')
+  } finally {
+    resettingActiveProject.value = false
+  }
+}
 
 // Search & Filter State
 const searchQuery = ref('')
