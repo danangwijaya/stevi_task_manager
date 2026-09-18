@@ -11,7 +11,7 @@
         />
         <div>
           <div class="font-black text-xl md:text-2xl tracking-tight leading-tight text-slate-900 font-heading">
-            STEVI Task Manager
+            GEOSTEVIA
           </div>
           <div class="text-xs text-slate-500 font-medium leading-none mt-0.5">
             Platform Kolaborasi Pembuatan Training Sample
