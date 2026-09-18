@@ -16,9 +16,10 @@
             @error="handleLogoError"
           />
         </router-link>
-        <h1 class="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight font-heading">STEVI Task Manager</h1>
-        <p class="text-sm text-slate-500 mt-1 leading-relaxed">
-          Platform Kolaborasi Pembuatan Training Sample
+        <h1 class="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight font-heading">GEOSTEVIA</h1>
+        <p class="text-xs text-rose-600 font-bold uppercase tracking-wider mt-1">Geospatial Ecosystem Services Analytics</p>
+        <p class="text-xs text-slate-500 mt-2 leading-relaxed">
+          A geospatial analytical platform for ecosystem services assessment, visualization, and spatial decision support.
         </p>
       </div>
 

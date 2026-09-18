@@ -26,6 +26,190 @@ def get_classes() -> Any:
     """Returns the 12 standard land cover classes"""
     return settings.LAND_COVER_CLASSES
 
+@router.get("/overview")
+def get_annotations_overview(
+    study_area_id: Optional[int] = None,
+    year: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Returns aggregated digitations across all grids with segments by grid, mapper, and land cover class.
+    """
+    query = db.query(TaskGrid).join(Annotation).distinct()
+    if study_area_id:
+        query = query.filter(TaskGrid.study_area_id == study_area_id)
+    if year:
+        query = query.filter(TaskGrid.year == year)
+    grids = query.all()
+
+    classes_meta = {c["id"]: c for c in settings.LAND_COVER_CLASSES}
+
+    by_grid = []
+    by_mapper_dict = {}
+    by_class_dict = {
+        c["id"]: {
+            "class_id": c["id"],
+            "name": c["name"],
+            "color": c["color"],
+            "count": 0,
+            "total_area_ha": 0.0
+        } for c in settings.LAND_COVER_CLASSES
+    }
+    total_polygons = 0
+    total_area_sqm = 0.0
+
+    for grid in grids:
+        anns = db.query(Annotation).filter(Annotation.task_grid_id == grid.id).all()
+        grid_sqm = sum(a.area_sqm or 0 for a in anns)
+        total_area_sqm += grid_sqm
+        total_polygons += len(anns)
+
+        grid_classes = {}
+        for a in anns:
+            c_id = a.class_id
+            if c_id not in grid_classes:
+                grid_classes[c_id] = {
+                    "class_id": c_id,
+                    "class_name": a.class_name,
+                    "color": classes_meta.get(c_id, {}).get("color", "#9CA3AF"),
+                    "count": 0,
+                    "area_ha": 0.0
+                }
+            grid_classes[c_id]["count"] += 1
+            ha = (a.area_sqm or 0) / 10000.0
+            grid_classes[c_id]["area_ha"] += round(ha, 2)
+
+            if c_id in by_class_dict:
+                by_class_dict[c_id]["count"] += 1
+                by_class_dict[c_id]["total_area_ha"] += round(ha, 2)
+
+            # mapper aggregation
+            u_id = a.user_id or (grid.assigned_user_id if grid.assigned_user_id else 0)
+            u_name = a.author.full_name if a.author else (grid.assignee.full_name if grid.assignee else "Unknown")
+            u_uname = a.author.username if a.author else (grid.assignee.username if grid.assignee else "")
+            u_nim = a.author.nim_nip if a.author else (grid.assignee.nim_nip if grid.assignee else "")
+            if u_id not in by_mapper_dict:
+                by_mapper_dict[u_id] = {
+                    "user_id": u_id,
+                    "full_name": u_name,
+                    "username": u_uname,
+                    "nim_nip": u_nim,
+                    "grids": set(),
+                    "polygon_count": 0,
+                    "total_area_ha": 0.0
+                }
+            by_mapper_dict[u_id]["grids"].add(grid.grid_code)
+            by_mapper_dict[u_id]["polygon_count"] += 1
+            by_mapper_dict[u_id]["total_area_ha"] += round(ha, 2)
+
+        by_grid.append({
+            "task_id": grid.id,
+            "grid_code": grid.grid_code,
+            "year": grid.year,
+            "study_area_name": grid.study_area.name if grid.study_area else "",
+            "status": grid.status,
+            "assigned_user_id": grid.assigned_user_id,
+            "assigned_user_name": grid.assignee.full_name if grid.assignee else "Belum Diambil",
+            "assigned_user_username": grid.assignee.username if grid.assignee else "",
+            "assigned_user_nim": grid.assignee.nim_nip if grid.assignee else "",
+            "annotation_count": len(anns),
+            "total_area_ha": round(grid_sqm / 10000.0, 2),
+            "bounds": [[grid.min_lat, grid.min_lon], [grid.max_lat, grid.max_lon]],
+            "center": [(grid.min_lat + grid.max_lat)/2.0, (grid.min_lon + grid.max_lon)/2.0],
+            "classes": sorted(list(grid_classes.values()), key=lambda x: x["count"], reverse=True)
+        })
+
+    by_mapper = []
+    for u_id, m in by_mapper_dict.items():
+        by_mapper.append({
+            "user_id": m["user_id"],
+            "full_name": m["full_name"],
+            "username": m["username"],
+            "nim_nip": m["nim_nip"],
+            "grids_count": len(m["grids"]),
+            "grids_list": sorted(list(m["grids"])),
+            "polygon_count": m["polygon_count"],
+            "total_area_ha": round(m["total_area_ha"], 2)
+        })
+    by_mapper.sort(key=lambda x: x["polygon_count"], reverse=True)
+
+    by_class = []
+    for c_id, c in by_class_dict.items():
+        if c["count"] > 0:
+            c["percentage"] = round((c["count"] / total_polygons * 100.0), 1) if total_polygons > 0 else 0
+            by_class.append(c)
+    by_class.sort(key=lambda x: x["count"], reverse=True)
+
+    return {
+        "summary": {
+            "total_annotations": total_polygons,
+            "total_grids_digitized": len(by_grid),
+            "total_area_ha": round(total_area_sqm / 10000.0, 2)
+        },
+        "by_grid": sorted(by_grid, key=lambda x: x["annotation_count"], reverse=True),
+        "by_mapper": by_mapper,
+        "by_class": by_class
+    }
+
+@router.get("/all-features")
+def get_all_annotations_features(
+    study_area_id: Optional[int] = None,
+    year: Optional[int] = None,
+    task_status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Returns a unified GeoJSON FeatureCollection containing all polygons across all digitized grids.
+    """
+    query = db.query(Annotation).join(TaskGrid)
+    if study_area_id:
+        query = query.filter(TaskGrid.study_area_id == study_area_id)
+    if year:
+        query = query.filter(TaskGrid.year == year)
+    if task_status:
+        query = query.filter(TaskGrid.status == task_status)
+        
+    annotations = query.all()
+    classes_meta = {c["id"]: c for c in settings.LAND_COVER_CLASSES}
+    
+    features = []
+    for ann in annotations:
+        try:
+            geom = json.loads(ann.geom_geojson)
+            tg = ann.task_grid
+            c_meta = classes_meta.get(ann.class_id, {})
+            features.append({
+                "type": "Feature",
+                "id": ann.id,
+                "geometry": geom,
+                "properties": {
+                    "id": ann.id,
+                    "task_grid_id": ann.task_grid_id,
+                    "grid_code": tg.grid_code if tg else "",
+                    "year": tg.year if tg else 2025,
+                    "task_status": tg.status if tg else "UNKNOWN",
+                    "class_id": ann.class_id,
+                    "class_name": ann.class_name,
+                    "color_hex": c_meta.get("color", "#9CA3AF"),
+                    "author_id": ann.user_id,
+                    "author_name": ann.author.full_name if ann.author else (tg.assignee.full_name if tg and tg.assignee else "Unknown"),
+                    "area_sqm": ann.area_sqm,
+                    "area_ha": round((ann.area_sqm or 0) / 10000.0, 2),
+                    "created_at": ann.created_at.isoformat() if ann.created_at else None,
+                    "bounds": [[tg.min_lat, tg.min_lon], [tg.max_lat, tg.max_lon]] if tg else None
+                }
+            })
+        except Exception:
+            continue
+
+    return {
+        "type": "FeatureCollection",
+        "total_features": len(features),
+        "features": features
+    }
+
 @router.get("/grid/{task_grid_id}")
 def get_grid_annotations(
     task_grid_id: int,

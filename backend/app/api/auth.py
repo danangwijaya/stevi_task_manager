@@ -101,8 +101,9 @@ def login(
     login_data: LoginRequest,
     db: Session = Depends(get_db)
 ) -> Any:
+    req_id = login_data.username.strip()
     user = db.query(User).filter(
-        (User.username == login_data.username) | (User.email == login_data.username)
+        (User.username == req_id) | (User.email == req_id) | (User.nim_nip == req_id)
     ).first()
     
     if not user or not verify_password(login_data.password, user.hashed_password):

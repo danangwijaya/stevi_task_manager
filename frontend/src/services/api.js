@@ -88,6 +88,8 @@ export default {
 
   // Annotations & Classes
   getClasses: () => api.get('/annotations/classes'),
+  getAnnotationsOverview: (params) => api.get('/annotations/overview', { params }),
+  getAllAnnotationsFeatures: (params) => api.get('/annotations/all-features', { params }),
   getGridAnnotations: (taskGridId) => api.get(`/annotations/grid/${taskGridId}`),
   saveGridAnnotations: (taskGridId, features) => api.post(`/annotations/grid/${taskGridId}`, {
     task_grid_id: taskGridId,
@@ -124,10 +126,25 @@ export default {
   getGEEStatus: () => api.get('/gee/status'),
   getGEETiles: (params) => api.get('/gee/tiles', { params }),
 
-  // 1-Click Export
+  // 1-Click Export & Vector Export
   triggerExport: (year = 2025, onlyApproved = false) => 
     api.post('/export/trigger', null, { params: { year, only_approved: onlyApproved } }),
   getDownloadUrl: (jobId) => `${getBaseUrl()}/export/download/${jobId}`,
+  
+  // Vector Training Samples Export (GeoJSON & Shapefile)
+  getVectorExportSummary: (params = {}) => api.get('/export/vector/summary', { params }),
+  getVectorGeoJsonDownloadUrl: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return `${getBaseUrl()}/export/vector/geojson${qs ? '?' + qs : ''}`
+  },
+  getVectorShapefileDownloadUrl: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return `${getBaseUrl()}/export/vector/shapefile${qs ? '?' + qs : ''}`
+  },
+  downloadVectorGeoJson: (params = {}) =>
+    api.get('/export/vector/geojson', { params, responseType: 'blob' }),
+  downloadVectorShapefile: (params = {}) =>
+    api.get('/export/vector/shapefile', { params, responseType: 'blob' }),
 
   // Import Custom Grid (Shapefile / GeoJSON)
   importGrid: (formData) => api.post('/tasks/import-grid', formData, {

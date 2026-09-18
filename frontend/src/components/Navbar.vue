@@ -2,10 +2,10 @@
   <header class="bg-white border-b border-slate-200 text-slate-800 px-4 lg:px-8 py-2.5 flex items-center justify-between sticky top-0 z-50 shadow-xs">
     <!-- Brand / Logo (STEVI Task Manager) -->
     <div class="flex items-center gap-3">
-      <router-link to="/" class="flex items-center gap-3 group">
+      <router-link to="/" class="flex items-center gap-3 group" title="A geospatial analytical platform for ecosystem services assessment, visualization, and spatial decision support.">
         <img
           src="https://koboegis.app/klh-logo.png?v=2026|g"
-          alt="STEVI Logo"
+          alt="GEOSTEVIA Logo"
           class="h-10 w-auto object-contain transition-transform group-hover:scale-105"
           @error="handleLogoError"
         />
@@ -14,7 +14,7 @@
             GEOSTEVIA
           </div>
           <div class="text-xs text-slate-500 font-medium leading-none mt-0.5">
-            Platform Kolaborasi Pembuatan Training Sample
+            Geospatial Ecosystem Services Analytics
           </div>
         </div>
       </router-link>
@@ -22,6 +22,15 @@
 
     <!-- Center Navigation Links (when authenticated) -->
     <nav v-if="authStore.isAuthenticated" class="hidden md:flex items-center gap-1.5 bg-slate-100/90 p-1.5 rounded-2xl border border-slate-200 text-sm font-bold">
+      <router-link
+        to="/projects"
+        class="px-3.5 py-2 rounded-xl transition-all flex items-center gap-2 text-slate-600 hover:text-slate-900"
+        active-class="bg-white text-slate-900 shadow-2xs"
+      >
+        <Compass :size="15" />
+        <span>Projects</span>
+      </router-link>
+
       <router-link
         to="/dashboard"
         class="px-3.5 py-2 rounded-xl transition-all flex items-center gap-2 text-slate-600 hover:text-slate-900"
@@ -75,9 +84,9 @@
       <!-- Current User Profile Badge (Clickable to open User Profile Modal) -->
       <div v-if="authStore.isAuthenticated" class="flex items-center gap-2">
         <button
-          @click="showProfileModal = true"
+          @click="handleProfileClick"
           class="flex items-center gap-3 p-1.5 pr-3.5 rounded-2xl hover:bg-slate-100/80 border border-slate-200/80 bg-white transition-all text-left group cursor-pointer shadow-2xs"
-          title="Buka Manajemen Profil Pengguna"
+          :title="authStore.isAdmin ? 'Buka Panel Admin Dashboard' : 'Buka Manajemen Profil Pengguna'"
         >
           <div
             class="w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shadow-xs border group-hover:scale-105 transition-transform"
@@ -110,6 +119,13 @@
       <!-- If Not Logged In -->
       <div v-else class="flex items-center gap-2">
         <router-link
+          to="/projects"
+          class="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50 text-xs font-bold transition-all"
+        >
+          <Compass :size="14" />
+          <span>Jelajahi Proyek</span>
+        </router-link>
+        <router-link
           to="/login"
           class="bg-rose-600 hover:bg-rose-700 text-white text-sm font-extrabold px-5 py-2.5 rounded-xl transition-all shadow-md shadow-rose-600/20 flex items-center gap-2 cursor-pointer"
         >
@@ -130,6 +146,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import {
+  Compass,
   Settings,
   LogOut,
   LogIn,
@@ -148,6 +165,14 @@ const authStore = useAuthStore()
 const tasksStore = useTasksStore()
 const router = useRouter()
 const showProfileModal = ref(false)
+
+const handleProfileClick = () => {
+  if (authStore.isAdmin) {
+    router.push('/admin')
+  } else {
+    showProfileModal.value = true
+  }
+}
 
 onMounted(async () => {
   if (authStore.isAuthenticated) {

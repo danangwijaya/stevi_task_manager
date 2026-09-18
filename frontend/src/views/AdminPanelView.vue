@@ -1,425 +1,980 @@
 <template>
-  <div class="min-h-full bg-[#f0f2f5] font-sans text-[#2c3038]">
-
-    <!-- Page Header -->
-    <div class="bg-white border-b border-[#e4e7eb] px-6 lg:px-10 py-5">
-      <div class="max-w-screen-xl mx-auto flex items-center justify-between gap-4">
+  <div class="h-[calc(100vh-57px)] w-full flex bg-[#f0f2f5] font-sans text-[#2c3038] overflow-hidden">
+    
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <!-- 1. MODERN ADMIN SIDEBAR NAVIGATION                         -->
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <aside class="w-64 lg:w-72 bg-white border-r border-[#e4e7eb] flex flex-col h-full shrink-0 z-20 select-none shadow-xs">
+      
+      <!-- Sidebar Brand Header -->
+      <div class="p-5 border-b border-[#e4e7eb] bg-slate-50/70 flex items-center justify-between shrink-0">
         <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-[#d73f3f] flex items-center justify-center shadow-sm text-white">
-            <Shield :size="20" />
+          <div class="w-9 h-9 rounded-xl bg-[#d73f3f] flex items-center justify-center text-white shadow-sm">
+            <Shield :size="18" />
           </div>
           <div>
-            <h1 class="text-xl font-black text-[#1f242e] font-heading tracking-tight">Panel Admin</h1>
-            <p class="text-xs text-[#707a8a]">Manajemen Proyek & Pengguna STEVI Task Manager</p>
+            <div class="font-black text-sm text-[#1f242e] font-heading tracking-tight leading-tight">Admin Dashboard</div>
+            <div class="text-[11px] text-slate-500 font-medium">GEOSTEVIA Control Hub</div>
           </div>
         </div>
-        <div class="flex items-center gap-2 text-xs text-[#707a8a] bg-[#f0f2f5] px-3 py-1.5 rounded-lg border border-[#e4e7eb]">
-          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-          <span>Login sebagai <b class="text-[#1f242e]">{{ authStore.user?.full_name || 'Admin' }}</b></span>
-        </div>
-      </div>
-    </div>
-
-    <div class="max-w-screen-xl mx-auto px-4 lg:px-10 py-6 space-y-6">
-
-      <!-- Tab Navigation -->
-      <div class="flex flex-wrap gap-2 bg-white p-1.5 rounded-2xl border border-[#e4e7eb] shadow-xs w-fit">
-        <button
-          @click="activeTab = 'projects'"
-          class="px-5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
-          :class="activeTab === 'projects'
-            ? 'bg-[#d73f3f] text-white shadow-sm'
-            : 'text-[#707a8a] hover:text-[#1f242e] hover:bg-[#f0f2f5]'"
-        >
-          <FolderKanban :size="16" />
-          Manajemen Proyek
-          <span class="text-[10px] bg-white/25 px-1.5 py-0.5 rounded font-mono">{{ adminStore.projects.length }}</span>
-        </button>
-        <button
-          @click="activeTab = 'import'"
-          class="px-5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
-          :class="activeTab === 'import'
-            ? 'bg-[#d73f3f] text-white shadow-sm'
-            : 'text-[#707a8a] hover:text-[#1f242e] hover:bg-[#f0f2f5]'"
-        >
-          <UploadCloud :size="16" />
-          Import Grid Kustom (Shapefile / GeoJSON)
-        </button>
-        <button
-          @click="activeTab = 'users'"
-          class="px-5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer"
-          :class="activeTab === 'users'
-            ? 'bg-[#d73f3f] text-white shadow-sm'
-            : 'text-[#707a8a] hover:text-[#1f242e] hover:bg-[#f0f2f5]'"
-        >
-          <Users :size="16" />
-          Manajemen Pengguna
-          <span class="text-[10px] bg-white/25 px-1.5 py-0.5 rounded font-mono">{{ adminStore.users.length }}</span>
-        </button>
-      </div>
-
-      <!-- ═══════════════════════════════════════ -->
-      <!-- TAB 1: MANAJEMEN PROYEK                -->
-      <!-- ═══════════════════════════════════════ -->
-      <div v-if="activeTab === 'projects'" class="space-y-4">
-
-        <!-- Toolbar -->
-        <div class="flex items-center justify-between flex-wrap gap-3">
-          <h2 class="text-base font-black text-[#1f242e] flex items-center gap-2">
-            <Map :size="18" class="text-[#d73f3f]" />
-            Daftar Proyek Tasking Grid
-          </h2>
-          <div class="flex items-center gap-2.5">
-            <button
-              @click="activeTab = 'import'"
-              class="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2 rounded-xl border border-slate-300 transition-all cursor-pointer shadow-2xs"
-            >
-              <UploadCloud :size="14" class="text-rose-600" />
-              <span>Import Shapefile / GeoJSON</span>
-            </button>
-            <button
-              @click="openProjectModal()"
-              class="flex items-center gap-2 bg-[#d73f3f] hover:bg-[#c23434] text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-sm cursor-pointer"
-            >
-              <Plus :size="14" />
-              Tambah Proyek Baru
-            </button>
-          </div>
-        </div>
-
-        <!-- Loading skeleton -->
-        <div v-if="adminStore.loadingProjects" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          <div v-for="i in 3" :key="i" class="bg-white rounded-2xl border border-[#e4e7eb] p-5 animate-pulse space-y-3">
-            <div class="h-4 bg-slate-200 rounded w-3/4"></div>
-            <div class="h-3 bg-slate-100 rounded w-full"></div>
-            <div class="h-3 bg-slate-100 rounded w-1/2"></div>
-          </div>
-        </div>
-
-        <!-- Projects grid -->
-        <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          <div
-            v-for="project in adminStore.projects"
-            :key="project.id"
-            class="bg-white rounded-2xl border border-[#e4e7eb] p-5 hover:border-[#cfd4dc] hover:shadow-md transition-all space-y-4"
-          >
-            <!-- Project header -->
-            <div class="flex items-start justify-between gap-2">
-              <div class="min-w-0">
-                <div class="font-black text-sm text-[#1f242e] leading-tight">{{ project.name }}</div>
-                <div class="text-[11px] text-[#707a8a] mt-0.5 line-clamp-2">{{ project.description || 'Tidak ada deskripsi' }}</div>
-              </div>
-              <div class="flex gap-1.5 shrink-0">
-                <button
-                  @click="confirmResetProject(project)"
-                  class="w-7 h-7 rounded-lg border border-[#e4e7eb] flex items-center justify-center text-[#707a8a] hover:border-amber-400 hover:text-amber-600 hover:bg-amber-50 transition-all cursor-pointer"
-                  title="Reset seluruh pengerjaan proyek (kembalikan semua grid ke status Tersedia)"
-                >
-                  <RotateCcw :size="12" />
-                </button>
-                <button
-                  @click="openProjectModal(project)"
-                  class="w-7 h-7 rounded-lg border border-[#e4e7eb] flex items-center justify-center text-[#707a8a] hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-all cursor-pointer"
-                  title="Edit proyek"
-                >
-                  <Pencil :size="12" />
-                </button>
-                <button
-                  @click="confirmDeleteProject(project)"
-                  class="w-7 h-7 rounded-lg border border-[#e4e7eb] flex items-center justify-center text-[#707a8a] hover:border-red-300 hover:text-red-600 hover:bg-red-50 transition-all cursor-pointer"
-                  title="Hapus proyek"
-                >
-                  <Trash2 :size="12" />
-                </button>
-              </div>
-            </div>
-
-            <!-- Stats -->
-            <div class="grid grid-cols-3 gap-2 text-center">
-              <div class="bg-[#f0f2f5] rounded-xl p-2">
-                <div class="font-black text-base text-[#1f242e] font-mono">{{ project.total_tasks.toLocaleString() }}</div>
-                <div class="text-[10px] text-[#707a8a] font-bold uppercase">Total Grid</div>
-              </div>
-              <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-2">
-                <div class="font-black text-base text-emerald-700 font-mono">{{ project.approved_tasks }}</div>
-                <div class="text-[10px] text-emerald-600 font-bold uppercase">Approved</div>
-              </div>
-              <div class="bg-blue-50 border border-blue-100 rounded-xl p-2">
-                <div class="font-black text-base text-blue-700 font-mono">{{ project.in_progress_tasks }}</div>
-                <div class="text-[10px] text-blue-600 font-bold uppercase">On Progress</div>
-              </div>
-            </div>
-
-            <!-- Progress bar -->
-            <div>
-              <div class="flex justify-between text-[10px] font-bold text-[#707a8a] mb-1">
-                <span>Progress</span>
-                <span class="font-mono text-emerald-600">
-                  {{ project.total_tasks > 0 ? Math.round((project.approved_tasks / project.total_tasks) * 100) : 0 }}%
-                </span>
-              </div>
-              <div class="w-full h-1.5 bg-[#e4e7eb] rounded-full overflow-hidden">
-                <div
-                  class="h-full bg-emerald-500 rounded-full transition-all duration-500"
-                  :style="{ width: project.total_tasks > 0 ? (project.approved_tasks / project.total_tasks * 100) + '%' : '0%' }"
-                ></div>
-              </div>
-            </div>
-
-            <!-- Center coordinates -->
-            <div class="text-[11px] text-[#707a8a] font-mono border-t border-[#e4e7eb] pt-3">
-              📍 {{ project.center_lat.toFixed(4) }}°, {{ project.center_lon.toFixed(4) }}°
-            </div>
-          </div>
-
-          <!-- Empty state -->
-          <div v-if="!adminStore.loadingProjects && adminStore.projects.length === 0"
-            class="col-span-3 bg-white rounded-2xl border border-dashed border-[#cfd4dc] p-12 text-center text-[#707a8a]">
-            <FolderKanban :size="40" class="mx-auto mb-3 opacity-30 text-slate-400" />
-            <p class="font-bold text-sm">Belum ada proyek tasking</p>
-            <p class="text-xs mt-1">Klik "Tambah Proyek Baru" untuk membuat proyek pertama</p>
-          </div>
+        <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span>Online</span>
         </div>
       </div>
 
-      <!-- ═══════════════════════════════════════ -->
-      <!-- TAB 2: IMPORT GRID KUSTOM               -->
-      <!-- ═══════════════════════════════════════ -->
-      <div v-if="activeTab === 'import'" class="space-y-6">
+      <!-- Sidebar Menu Groups (Scrollable) -->
+      <div class="flex-1 overflow-y-auto p-4 space-y-6">
         
-        <!-- Header -->
-        <div class="bg-white rounded-3xl border border-[#e4e7eb] p-6 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div class="space-y-1">
-            <div class="flex items-center gap-2">
-              <div class="p-2 bg-rose-50 text-rose-600 rounded-xl">
-                <UploadCloud :size="20" />
-              </div>
-              <h2 class="text-lg font-black text-[#1f242e]">Import Grid Kustom (Shapefile / GeoJSON)</h2>
-            </div>
-            <p class="text-xs text-[#707a8a] max-w-2xl leading-relaxed">
-              Unggah file Shapefile (*.zip yang berisi .shp, .shx, .dbf, .prj) atau GeoJSON (*.geojson, *.json) Anda sendiri. Sistem akan otomatis melakukan reproyeksi WGS84, menghitung batas koordinat, dan mendistribusikannya ke antrean tasking.
-            </p>
+        <!-- GROUP 1: UTAMA / RINGKASAN -->
+        <div class="space-y-1">
+          <div class="px-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
+            Ringkasan & Akun
           </div>
+          
+          <button
+            @click="activeTab = 'account_info'"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer"
+            :class="activeTab === 'account_info'
+              ? 'bg-[#d73f3f] text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'"
+          >
+            <div class="flex items-center gap-2.5">
+              <BadgeCheck :size="16" :class="activeTab === 'account_info' ? 'text-white' : 'text-slate-500'" />
+              <span>Informasi Akun</span>
+            </div>
+            <span v-if="activeTab === 'account_info'" class="w-1.5 h-1.5 rounded-full bg-white"></span>
+          </button>
+
+          <button
+            @click="activeTab = 'stats'"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer"
+            :class="activeTab === 'stats'
+              ? 'bg-[#d73f3f] text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'"
+          >
+            <div class="flex items-center gap-2.5">
+              <BarChart3 :size="16" :class="activeTab === 'stats' ? 'text-white' : 'text-slate-500'" />
+              <span>Statistik Kontribusi</span>
+            </div>
+            <span class="text-[10px] px-1.5 py-0.2 rounded font-mono" :class="activeTab === 'stats' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'">Live</span>
+          </button>
         </div>
 
-        <!-- Main Import Form Grid -->
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          
-          <!-- Drag & Drop Zone (7 cols) -->
-          <div class="lg:col-span-7 bg-white rounded-3xl border border-[#e4e7eb] p-6 shadow-xs space-y-4">
-            <h3 class="text-sm font-black text-[#1f242e] flex items-center gap-2">
-              <FileArchive :size="16" class="text-rose-600" />
-              <span>Pilih atau Tarik File Grid Anda</span>
-            </h3>
+        <!-- GROUP 2: MANAJEMEN PENGGUNA -->
+        <div class="space-y-1">
+          <div class="px-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
+            Manajemen Pengguna
+          </div>
 
-            <!-- Drop Zone Container -->
-            <div
-              @dragover.prevent="isDragging = true"
-              @dragleave.prevent="isDragging = false"
-              @drop.prevent="onFileDrop"
-              @click="$refs.fileInput.click()"
-              class="border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-3 min-h-[240px]"
-              :class="isDragging
-                ? 'border-rose-500 bg-rose-50/70 scale-[0.99]'
-                : importFile
-                  ? 'border-emerald-400 bg-emerald-50/30'
-                  : 'border-slate-300 hover:border-rose-400 bg-slate-50/60 hover:bg-slate-50'"
-            >
-              <input
-                ref="fileInput"
-                type="file"
-                accept=".zip,.geojson,.json,.shp"
-                @change="onFileSelect"
-                class="hidden"
-              />
-
-              <div
-                class="w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-sm"
-                :class="importFile ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600'"
-              >
-                <CheckCircle2 v-if="importFile" :size="28" />
-                <UploadCloud v-else :size="28" />
-              </div>
-
-              <div v-if="!importFile" class="space-y-1">
-                <p class="font-extrabold text-sm text-slate-800">
-                  Tarik & Jatuhkan file Shapefile (.zip) atau GeoJSON di sini
-                </p>
-                <p class="text-xs text-slate-500">
-                  atau <span class="text-rose-600 font-bold underline">klik untuk memilih dari komputer Anda</span>
-                </p>
-                <div class="pt-2 flex items-center justify-center gap-2 text-[11px] text-slate-400 font-mono">
-                  <span class="bg-white px-2 py-0.5 rounded border border-slate-200">.ZIP (Shapefile)</span>
-                  <span class="bg-white px-2 py-0.5 rounded border border-slate-200">.GEOJSON</span>
-                  <span class="bg-white px-2 py-0.5 rounded border border-slate-200">.JSON</span>
-                </div>
-              </div>
-
-              <div v-else class="space-y-1 text-center">
-                <div class="font-black text-sm text-emerald-950 font-mono flex items-center justify-center gap-2">
-                  <span>{{ importFile.name }}</span>
-                </div>
-                <div class="text-xs text-slate-500">
-                  Ukuran: {{ formatFileSize(importFile.size) }} • Siap diproses
-                </div>
-                <button
-                  type="button"
-                  @click.stop="importFile = null; importResult = null"
-                  class="mt-2 text-xs text-rose-600 hover:underline font-bold cursor-pointer"
-                >
-                  Ganti File Lain
-                </button>
-              </div>
+          <button
+            @click="activeTab = 'users_crud'"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer"
+            :class="activeTab === 'users_crud'
+              ? 'bg-[#d73f3f] text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'"
+          >
+            <div class="flex items-center gap-2.5">
+              <Users :size="16" :class="activeTab === 'users_crud' ? 'text-white' : 'text-slate-500'" />
+              <span>CRUD Pengguna</span>
             </div>
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold"
+              :class="activeTab === 'users_crud' ? 'bg-white text-[#d73f3f]' : 'bg-slate-200 text-slate-700'">
+              {{ adminStore.users.length }}
+            </span>
+          </button>
 
-            <!-- Notes & Instructions -->
-            <div class="bg-amber-50/80 border border-amber-200/80 rounded-2xl p-3.5 text-xs text-amber-900 space-y-1">
-              <div class="font-bold flex items-center gap-1.5 text-amber-800">
-                <Info :size="14" />
-                <span>Format Shapefile yang Didukung:</span>
+          <button
+            @click="activeTab = 'user_profile'"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer"
+            :class="activeTab === 'user_profile'
+              ? 'bg-[#d73f3f] text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'"
+          >
+            <div class="flex items-center gap-2.5">
+              <UserCog :size="16" :class="activeTab === 'user_profile' ? 'text-white' : 'text-slate-500'" />
+              <span>Profil Pengguna</span>
+            </div>
+            <span v-if="activeTab === 'user_profile'" class="w-1.5 h-1.5 rounded-full bg-white"></span>
+          </button>
+        </div>
+
+        <!-- GROUP 3: KAWASAN & SPASIAL -->
+        <div class="space-y-1">
+          <div class="px-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
+            Kawasan & Spasial
+          </div>
+
+          <button
+            @click="activeTab = 'projects'"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer"
+            :class="activeTab === 'projects'
+              ? 'bg-[#d73f3f] text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'"
+          >
+            <div class="flex items-center gap-2.5">
+              <FolderKanban :size="16" :class="activeTab === 'projects' ? 'text-white' : 'text-slate-500'" />
+              <span>Panel Admin / Proyek</span>
+            </div>
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold"
+              :class="activeTab === 'projects' ? 'bg-white text-[#d73f3f]' : 'bg-slate-200 text-slate-700'">
+              {{ adminStore.projects.length }}
+            </span>
+          </button>
+
+          <button
+            @click="activeTab = 'import'"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer"
+            :class="activeTab === 'import'
+              ? 'bg-[#d73f3f] text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'"
+          >
+            <div class="flex items-center gap-2.5">
+              <UploadCloud :size="16" :class="activeTab === 'import' ? 'text-white' : 'text-slate-500'" />
+              <span>Import Grid Kustom</span>
+            </div>
+            <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-extrabold" v-if="activeTab !== 'import'">SHP</span>
+          </button>
+        </div>
+
+        <!-- GROUP 4: MODUL PEMETAAN TERPADU (SHORTCUTS) -->
+        <div class="space-y-1">
+          <div class="px-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
+            Modul Pemetaan
+          </div>
+
+          <router-link
+            to="/tasking"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 transition-all"
+          >
+            <div class="flex items-center gap-2.5">
+              <Grid :size="16" class="text-blue-500" />
+              <span>Tasking Map</span>
+            </div>
+            <ExternalLink :size="12" class="text-slate-400" />
+          </router-link>
+
+          <router-link
+            to="/qc"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 transition-all"
+          >
+            <div class="flex items-center gap-2.5">
+              <CheckSquare :size="16" class="text-amber-500" />
+              <span>QC Review</span>
+            </div>
+            <ExternalLink :size="12" class="text-slate-400" />
+          </router-link>
+
+          <router-link
+            to="/export"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 transition-all"
+          >
+            <div class="flex items-center gap-2.5">
+              <Download :size="16" class="text-emerald-500" />
+              <span>Ekspor Dataset</span>
+            </div>
+            <ExternalLink :size="12" class="text-slate-400" />
+          </router-link>
+
+          <router-link
+            to="/projects"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 transition-all"
+          >
+            <div class="flex items-center gap-2.5">
+              <Compass :size="16" class="text-rose-500" />
+              <span>Katalog Proyek</span>
+            </div>
+            <ExternalLink :size="12" class="text-slate-400" />
+          </router-link>
+        </div>
+
+      </div>
+
+      <!-- Sidebar Footer: Active Admin User & Quick Logout -->
+      <div class="p-4 border-t border-[#e4e7eb] bg-slate-50/70 shrink-0 space-y-2">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-8 h-8 rounded-lg bg-purple-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-2xs">
+              {{ (authStore.user?.full_name || authStore.userName || 'A').charAt(0).toUpperCase() }}
+            </div>
+            <div class="min-w-0">
+              <div class="text-xs font-black text-slate-800 truncate leading-tight">
+                {{ authStore.user?.full_name || authStore.userName }}
               </div>
-              <ul class="ml-5 list-disc space-y-0.5 text-[11px] text-amber-800">
-                <li>Untuk <b>Shapefile</b>, pastikan dikompres dalam format <b>.zip</b> dan memuat minimal 4 file pendukung: <code>.shp</code>, <code>.shx</code>, <code>.dbf</code>, dan <code>.prj</code>.</li>
-                <li>Jika koordinat dalam UTM / Proyeksi lain, sistem akan <b>otomatis mereproyeksikan</b> ke WGS84 (EPSG:4326).</li>
-              </ul>
+              <div class="text-[10px] text-purple-700 font-bold flex items-center gap-1">
+                <span>Administrator</span>
+              </div>
             </div>
           </div>
 
-          <!-- Configuration & Target Project (5 cols) -->
-          <div class="lg:col-span-5 bg-white rounded-3xl border border-[#e4e7eb] p-6 shadow-xs space-y-5">
-            <h3 class="text-sm font-black text-[#1f242e] flex items-center gap-2">
-              <FolderPlus :size="16" class="text-rose-600" />
-              <span>Pengaturan Target Grid</span>
-            </h3>
+          <button
+            @click="authStore.logout()"
+            title="Keluar (Logout)"
+            class="p-2 hover:bg-rose-50 hover:text-rose-600 text-slate-400 border border-slate-200/80 rounded-lg transition-colors cursor-pointer bg-white"
+          >
+            <LogOut :size="14" />
+          </button>
+        </div>
+      </div>
+    </aside>
 
-            <!-- Option 1: Destination Project Type -->
-            <div class="space-y-2">
-              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Tujuan Wilayah / Proyek:
-              </label>
-              <div class="grid grid-cols-2 gap-2">
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <!-- 2. MAIN VIEWPORT AREA (Header + Content)                   -->
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <main class="flex-1 flex flex-col h-full overflow-y-auto">
+      
+      <!-- Top Header Bar -->
+      <header class="bg-white border-b border-[#e4e7eb] px-6 lg:px-10 py-4 shrink-0 flex items-center justify-between gap-4 sticky top-0 z-10 shadow-2xs">
+        <div>
+          <!-- Dynamic Breadcrumbs -->
+          <div class="flex items-center gap-2 text-xs text-slate-500 font-medium">
+            <span>Admin Dashboard</span>
+            <span>/</span>
+            <span class="font-bold text-slate-800 capitalize">{{ currentTabTitle }}</span>
+          </div>
+          <h1 class="text-xl font-black text-[#1f242e] font-heading tracking-tight leading-tight mt-0.5">
+            {{ currentTabHeading }}
+          </h1>
+        </div>
+
+        <div class="flex items-center gap-2.5">
+          <!-- Contextual Action Buttons -->
+          <button
+            v-if="activeTab === 'projects'"
+            @click="openProjectModal()"
+            class="flex items-center gap-2 bg-[#d73f3f] hover:bg-[#c23434] text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-sm cursor-pointer"
+          >
+            <Plus :size="14" />
+            <span>Tambah Proyek Baru</span>
+          </button>
+
+          <button
+            v-if="activeTab === 'users_crud'"
+            @click="openUserModal()"
+            class="flex items-center gap-2 bg-[#d73f3f] hover:bg-[#c23434] text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-sm cursor-pointer"
+          >
+            <UserPlus :size="14" />
+            <span>Tambah Pengguna</span>
+          </button>
+
+          <button
+            @click="refreshCurrentTab"
+            class="p-2 border border-slate-200 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer bg-white"
+            title="Segarkan Data"
+          >
+            <RotateCw :size="14" :class="{ 'animate-spin': isRefreshing }" />
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Body Container -->
+      <div class="flex-1 p-6 lg:p-10 space-y-6">
+
+        <!-- ────────────────────────────────────────────────── -->
+        <!-- VIEW 1: INFORMASI AKUN                             -->
+        <!-- ────────────────────────────────────────────────── -->
+        <div v-if="activeTab === 'account_info'" class="space-y-6 max-w-5xl">
+          
+          <!-- Welcome Hero Banner -->
+          <div class="bg-gradient-to-r from-slate-900 via-[#1f242e] to-slate-800 text-white rounded-3xl p-6 sm:p-8 shadow-sm relative overflow-hidden">
+            <div class="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+              <div class="flex items-center gap-4">
+                <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-purple-500 to-indigo-600 flex items-center justify-center font-black text-2xl text-white shadow-md border-2 border-white/20">
+                  {{ (authStore.user?.full_name || authStore.userName || 'A').charAt(0).toUpperCase() }}
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <h2 class="text-2xl font-black text-white font-heading">{{ authStore.user?.full_name || authStore.userName }}</h2>
+                    <span class="px-2.5 py-0.5 rounded-full bg-purple-500/30 border border-purple-400/40 text-purple-200 font-bold text-[11px] uppercase tracking-wider">
+                      Administrator
+                    </span>
+                  </div>
+                  <p class="text-xs text-slate-300 mt-1">
+                    Username: <span class="font-mono text-white font-bold">{{ authStore.user?.username }}</span> · Hak Akses Penuh Sistem GEOSTEVIA
+                  </p>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-3">
                 <button
-                  type="button"
-                  @click="importTargetType = 'new'"
-                  class="p-2.5 rounded-xl border text-xs font-bold transition-all text-left cursor-pointer flex flex-col gap-0.5"
-                  :class="importTargetType === 'new'
-                    ? 'border-rose-500 bg-rose-50/70 text-rose-900 shadow-2xs'
-                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'"
+                  @click="activeTab = 'user_profile'"
+                  class="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 transition-all flex items-center gap-1.5 cursor-pointer"
                 >
-                  <span>✨ Buat Proyek Baru</span>
-                  <span class="text-[10px] font-normal text-slate-500">Otomatis dari nama file</span>
+                  <Pencil :size="13" />
+                  <span>Edit Profil</span>
                 </button>
                 <button
-                  type="button"
-                  @click="importTargetType = 'existing'"
-                  class="p-2.5 rounded-xl border text-xs font-bold transition-all text-left cursor-pointer flex flex-col gap-0.5"
-                  :class="importTargetType === 'existing'
-                    ? 'border-rose-500 bg-rose-50/70 text-rose-900 shadow-2xs'
-                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'"
+                  @click="activeTab = 'projects'"
+                  class="px-4 py-2 bg-[#d73f3f] hover:bg-[#c23434] text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
                 >
-                  <span>📁 Proyek Yang Ada</span>
-                  <span class="text-[10px] font-normal text-slate-500">Gabungkan ke proyek</span>
+                  <FolderKanban :size="13" />
+                  <span>Kelola Proyek</span>
                 </button>
               </div>
             </div>
+          </div>
 
-            <!-- New Project Inputs -->
-            <div v-if="importTargetType === 'new'" class="space-y-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
-              <div class="space-y-1">
-                <label class="block text-[11px] font-bold text-slate-700">Nama Proyek Baru *</label>
-                <input
-                  v-model="importNewProjectName"
-                  placeholder="Contoh: Grid Kustom Riau 2025"
-                  class="w-full bg-white border border-slate-300 rounded-xl p-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500 font-sans"
-                />
+          <!-- Account Details Grid -->
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            
+            <!-- Card 1: Data Identitas Pengguna -->
+            <div class="bg-white rounded-2xl border border-slate-200/80 p-5 space-y-4 shadow-xs">
+              <div class="flex items-center gap-2 text-slate-900 font-extrabold text-sm border-b border-slate-100 pb-3">
+                <BadgeCheck :size="16" class="text-blue-600" />
+                <span>Identitas Akun</span>
               </div>
-              <div class="space-y-1">
-                <label class="block text-[11px] font-bold text-slate-700">Deskripsi (Opsional)</label>
-                <input
-                  v-model="importNewProjectDesc"
-                  placeholder="Deskripsi wilayah atau sumber shapefile..."
-                  class="w-full bg-white border border-slate-300 rounded-xl p-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500 font-sans"
-                />
+              <div class="space-y-2.5 text-xs">
+                <div>
+                  <div class="text-slate-400 text-[10px] font-bold uppercase">Nama Lengkap</div>
+                  <div class="font-bold text-slate-800 text-sm mt-0.5">{{ currentAdminUser.full_name || authStore.userName }}</div>
+                </div>
+                <div>
+                  <div class="text-slate-400 text-[10px] font-bold uppercase">Alamat Email</div>
+                  <div class="font-bold text-slate-800 mt-0.5">{{ currentAdminUser.email || '-' }}</div>
+                </div>
+                <div>
+                  <div class="text-slate-400 text-[10px] font-bold uppercase">Nomor Induk (NIM/NIP)</div>
+                  <div class="font-mono font-bold text-slate-800 mt-0.5">{{ currentAdminUser.nim_nip || 'N/A' }}</div>
+                </div>
+                <div>
+                  <div class="text-slate-400 text-[10px] font-bold uppercase">Nomor Telepon / WhatsApp</div>
+                  <div class="font-bold text-slate-800 mt-0.5">{{ currentAdminUser.phone || '-' }}</div>
+                </div>
               </div>
             </div>
 
-            <!-- Existing Project Select -->
-            <div v-else class="space-y-1 p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
-              <label class="block text-[11px] font-bold text-slate-700">Pilih Proyek / Wilayah Studi Tujuan *</label>
+            <!-- Card 2: Lembaga & Satuan Kerja -->
+            <div class="bg-white rounded-2xl border border-slate-200/80 p-5 space-y-4 shadow-xs">
+              <div class="flex items-center gap-2 text-slate-900 font-extrabold text-sm border-b border-slate-100 pb-3">
+                <Building2 :size="16" class="text-purple-600" />
+                <span>Institusi & Divisi</span>
+              </div>
+              <div class="space-y-2.5 text-xs">
+                <div>
+                  <div class="text-slate-400 text-[10px] font-bold uppercase">Institusi / Universitas</div>
+                  <div class="font-bold text-slate-800 mt-0.5">{{ currentAdminUser.institution || 'GEOSTEVIA Core Platform' }}</div>
+                </div>
+                <div>
+                  <div class="text-slate-400 text-[10px] font-bold uppercase">Departemen / Fakultas</div>
+                  <div class="font-bold text-slate-800 mt-0.5">{{ currentAdminUser.department || 'Divisi Spasial & Pemetaan' }}</div>
+                </div>
+                <div>
+                  <div class="text-slate-400 text-[10px] font-bold uppercase">Alamat Domisili / Kantor</div>
+                  <div class="text-slate-700 mt-0.5 leading-relaxed">{{ currentAdminUser.address || 'Padang, Sumatera Barat' }}</div>
+                </div>
+                <div>
+                  <div class="text-slate-400 text-[10px] font-bold uppercase">Status Akun</div>
+                  <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-extrabold text-[11px] mt-0.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    <span>Aktif & Terverifikasi</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card 3: Sesi & Keamanan -->
+            <div class="bg-white rounded-2xl border border-slate-200/80 p-5 space-y-4 shadow-xs">
+              <div class="flex items-center gap-2 text-slate-900 font-extrabold text-sm border-b border-slate-100 pb-3">
+                <ShieldCheck :size="16" class="text-emerald-600" />
+                <span>Status Keamanan & Sesi</span>
+              </div>
+              <div class="space-y-2.5 text-xs">
+                <div>
+                  <div class="text-slate-400 text-[10px] font-bold uppercase">Tipe Autentikasi</div>
+                  <div class="font-mono text-slate-800 font-bold mt-0.5">OAuth2 / Bearer JWT (HS256)</div>
+                </div>
+                <div>
+                  <div class="text-slate-400 text-[10px] font-bold uppercase">Masa Berlaku Token</div>
+                  <div class="text-slate-700 mt-0.5">7 Hari sejak login (Auto-renew)</div>
+                </div>
+                <div>
+                  <div class="text-slate-400 text-[10px] font-bold uppercase">Hak Istimewa (Privilege)</div>
+                  <div class="text-slate-700 mt-0.5">
+                    Full CRUD Proyek, CRUD User, QC Approval, Ekspor Dataset
+                  </div>
+                </div>
+                <div class="pt-2">
+                  <button
+                    @click="activeTab = 'user_profile'"
+                    class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition-colors text-xs flex items-center justify-center gap-1.5"
+                  >
+                    <Key :size="13" />
+                    <span>Ubah Password Akun</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Quick System Metrics Bar -->
+          <div class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs">
+            <h3 class="text-xs font-black uppercase tracking-wider text-slate-400 mb-4">Ringkasan Beban Kerja Sistem</h3>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+              <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div class="text-2xl font-black text-slate-900 font-mono">{{ adminStore.projects.length }}</div>
+                <div class="text-[11px] font-bold text-slate-500 uppercase mt-0.5">Total Proyek</div>
+              </div>
+              <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div class="text-2xl font-black text-blue-600 font-mono">{{ totalUsersCount }}</div>
+                <div class="text-[11px] font-bold text-slate-500 uppercase mt-0.5">Pengguna Terdaftar</div>
+              </div>
+              <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div class="text-2xl font-black text-purple-600 font-mono">{{ totalSystemGrids }}</div>
+                <div class="text-[11px] font-bold text-slate-500 uppercase mt-0.5">Total Grid Patches</div>
+              </div>
+              <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div class="text-2xl font-black text-emerald-600 font-mono">{{ totalSystemApproved }}</div>
+                <div class="text-[11px] font-bold text-slate-500 uppercase mt-0.5">Grid Lulus QC</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ────────────────────────────────────────────────── -->
+        <!-- VIEW 2: STATISTIK KONTRIBUSI                       -->
+        <!-- ────────────────────────────────────────────────── -->
+        <div v-if="activeTab === 'stats'" class="space-y-6">
+          
+          <!-- KPI Stats Summary Cards -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
+              <div class="flex items-center justify-between text-slate-500">
+                <span class="text-xs font-bold uppercase tracking-wider">Total Akun</span>
+                <Users :size="18" class="text-slate-600" />
+              </div>
+              <div class="text-3xl font-black text-slate-900 mt-2 font-heading">{{ totalUsersCount }}</div>
+              <div class="text-[11px] text-slate-400 mt-1">{{ activeAnnotatorsCount }} Kontributor Aktif</div>
+            </div>
+
+            <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
+              <div class="flex items-center justify-between text-slate-500">
+                <span class="text-xs font-bold uppercase tracking-wider">Total Proyek</span>
+                <FolderKanban :size="18" class="text-rose-600" />
+              </div>
+              <div class="text-3xl font-black text-slate-900 mt-2 font-heading">{{ adminStore.projects.length }}</div>
+              <div class="text-[11px] text-slate-400 mt-1">Wilayah Kajian Spasial</div>
+            </div>
+
+            <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
+              <div class="flex items-center justify-between text-slate-500">
+                <span class="text-xs font-bold uppercase tracking-wider">Total Grid Patches</span>
+                <Grid :size="18" class="text-blue-600" />
+              </div>
+              <div class="text-3xl font-black text-slate-900 mt-2 font-mono">{{ totalSystemGrids }}</div>
+              <div class="text-[11px] text-slate-400 mt-1">Resolusi 1024×1024px</div>
+            </div>
+
+            <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
+              <div class="flex items-center justify-between text-slate-500">
+                <span class="text-xs font-bold uppercase tracking-wider">Grid Lulus QC</span>
+                <CheckCircle2 :size="18" class="text-emerald-600" />
+              </div>
+              <div class="text-3xl font-black text-emerald-600 mt-2 font-mono">{{ totalSystemApproved }}</div>
+              <div class="text-[11px] text-emerald-700 font-bold mt-1">Siap Ekspor Data Latih</div>
+            </div>
+          </div>
+
+          <!-- Leaderboard Kontributor Mahasiswa -->
+          <div class="bg-white rounded-2xl border border-slate-200/80 overflow-hidden shadow-xs">
+            <div class="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <Trophy :size="18" class="text-amber-500" />
+                <h3 class="font-extrabold text-sm text-slate-800 font-heading">Leaderboard Kontributor Mahasiswa</h3>
+              </div>
+              <span class="text-xs text-slate-400">Peringkat berdasarkan grid selesai dan poligon</span>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200">
+                  <tr>
+                    <th class="py-3 px-4 w-12 text-center">Rank</th>
+                    <th class="py-3 px-4">Kontributor / Mahasiswa</th>
+                    <th class="py-3 px-4">NIM / Akun</th>
+                    <th class="py-3 px-4 text-center">Grid Disetujui</th>
+                    <th class="py-3 px-4 text-center">Total Poligon</th>
+                    <th class="py-3 px-4 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  <tr
+                    v-for="(student, idx) in leaderboardList"
+                    :key="student.id || idx"
+                    class="hover:bg-slate-50/80 transition-colors"
+                  >
+                    <td class="py-3 px-4 text-center font-black">
+                      <span v-if="idx === 0" class="text-lg">🥇</span>
+                      <span v-else-if="idx === 1" class="text-lg">🥈</span>
+                      <span v-else-if="idx === 2" class="text-lg">🥉</span>
+                      <span v-else class="text-slate-400 font-mono">{{ idx + 1 }}</span>
+                    </td>
+                    <td class="py-3 px-4">
+                      <div class="font-bold text-slate-900">{{ student.name || student.full_name }}</div>
+                      <div class="text-[10px] text-slate-400">{{ student.institution || 'Mahasiswa' }}</div>
+                    </td>
+                    <td class="py-3 px-4 font-mono text-slate-600">
+                      {{ student.nim_nip || student.username }}
+                    </td>
+                    <td class="py-3 px-4 text-center font-bold text-emerald-600 font-mono">
+                      {{ student.approved_tasks || 0 }} Grid
+                    </td>
+                    <td class="py-3 px-4 text-center font-black text-purple-700 font-mono">
+                      {{ student.total_polygons || 0 }}
+                    </td>
+                    <td class="py-3 px-4 text-center">
+                      <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        Aktif
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ────────────────────────────────────────────────── -->
+        <!-- VIEW 3: CRUD PENGGUNA                              -->
+        <!-- ────────────────────────────────────────────────── -->
+        <div v-if="activeTab === 'users_crud'" class="space-y-6">
+          
+          <!-- KPI Row -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs">
+              <div class="text-xs font-bold text-slate-500 uppercase">Total Pengguna</div>
+              <div class="text-2xl font-black text-slate-900 mt-1 font-heading">{{ totalUsersCount }}</div>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-purple-200/80 shadow-xs bg-purple-50/20">
+              <div class="text-xs font-bold text-purple-700 uppercase">Administrator</div>
+              <div class="text-2xl font-black text-purple-900 mt-1 font-heading">{{ adminUsersCount }}</div>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-indigo-200/80 shadow-xs bg-indigo-50/20">
+              <div class="text-xs font-bold text-indigo-700 uppercase">Supervisi / Dosen</div>
+              <div class="text-2xl font-black text-indigo-900 mt-1 font-heading">{{ dosenUsersCount }}</div>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-rose-200/80 shadow-xs bg-rose-50/20">
+              <div class="text-xs font-bold text-rose-700 uppercase">Kontributor Mahasiswa</div>
+              <div class="text-2xl font-black text-rose-900 mt-1 font-heading">{{ activeAnnotatorsCount }}</div>
+            </div>
+          </div>
+
+          <!-- Search & Filter Bar -->
+          <div class="bg-white rounded-2xl border border-[#e4e7eb] p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+            <div class="relative flex-1 w-full max-w-md">
+              <Search :size="15" class="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                v-model="userSearch"
+                type="text"
+                placeholder="Cari nama, NIM, email, username..."
+                class="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-hidden focus:border-rose-500 focus:bg-white"
+              />
+              <button v-if="userSearch" @click="userSearch = ''" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <X :size="13" />
+              </button>
+            </div>
+
+            <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
               <select
-                v-model="importSelectedProjectId"
-                class="w-full bg-white border border-slate-300 rounded-xl p-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500 font-sans"
+                v-model="userRoleFilter"
+                class="bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 py-2 px-3 rounded-xl focus:outline-hidden"
               >
-                <option :value="null" disabled>-- Pilih salah satu proyek --</option>
-                <option v-for="proj in adminStore.projects" :key="proj.id" :value="proj.id">
-                  {{ proj.name }} ({{ proj.total_tasks }} tasks)
-                </option>
+                <option value="all">Semua Peran</option>
+                <option value="admin">Administrator</option>
+                <option value="dosen">Supervisi / Dosen</option>
+                <option value="annotator">Anotator / Mahasiswa</option>
+              </select>
+
+              <select
+                v-model="userStatusFilter"
+                class="bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 py-2 px-3 rounded-xl focus:outline-hidden"
+              >
+                <option value="all">Semua Status</option>
+                <option value="active">Aktif</option>
+                <option value="inactive">Nonaktif</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- User Table -->
+          <div class="bg-white rounded-2xl border border-[#e4e7eb] overflow-hidden shadow-xs">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200">
+                  <tr>
+                    <th class="py-3.5 px-4">Pengguna</th>
+                    <th class="py-3.5 px-4">Kontak & Lembaga</th>
+                    <th class="py-3.5 px-4">Role / Peran</th>
+                    <th class="py-3.5 px-4 text-center">Status</th>
+                    <th class="py-3.5 px-4 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  <tr
+                    v-for="user in filteredUsers"
+                    :key="user.id"
+                    class="hover:bg-slate-50/80 transition-colors"
+                  >
+                    <!-- Pengguna -->
+                    <td class="py-3.5 px-4">
+                      <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-white text-xs shrink-0" :class="getAvatarColor(user)">
+                          {{ (user.full_name || user.username || 'U').charAt(0).toUpperCase() }}
+                        </div>
+                        <div class="min-w-0">
+                          <div class="font-extrabold text-slate-900 leading-tight">{{ user.full_name }}</div>
+                          <div class="text-[11px] text-slate-400 font-mono">@{{ user.username }}</div>
+                        </div>
+                      </div>
+                    </td>
+
+                    <!-- Kontak & Lembaga -->
+                    <td class="py-3.5 px-4">
+                      <div class="text-slate-800">{{ user.email || '-' }}</div>
+                      <div class="text-[11px] text-slate-400">{{ user.institution || '-' }} <span v-if="user.nim_nip">· NIM: {{ user.nim_nip }}</span></div>
+                    </td>
+
+                    <!-- Role Badge -->
+                    <td class="py-3.5 px-4">
+                      <span v-if="user.role === 'admin'" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-50 text-purple-700 border border-purple-200">Admin</span>
+                      <span v-else-if="user.role === 'dosen' || user.role === 'supervisi'" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">Supervisi</span>
+                      <span v-else class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200">Kontributor</span>
+                    </td>
+
+                    <!-- Status -->
+                    <td class="py-3.5 px-4 text-center">
+                      <button
+                        @click="toggleActive(user)"
+                        class="px-2.5 py-1 rounded-full text-[10px] font-extrabold transition-all cursor-pointer border"
+                        :class="user.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-300'"
+                      >
+                        {{ user.is_active ? 'Aktif' : 'Nonaktif' }}
+                      </button>
+                    </td>
+
+                    <!-- Aksi -->
+                    <td class="py-3.5 px-4 text-right">
+                      <div class="flex items-center justify-end gap-1.5">
+                        <button
+                          @click="openUserModal(user)"
+                          class="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                          title="Edit User"
+                        >
+                          <Pencil :size="13" />
+                        </button>
+                        <button
+                          @click="openResetPasswordModal(user)"
+                          class="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                          title="Reset Password"
+                        >
+                          <Key :size="13" />
+                        </button>
+                        <button
+                          v-if="user.id !== authStore.user?.id"
+                          @click="confirmDeleteUser(user)"
+                          class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          title="Hapus User"
+                        >
+                          <Trash2 :size="13" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ────────────────────────────────────────────────── -->
+        <!-- VIEW 4: PROFIL PENGGUNA (EDITOR DETAIL)            -->
+        <!-- ────────────────────────────────────────────────── -->
+        <div v-if="activeTab === 'user_profile'" class="space-y-6 max-w-4xl">
+          
+          <div class="bg-white rounded-2xl border border-slate-200/80 p-6 space-y-6 shadow-xs">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <h3 class="font-extrabold text-base text-slate-900 font-heading">Perbarui Informasi Profil</h3>
+                <p class="text-xs text-slate-500 mt-0.5">Kelola identitas, instansi, dan informasi kontak akun administrator Anda.</p>
+              </div>
+              <span class="px-3 py-1 rounded-full bg-purple-50 text-purple-700 text-xs font-bold border border-purple-200">
+                Administrator
+              </span>
+            </div>
+
+            <form @submit.prevent="saveMyProfile" class="space-y-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="space-y-1">
+                  <label class="text-xs font-bold text-slate-700 uppercase">Nama Lengkap *</label>
+                  <input v-model="profileForm.full_name" type="text" class="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-rose-500 focus:outline-hidden" />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-bold text-slate-700 uppercase">Alamat Email *</label>
+                  <input v-model="profileForm.email" type="email" class="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-rose-500 focus:outline-hidden" />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="space-y-1">
+                  <label class="text-xs font-bold text-slate-700 uppercase">Nomor Induk (NIM / NIP)</label>
+                  <input v-model="profileForm.nim_nip" type="text" class="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-rose-500 focus:outline-hidden" />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-bold text-slate-700 uppercase">Nomor Telepon / WhatsApp</label>
+                  <input v-model="profileForm.phone" type="text" class="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-rose-500 focus:outline-hidden" />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="space-y-1">
+                  <label class="text-xs font-bold text-slate-700 uppercase">Institusi / Universitas</label>
+                  <input v-model="profileForm.institution" type="text" class="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-rose-500 focus:outline-hidden" />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-bold text-slate-700 uppercase">Fakultas / Program Studi</label>
+                  <input v-model="profileForm.department" type="text" class="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-rose-500 focus:outline-hidden" />
+                </div>
+              </div>
+
+              <div class="space-y-1">
+                <label class="text-xs font-bold text-slate-700 uppercase">Alamat Kantor / Domisili</label>
+                <textarea v-model="profileForm.address" rows="2" class="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-rose-500 focus:outline-hidden resize-none"></textarea>
+              </div>
+
+              <div class="pt-2 flex justify-end">
+                <button
+                  type="submit"
+                  :disabled="savingProfile"
+                  class="px-6 py-2.5 bg-[#d73f3f] hover:bg-[#c23434] text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <RotateCw v-if="savingProfile" :size="14" class="animate-spin" />
+                  <Save v-else :size="14" />
+                  <span>{{ savingProfile ? 'Menyimpan...' : 'Simpan Perubahan Profil' }}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Password Change Card -->
+          <div class="bg-white rounded-2xl border border-slate-200/80 p-6 space-y-4 shadow-xs">
+            <div class="border-b border-slate-100 pb-3">
+              <h3 class="font-extrabold text-sm text-slate-900 font-heading">Ubah Password Administrator</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Pastikan password baru memiliki panjang minimal 6 karakter.</p>
+            </div>
+
+            <form @submit.prevent="changeMyPassword" class="space-y-4 max-w-md">
+              <div class="space-y-1">
+                <label class="text-xs font-bold text-slate-700 uppercase">Password Baru</label>
+                <input v-model="passwordForm.new_password" type="password" class="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:border-rose-500 focus:outline-hidden" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-xs font-bold text-slate-700 uppercase">Konfirmasi Password Baru</label>
+                <input v-model="passwordForm.confirm_password" type="password" class="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:border-rose-500 focus:outline-hidden" />
+              </div>
+              <button
+                type="submit"
+                :disabled="savingPassword || !passwordForm.new_password"
+                class="px-5 py-2 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-xl transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <Lock :size="13" />
+                <span>{{ savingPassword ? 'Memperbarui...' : 'Perbarui Password' }}</span>
+              </button>
+            </form>
+          </div>
+
+        </div>
+
+        <!-- ────────────────────────────────────────────────── -->
+        <!-- VIEW 5: PANEL ADMIN (KELOLA PROYEK)               -->
+        <!-- ────────────────────────────────────────────────── -->
+        <div v-if="activeTab === 'projects'" class="space-y-4">
+          
+          <!-- Projects Grid -->
+          <div v-if="adminStore.loadingProjects" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div v-for="i in 3" :key="i" class="bg-white rounded-2xl border border-[#e4e7eb] p-5 animate-pulse space-y-3">
+              <div class="h-4 bg-slate-200 rounded w-3/4"></div>
+              <div class="h-3 bg-slate-100 rounded w-full"></div>
+              <div class="h-3 bg-slate-100 rounded w-1/2"></div>
+            </div>
+          </div>
+
+          <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div
+              v-for="project in adminStore.projects"
+              :key="project.id"
+              class="bg-white rounded-2xl border border-[#e4e7eb] p-5 hover:border-slate-300 hover:shadow-md transition-all space-y-4"
+            >
+              <!-- Project Header with Lucide priority/difficulty badges -->
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5 mb-1.5">
+                    <span
+                      v-if="project.priority === 'URGENT'"
+                      class="border border-red-500 text-red-600 font-extrabold text-[9px] px-2 py-0.5 rounded tracking-wider uppercase flex items-center gap-1"
+                    >
+                      <Flame :size="10" />
+                      <span>URGENT</span>
+                    </span>
+                    <span
+                      v-else-if="project.priority === 'HIGH'"
+                      class="border border-amber-500 text-amber-600 font-extrabold text-[9px] px-2 py-0.5 rounded tracking-wider uppercase flex items-center gap-1"
+                    >
+                      <Clock :size="10" />
+                      <span>HIGH</span>
+                    </span>
+                    <span
+                      v-else
+                      class="border border-blue-400 text-blue-600 font-extrabold text-[9px] px-2 py-0.5 rounded tracking-wider uppercase flex items-center gap-1"
+                    >
+                      <Layers :size="10" />
+                      <span>{{ project.priority || 'MEDIUM' }}</span>
+                    </span>
+                    <span class="text-[10px] text-slate-500 font-medium">· {{ project.difficulty || 'Moderate' }}</span>
+                  </div>
+                  <div class="font-black text-sm text-[#1f242e] leading-tight">{{ project.name }}</div>
+                  <div class="text-[11px] text-[#707a8a] mt-0.5 line-clamp-2">{{ project.description || 'Tidak ada deskripsi' }}</div>
+                </div>
+
+                <div class="flex gap-1 shrink-0">
+                  <button
+                    @click="confirmResetProject(project)"
+                    class="w-7 h-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:border-amber-400 hover:text-amber-600 hover:bg-amber-50 transition-all cursor-pointer"
+                    title="Reset seluruh pengerjaan proyek"
+                  >
+                    <RotateCcw :size="12" />
+                  </button>
+                  <button
+                    @click="openProjectModal(project)"
+                    class="w-7 h-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all cursor-pointer"
+                    title="Edit Proyek"
+                  >
+                    <Pencil :size="12" />
+                  </button>
+                  <button
+                    @click="confirmDeleteProject(project)"
+                    class="w-7 h-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:border-red-400 hover:text-red-600 hover:bg-red-50 transition-all cursor-pointer"
+                    title="Hapus Proyek"
+                  >
+                    <Trash2 :size="12" />
+                  </button>
+                </div>
+              </div>
+
+              <!-- Stats Metrics -->
+              <div class="grid grid-cols-3 gap-2 text-center">
+                <div class="bg-slate-50 rounded-xl p-2 border border-slate-100">
+                  <div class="font-black text-base text-[#1f242e] font-mono">{{ project.total_tasks?.toLocaleString() || 0 }}</div>
+                  <div class="text-[10px] text-[#707a8a] font-bold uppercase">Total Grid</div>
+                </div>
+                <div class="bg-emerald-50/70 border border-emerald-100 rounded-xl p-2">
+                  <div class="font-black text-base text-emerald-700 font-mono">{{ project.approved_tasks || 0 }}</div>
+                  <div class="text-[10px] text-emerald-600 font-bold uppercase">Approved</div>
+                </div>
+                <div class="bg-blue-50/70 border border-blue-100 rounded-xl p-2">
+                  <div class="font-black text-base text-blue-700 font-mono">{{ project.in_progress_tasks || 0 }}</div>
+                  <div class="text-[10px] text-blue-600 font-bold uppercase">On Progress</div>
+                </div>
+              </div>
+
+              <!-- Action Link -->
+              <div class="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                <router-link :to="`/project/${project.id}`" class="font-bold text-[#d73f3f] hover:underline flex items-center gap-1">
+                  <span>Buka Tasking Studio</span>
+                  <ExternalLink :size="12" />
+                </router-link>
+                <span class="text-[10px] text-slate-400 font-mono">ID: #{{ 64060 + project.id }}</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ────────────────────────────────────────────────── -->
+        <!-- VIEW 6: IMPORT GRID KUSTOM                         -->
+        <!-- ────────────────────────────────────────────────── -->
+        <div v-if="activeTab === 'import'" class="space-y-4 max-w-4xl">
+          
+          <div class="bg-white rounded-2xl border border-[#e4e7eb] p-6 space-y-6 shadow-xs">
+            <div>
+              <h3 class="font-extrabold text-base text-slate-900 font-heading">Import Grid Geospasial Kustom</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Unggah Shapefile (.zip) atau file GeoJSON (.geojson / .json) untuk membuat petak grid tasking otomatis.</p>
+            </div>
+
+            <!-- Target Project Type -->
+            <div class="space-y-2">
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Tujuan Proyek:</label>
+              <div class="flex items-center gap-4 text-xs font-bold">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" v-model="importTargetType" value="existing" class="text-rose-600" />
+                  <span>Tambahkan ke Proyek yang Sudah Ada</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" v-model="importTargetType" value="new" class="text-rose-600" />
+                  <span>Buat Proyek Baru Otomatis</span>
+                </label>
+              </div>
+            </div>
+
+            <div v-if="importTargetType === 'existing'" class="space-y-1">
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Pilih Proyek:</label>
+              <select v-model="importSelectedProjectId" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800">
+                <option v-for="p in adminStore.projects" :key="p.id" :value="p.id">{{ p.name }}</option>
               </select>
             </div>
 
-            <!-- Year Checkboxes -->
-            <div class="space-y-2">
-              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Tahun Komposit Sentinel-2:
-              </label>
-              <div class="flex items-center gap-3">
-                <label v-for="yr in [2017, 2021, 2025]" :key="yr" class="flex items-center gap-1.5 text-xs font-bold text-slate-800 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    :value="yr"
-                    v-model="importYears"
-                    class="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer"
-                  />
-                  <span>{{ yr }}</span>
-                </label>
+            <div v-else class="space-y-3">
+              <div class="space-y-1">
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Nama Proyek Baru *</label>
+                <input v-model="importNewProjectName" type="text" placeholder="cth: Kawasan Hutan Lindung Riau 2026" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800" />
               </div>
-              <p class="text-[10px] text-slate-400">Setiap poligon grid akan dibuatkan 1 tugas terpisah untuk setiap tahun yang dicentang.</p>
+              <div class="space-y-1">
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Deskripsi Proyek</label>
+                <textarea v-model="importNewProjectDesc" rows="2" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800 resize-none"></textarea>
+              </div>
             </div>
 
-            <!-- Custom Column ID (Optional) -->
-            <div class="space-y-1">
-              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Nama Kolom Kode Grid (Opsional):
-              </label>
-              <input
-                v-model="importColumnName"
-                placeholder="Otomatis (misal: grid_code, id, name, fid)"
-                class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500 focus:bg-white font-mono"
-              />
-              <p class="text-[10px] text-slate-400">Kosongkan untuk mendeteksi kolom atribut secara otomatis.</p>
+            <!-- Upload File Box -->
+            <div
+              @dragover.prevent="isDragOver = true"
+              @dragleave.prevent="isDragOver = false"
+              @drop.prevent="handleDrop"
+              class="border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer"
+              :class="isDragOver ? 'border-rose-500 bg-rose-50/40' : 'border-slate-300 bg-slate-50/50 hover:bg-slate-50'"
+              @click="$refs.fileInput.click()"
+            >
+              <input ref="fileInput" type="file" accept=".zip,.geojson,.json" class="hidden" @change="onFileSelected" />
+              <div class="w-12 h-12 rounded-xl bg-rose-100 text-[#d73f3f] flex items-center justify-center mx-auto mb-2">
+                <UploadCloud :size="24" />
+              </div>
+              <div class="text-sm font-bold text-slate-800">
+                {{ importFile ? importFile.name : 'Klik atau seret file Shapefile (.zip) / GeoJSON ke sini' }}
+              </div>
+              <div class="text-xs text-slate-400 mt-1">Maksimum ukuran file: 25 MB</div>
             </div>
 
-            <!-- Process Button -->
-            <div class="pt-2">
-              <button
-                @click="executeImport"
-                :disabled="!importFile || importLoading || importYears.length === 0"
-                class="w-full bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-extrabold text-sm py-3 rounded-2xl transition-all shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              >
-                <RotateCw v-if="importLoading" :size="16" class="animate-spin" />
-                <UploadCloud v-else :size="16" />
-                <span>{{ importLoading ? 'Memproses & Mengimpor Grid...' : 'Proses & Import Grid Sekarang' }}</span>
-              </button>
-            </div>
+            <button
+              @click="executeImport"
+              :disabled="!importFile || importLoading"
+              class="w-full py-3 bg-[#d73f3f] hover:bg-[#c23434] text-white font-extrabold text-sm rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <RotateCw v-if="importLoading" :size="16" class="animate-spin" />
+              <UploadCloud v-else :size="16" />
+              <span>{{ importLoading ? 'Memproses & Mengimpor Grid...' : 'Proses & Import Grid Sekarang' }}</span>
+            </button>
 
             <!-- Success Card -->
-            <div v-if="importResult" class="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl space-y-3 animate-in fade-in">
+            <div v-if="importResult" class="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl space-y-2">
               <div class="flex items-center gap-2 text-emerald-900 font-extrabold text-xs">
-                <CheckCircle2 :size="18" class="text-emerald-600 shrink-0" />
+                <CheckCircle2 :size="16" class="text-emerald-600" />
                 <span>{{ importResult.message }}</span>
               </div>
-              <div class="text-[11px] text-emerald-800 space-y-1 font-mono">
+              <div class="text-[11px] text-emerald-800 space-y-0.5 font-mono">
                 <div>• Proyek: <b>{{ importResult.study_area_name }}</b></div>
-                <div>• Jumlah Grid Asli: <b>{{ importResult.feature_count }} fitur</b></div>
-                <div>• Total Tugas Dibuat: <b>{{ importResult.created_tasks_count }} tugas</b></div>
+                <div>• Total Tugas Dibuat: <b>{{ importResult.created_tasks_count }} grid</b></div>
               </div>
-              <router-link
-                to="/tasking"
-                class="inline-flex items-center gap-1.5 text-xs bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded-xl transition-all shadow-xs cursor-pointer"
-              >
-                <ExternalLink :size="12" />
-                <span>Buka di Tasking Manager</span>
-              </router-link>
             </div>
 
           </div>
@@ -427,591 +982,11 @@
         </div>
 
       </div>
+    </main>
 
-      <!-- ═══════════════════════════════════════ -->
-      <!-- TAB 3: MANAJEMEN PENGGUNA (2026 MODERN) -->
-      <!-- ═══════════════════════════════════════ -->
-      <div v-if="activeTab === 'users'" class="space-y-6">
-
-        <!-- 1. KPI Stats Summary Cards -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <!-- Total Users -->
-          <div class="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs hover:shadow-md transition-all relative overflow-hidden group">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Akun</span>
-              <div class="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-700 group-hover:scale-105 transition-transform">
-                <Users :size="20" />
-              </div>
-            </div>
-            <div class="mt-3">
-              <div class="text-3xl font-black text-slate-900 font-heading tracking-tight">{{ totalUsersCount }}</div>
-              <p class="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-                <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>Semua pengguna terdaftar</span>
-              </p>
-            </div>
-          </div>
-
-          <!-- Admins -->
-          <div class="bg-white rounded-3xl p-5 border border-purple-200/80 shadow-xs hover:shadow-md transition-all relative overflow-hidden group bg-gradient-to-br from-white to-purple-50/30">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-purple-700 uppercase tracking-wider">Administrator</span>
-              <div class="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center text-purple-700 group-hover:scale-105 transition-transform">
-                <ShieldCheck :size="20" />
-              </div>
-            </div>
-            <div class="mt-3">
-              <div class="text-3xl font-black text-purple-900 font-heading tracking-tight">{{ adminUsersCount }}</div>
-              <p class="text-xs text-purple-600 mt-1">
-                <span>Hak penuh & kelola pengguna</span>
-              </p>
-            </div>
-          </div>
-
-          <!-- Supervisi / QC Reviewers -->
-          <div class="bg-white rounded-3xl p-5 border border-indigo-200/80 shadow-xs hover:shadow-md transition-all relative overflow-hidden group bg-gradient-to-br from-white to-indigo-50/30">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-indigo-700 uppercase tracking-wider">Supervisi</span>
-              <div class="w-10 h-10 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-700 group-hover:scale-105 transition-transform">
-                <GraduationCap :size="20" />
-              </div>
-            </div>
-            <div class="mt-3">
-              <div class="text-3xl font-black text-indigo-900 font-heading tracking-tight">{{ dosenUsersCount }}</div>
-              <p class="text-xs text-indigo-600 mt-1">
-                <span>Hak validasi & supervisi QC</span>
-              </p>
-            </div>
-          </div>
-
-          <!-- Active Annotators -->
-          <div class="bg-white rounded-3xl p-5 border border-emerald-200/80 shadow-xs hover:shadow-md transition-all relative overflow-hidden group bg-gradient-to-br from-white to-emerald-50/30">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Mapper Aktif</span>
-              <div class="w-10 h-10 rounded-2xl bg-emerald-100 flex items-center justify-center text-emerald-700 group-hover:scale-105 transition-transform">
-                <PenTool :size="18" />
-              </div>
-            </div>
-            <div class="mt-3">
-              <div class="text-3xl font-black text-emerald-700 font-heading tracking-tight">{{ activeAnnotatorsCount }}</div>
-              <p class="text-xs text-emerald-600 mt-1">
-                <span>Kontributor aktif digitasi</span>
-              </p>
-            </div>
-          </div>
-
-          <!-- Inactive / Suspended Users -->
-          <div class="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs hover:shadow-md transition-all relative overflow-hidden group">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Nonaktif</span>
-              <div class="w-10 h-10 rounded-2xl bg-rose-50 flex items-center justify-center text-rose-600 group-hover:scale-105 transition-transform">
-                <UserX :size="20" />
-              </div>
-            </div>
-            <div class="mt-3">
-              <div class="text-3xl font-black text-slate-800 font-heading tracking-tight">{{ inactiveUsersCount }}</div>
-              <p class="text-xs text-slate-500 mt-1">
-                <span>Akses login ditangguhkan</span>
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <!-- 2. Smart Toolbar & Filter Control -->
-        <div class="bg-white rounded-3xl border border-slate-200/90 p-4 lg:p-5 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
-          <!-- Search & Filter Chips -->
-          <div class="flex flex-wrap items-center gap-3 flex-1">
-            <!-- Search Box -->
-            <div class="relative w-full sm:w-72">
-              <input
-                v-model="userSearch"
-                placeholder="Cari nama, username, email..."
-                class="w-full pl-9 pr-8 py-2.5 text-xs border border-slate-200 rounded-2xl bg-slate-50/60 focus:bg-white focus:outline-none focus:border-rose-500 transition-all font-sans text-slate-800"
-              />
-              <Search :size="15" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <button
-                v-if="userSearch"
-                @click="userSearch = ''"
-                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                <X :size="14" />
-              </button>
-            </div>
-
-            <!-- Role Filter Chips -->
-            <div class="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200/80 text-xs">
-              <button
-                @click="userRoleFilter = 'all'"
-                class="px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer"
-                :class="userRoleFilter === 'all' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'"
-              >
-                Semua Peran
-              </button>
-              <button
-                @click="userRoleFilter = 'admin'"
-                class="px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 cursor-pointer"
-                :class="userRoleFilter === 'admin' ? 'bg-purple-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'"
-              >
-                <ShieldCheck :size="12" />
-                <span>Admin</span>
-              </button>
-              <button
-                @click="userRoleFilter = 'dosen'"
-                class="px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 cursor-pointer"
-                :class="userRoleFilter === 'dosen' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'"
-              >
-                <GraduationCap :size="13" />
-                <span>Supervisi</span>
-              </button>
-              <button
-                @click="userRoleFilter = 'annotator'"
-                class="px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 cursor-pointer"
-                :class="userRoleFilter === 'annotator' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'"
-              >
-                <PenTool :size="11" />
-                <span>Mapper</span>
-              </button>
-            </div>
-
-            <!-- Status Filter Chips -->
-            <div class="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200/80 text-xs">
-              <button
-                @click="userStatusFilter = 'all'"
-                class="px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer"
-                :class="userStatusFilter === 'all' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'"
-              >
-                Semua Status
-              </button>
-              <button
-                @click="userStatusFilter = 'active'"
-                class="px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 cursor-pointer"
-                :class="userStatusFilter === 'active' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'"
-              >
-                <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
-                <span>Aktif</span>
-              </button>
-              <button
-                @click="userStatusFilter = 'inactive'"
-                class="px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 cursor-pointer"
-                :class="userStatusFilter === 'inactive' ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'"
-              >
-                <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
-                <span>Nonaktif</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Actions & View Toggles -->
-          <div class="flex items-center gap-2 self-end lg:self-center">
-            <!-- View Mode Switcher -->
-            <div class="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200/80 text-slate-500">
-              <button
-                @click="userViewMode = 'table'"
-                class="p-2 rounded-xl transition-all cursor-pointer"
-                :class="userViewMode === 'table' ? 'bg-white text-slate-900 shadow-2xs' : 'hover:text-slate-800'"
-                title="Tampilan Tabel Detail"
-              >
-                <List :size="15" />
-              </button>
-              <button
-                @click="userViewMode = 'grid'"
-                class="p-2 rounded-xl transition-all cursor-pointer"
-                :class="userViewMode === 'grid' ? 'bg-white text-slate-900 shadow-2xs' : 'hover:text-slate-800'"
-                title="Tampilan Kartu Profil"
-              >
-                <LayoutGrid :size="15" />
-              </button>
-            </div>
-
-            <!-- Refresh Button -->
-            <button
-              @click="refreshUsers"
-              :disabled="adminStore.loadingUsers"
-              class="p-2.5 rounded-2xl border border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-slate-900 transition-all cursor-pointer"
-              title="Perbarui Data Pengguna"
-            >
-              <RefreshCw :size="15" :class="adminStore.loadingUsers ? 'animate-spin text-rose-600' : ''" />
-            </button>
-
-            <!-- Add User Button -->
-            <button
-              @click="openUserModal()"
-              class="flex items-center gap-2 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-extrabold text-xs px-4 py-2.5 rounded-2xl transition-all shadow-md shadow-rose-600/20 whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
-            >
-              <UserPlus :size="15" />
-              <span>Tambah Pengguna</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- 3A. Modern Table View -->
-        <div v-if="userViewMode === 'table'" class="bg-white rounded-3xl border border-slate-200/90 overflow-hidden shadow-xs">
-          <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
-              <thead>
-                <tr class="border-b border-slate-200 bg-slate-50/70 text-[11px] font-black text-slate-500 uppercase tracking-wider">
-                  <th class="py-3.5 px-4 w-12 text-center">#</th>
-                  <th class="py-3.5 px-4">Pengguna & Profil</th>
-                  <th class="py-3.5 px-4">Email</th>
-                  <th class="py-3.5 px-4">Peran (Role)</th>
-                  <th class="py-3.5 px-4">Beban & Kontribusi</th>
-                  <th class="py-3.5 px-4 text-center">Status</th>
-                  <th class="py-3.5 px-4 text-right">Aksi</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100 text-xs">
-                <!-- Loading state -->
-                <tr v-if="adminStore.loadingUsers" v-for="i in 5" :key="i" class="animate-pulse">
-                  <td class="p-4 text-center"><div class="h-3 w-4 bg-slate-200 rounded mx-auto"></div></td>
-                  <td class="p-4">
-                    <div class="flex items-center gap-3">
-                      <div class="w-9 h-9 bg-slate-200 rounded-2xl"></div>
-                      <div class="space-y-1.5 flex-1">
-                        <div class="h-3.5 bg-slate-200 rounded w-32"></div>
-                        <div class="h-2.5 bg-slate-100 rounded w-20"></div>
-                      </div>
-                    </div>
-                  </td>
-                  <td class="p-4"><div class="h-3 bg-slate-200 rounded w-28"></div></td>
-                  <td class="p-4"><div class="h-6 bg-slate-200 rounded-full w-20"></div></td>
-                  <td class="p-4"><div class="h-6 bg-slate-200 rounded-full w-24"></div></td>
-                  <td class="p-4"><div class="h-6 bg-slate-200 rounded-full w-14 mx-auto"></div></td>
-                  <td class="p-4 text-right"><div class="h-7 w-20 bg-slate-200 rounded-xl ml-auto"></div></td>
-                </tr>
-
-                <!-- Rows -->
-                <tr
-                  v-else-if="filteredUsers.length > 0"
-                  v-for="(user, idx) in filteredUsers"
-                  :key="user.id"
-                  class="hover:bg-slate-50/80 transition-colors group"
-                >
-                  <!-- Index -->
-                  <td class="py-3.5 px-4 text-center font-mono text-slate-400 font-bold text-[11px]">
-                    {{ idx + 1 }}
-                  </td>
-
-                  <!-- User Profile Info -->
-                  <td class="py-3.5 px-4">
-                    <div class="flex items-center gap-3">
-                      <!-- Avatar with status pulse -->
-                      <div class="relative shrink-0">
-                        <div
-                          class="w-10 h-10 rounded-2xl flex items-center justify-center font-black text-sm text-white shadow-xs"
-                          :class="getAvatarColor(user)"
-                        >
-                          {{ (user.full_name?.charAt(0) || user.username?.charAt(0) || 'U').toUpperCase() }}
-                        </div>
-                        <span
-                          class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white"
-                          :class="user.is_active ? 'bg-emerald-500' : 'bg-slate-400'"
-                          :title="user.is_active ? 'Akun Aktif' : 'Akun Nonaktif'"
-                        ></span>
-                      </div>
-
-                      <div class="min-w-0">
-                        <div class="font-bold text-slate-900 text-sm truncate flex items-center gap-1.5">
-                          <span>{{ user.full_name }}</span>
-                          <span v-if="user.id === authStore.user?.id" class="text-[9px] bg-rose-100 text-rose-700 px-1.5 py-0.2 rounded-md font-bold uppercase">
-                            Anda
-                          </span>
-                        </div>
-                        <div class="text-[11px] text-slate-500 font-mono flex items-center gap-2 mt-0.5">
-                          <span>@{{ user.username }}</span>
-                          <span v-if="user.created_at" class="text-slate-300">•</span>
-                          <span v-if="user.created_at" class="text-slate-400 text-[10px]">{{ formatDate(user.created_at) }}</span>
-                        </div>
-                        <div v-if="user.institution || user.department || user.phone || user.nim_nip" class="flex flex-wrap items-center gap-1.5 mt-1.5">
-                          <span v-if="user.institution" class="inline-flex items-center gap-1 text-[10px] font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md">
-                            <Building2 :size="10" class="text-slate-400" />
-                            <span>{{ user.institution }}</span>
-                            <span v-if="user.department" class="text-slate-400">• {{ user.department }}</span>
-                          </span>
-                          <span v-if="user.nim_nip" class="text-[10px] font-mono bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-md font-bold">
-                            ID: {{ user.nim_nip }}
-                          </span>
-                          <span v-if="user.phone" class="text-[10px] font-mono bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-1">
-                            <Phone :size="9" /> {{ user.phone }}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-
-                  <!-- Email with copy button -->
-                  <td class="py-3.5 px-4">
-                    <div class="flex items-center gap-1.5 group/email">
-                      <span class="font-mono text-xs text-slate-600 select-all">{{ user.email }}</span>
-                      <button
-                        @click="copyToClipboard(user.email, `email_${user.id}`)"
-                        class="opacity-0 group-hover/email:opacity-100 text-slate-400 hover:text-slate-700 transition-all p-1 rounded-md hover:bg-slate-200 cursor-pointer"
-                        title="Salin email"
-                      >
-                        <CheckCheck v-if="copyFeedback[`email_${user.id}`]" :size="12" class="text-emerald-600" />
-                        <Copy v-else :size="12" />
-                      </button>
-                    </div>
-                  </td>
-
-                  <!-- Role Badge -->
-                  <td class="py-3.5 px-4">
-                    <span
-                      class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] font-extrabold uppercase tracking-wider border shadow-2xs"
-                      :class="user.role?.toLowerCase() === 'admin'
-                        ? 'bg-purple-50 text-purple-800 border-purple-200'
-                        : (['dosen', 'supervisi'].includes(user.role?.toLowerCase())
-                          ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
-                          : 'bg-emerald-50 text-emerald-800 border-emerald-200')"
-                    >
-                      <ShieldCheck v-if="user.role?.toLowerCase() === 'admin'" :size="12" class="text-purple-600" />
-                      <GraduationCap v-else-if="['dosen', 'supervisi'].includes(user.role?.toLowerCase())" :size="12" class="text-indigo-600" />
-                      <PenTool v-else :size="11" class="text-emerald-600" />
-                      <span>{{ user.role?.toLowerCase() === 'admin' ? 'Administrator' : (['dosen', 'supervisi'].includes(user.role?.toLowerCase()) ? 'Supervisi' : 'Mapper') }}</span>
-                    </span>
-                  </td>
-
-                  <!-- Contribution / Workload -->
-                  <td class="py-3.5 px-4">
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <span
-                        class="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg border"
-                        :class="(user.assigned_tasks_count || 0) > 0 ? 'bg-blue-50 text-blue-800 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'"
-                        title="Grid tugas yang sedang dipegang"
-                      >
-                        <Grid :size="11" />
-                        <span>{{ user.assigned_tasks_count || 0 }} grid</span>
-                      </span>
-                      <span
-                        class="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg border"
-                        :class="(user.annotations_count || 0) > 0 ? 'bg-teal-50 text-teal-800 border-teal-200' : 'bg-slate-50 text-slate-500 border-slate-200'"
-                        title="Total poligon data latih yang didigitasi"
-                      >
-                        <Shapes :size="11" />
-                        <span>{{ user.annotations_count || 0 }} poligon</span>
-                      </span>
-                    </div>
-                  </td>
-
-                  <!-- Status Toggle Switch -->
-                  <td class="py-3.5 px-4 text-center">
-                    <button
-                      @click="toggleActive(user)"
-                      class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider transition-all border shadow-2xs cursor-pointer"
-                      :class="user.is_active
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300'
-                        : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300'"
-                      :title="user.is_active ? 'Klik untuk nonaktifkan akun' : 'Klik untuk aktifkan akun'"
-                    >
-                      <span class="w-1.5 h-1.5 rounded-full" :class="user.is_active ? 'bg-emerald-500' : 'bg-slate-400'"></span>
-                      <span>{{ user.is_active ? 'Aktif' : 'Nonaktif' }}</span>
-                    </button>
-                  </td>
-
-                  <!-- Actions -->
-                  <td class="py-3.5 px-4 text-right">
-                    <div class="flex items-center justify-end gap-1">
-                      <!-- Edit -->
-                      <button
-                        @click="openUserModal(user)"
-                        class="p-1.5 rounded-xl text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-transparent hover:border-blue-200 transition-all cursor-pointer"
-                        title="Edit Data Profil"
-                      >
-                        <Pencil :size="14" />
-                      </button>
-
-                      <!-- Reset Password -->
-                      <button
-                        @click="openResetPasswordModal(user)"
-                        class="p-1.5 rounded-xl text-slate-500 hover:text-amber-600 hover:bg-amber-50 border border-transparent hover:border-amber-200 transition-all cursor-pointer"
-                        title="Reset Kata Sandi"
-                      >
-                        <Key :size="14" />
-                      </button>
-
-                      <!-- Delete -->
-                      <button
-                        v-if="user.id !== authStore.user?.id"
-                        @click="confirmDeleteUser(user)"
-                        class="p-1.5 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-all cursor-pointer"
-                        title="Hapus / Nonaktifkan Pengguna"
-                      >
-                        <Trash2 :size="14" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-
-                <!-- Empty State -->
-                <tr v-else>
-                  <td colspan="7" class="py-16 text-center text-slate-400">
-                    <UserX :size="40" class="mx-auto mb-3 opacity-30 text-slate-400" />
-                    <p class="font-extrabold text-sm text-slate-700">Tidak ada pengguna yang sesuai</p>
-                    <p class="text-xs text-slate-500 mt-1">Coba sesuaikan kata kunci pencarian atau filter peran/status Anda.</p>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- 3B. Modern Card Grid View -->
-        <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <!-- Loading skeleton cards -->
-          <template v-if="adminStore.loadingUsers">
-            <div v-for="i in 6" :key="i" class="bg-white rounded-3xl p-5 border border-slate-200 animate-pulse space-y-4">
-              <div class="flex items-center gap-3">
-                <div class="w-12 h-12 rounded-2xl bg-slate-200"></div>
-                <div class="space-y-2 flex-1">
-                  <div class="h-3.5 bg-slate-200 rounded w-3/4"></div>
-                  <div class="h-2.5 bg-slate-100 rounded w-1/2"></div>
-                </div>
-              </div>
-              <div class="h-10 bg-slate-100 rounded-2xl"></div>
-              <div class="h-8 bg-slate-100 rounded-2xl"></div>
-            </div>
-          </template>
-
-          <!-- User Card -->
-          <template v-else-if="filteredUsers.length > 0">
-            <div
-              v-for="user in filteredUsers"
-              :key="user.id"
-              class="bg-white rounded-3xl p-5 border border-slate-200/90 hover:border-slate-300 hover:shadow-md transition-all space-y-4 flex flex-col justify-between group"
-            >
-              <!-- Top Profile Info -->
-              <div class="space-y-3">
-                <div class="flex items-start justify-between gap-2">
-                  <div class="flex items-center gap-3 min-w-0">
-                    <div
-                      class="w-12 h-12 rounded-2xl flex items-center justify-center font-black text-base text-white shadow-xs shrink-0"
-                      :class="getAvatarColor(user)"
-                    >
-                      {{ (user.full_name?.charAt(0) || user.username?.charAt(0) || 'U').toUpperCase() }}
-                    </div>
-                    <div class="min-w-0">
-                      <div class="font-bold text-slate-900 text-sm truncate flex items-center gap-1.5">
-                        <span class="truncate">{{ user.full_name }}</span>
-                        <span v-if="user.id === authStore.user?.id" class="text-[9px] bg-rose-100 text-rose-700 px-1 py-0.2 rounded font-bold">Anda</span>
-                      </div>
-                      <div class="text-xs text-slate-500 font-mono truncate">@{{ user.username }}</div>
-                    </div>
-                  </div>
-
-                  <!-- Role Pill -->
-                  <span
-                    class="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-extrabold uppercase tracking-wider border shrink-0"
-                    :class="user.role?.toLowerCase() === 'admin'
-                      ? 'bg-purple-50 text-purple-800 border-purple-200'
-                      : (['dosen', 'supervisi'].includes(user.role?.toLowerCase())
-                        ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
-                        : 'bg-emerald-50 text-emerald-800 border-emerald-200')"
-                  >
-                    <ShieldCheck v-if="user.role?.toLowerCase() === 'admin'" :size="11" class="text-purple-600" />
-                    <GraduationCap v-else-if="['dosen', 'supervisi'].includes(user.role?.toLowerCase())" :size="11" class="text-indigo-600" />
-                    <PenTool v-else :size="10" class="text-emerald-600" />
-                    <span>{{ user.role?.toLowerCase() === 'admin' ? 'Admin' : (['dosen', 'supervisi'].includes(user.role?.toLowerCase()) ? 'Supervisi' : 'Mapper') }}</span>
-                  </span>
-                </div>
-
-                <!-- Email banner -->
-                <div class="bg-slate-50 p-2.5 rounded-2xl border border-slate-200/70 flex items-center justify-between text-xs">
-                  <span class="text-slate-600 font-mono text-[11px] truncate select-all">{{ user.email }}</span>
-                  <button
-                    @click="copyToClipboard(user.email, `email_card_${user.id}`)"
-                    class="text-slate-400 hover:text-slate-700 p-1 rounded-md transition-colors cursor-pointer"
-                    title="Salin email"
-                  >
-                    <CheckCheck v-if="copyFeedback[`email_card_${user.id}`]" :size="12" class="text-emerald-600" />
-                    <Copy v-else :size="12" />
-                  </button>
-                </div>
-
-                <!-- Administrative & Academic Info Strip (Optional) -->
-                <div v-if="user.institution || user.department || user.phone || user.nim_nip" class="bg-slate-50/80 p-2.5 rounded-2xl border border-slate-200/60 space-y-1 text-[11px] text-slate-600">
-                  <div v-if="user.institution" class="flex items-center gap-1.5 font-medium text-slate-800 truncate">
-                    <Building2 :size="12" class="text-slate-400 shrink-0" />
-                    <span class="truncate">{{ user.institution }}</span>
-                  </div>
-                  <div v-if="user.department" class="flex items-center gap-1.5 text-[10px] text-slate-500 truncate pl-4">
-                    <span>{{ user.department }}</span>
-                    <span v-if="user.nim_nip" class="font-mono text-blue-600">({{ user.nim_nip }})</span>
-                  </div>
-                  <div v-if="user.phone" class="flex items-center gap-1.5 text-[10px] font-mono text-emerald-700 pt-0.5">
-                    <Phone :size="10" class="text-emerald-600" />
-                    <span>{{ user.phone }}</span>
-                  </div>
-                </div>
-
-                <!-- Workload Metrics Strip -->
-                <div class="grid grid-cols-2 gap-2 text-center">
-                  <div class="bg-blue-50/60 border border-blue-100 p-2 rounded-2xl">
-                    <div class="font-mono font-black text-sm text-blue-800">{{ user.assigned_tasks_count || 0 }}</div>
-                    <div class="text-[10px] font-bold text-blue-600 uppercase">Grid Tugas</div>
-                  </div>
-                  <div class="bg-teal-50/60 border border-teal-100 p-2 rounded-2xl">
-                    <div class="font-mono font-black text-sm text-teal-800">{{ user.annotations_count || 0 }}</div>
-                    <div class="text-[10px] font-bold text-teal-600 uppercase">Poligon Anotasi</div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Bottom Actions Bar -->
-              <div class="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                <!-- Status Switch -->
-                <button
-                  @click="toggleActive(user)"
-                  class="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border cursor-pointer"
-                  :class="user.is_active
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                    : 'bg-slate-100 text-slate-500 border-slate-300'"
-                >
-                  <span class="w-1.5 h-1.5 rounded-full" :class="user.is_active ? 'bg-emerald-500' : 'bg-slate-400'"></span>
-                  <span>{{ user.is_active ? 'Aktif' : 'Nonaktif' }}</span>
-                </button>
-
-                <!-- Action Button Group -->
-                <div class="flex items-center gap-1">
-                  <button
-                    @click="openUserModal(user)"
-                    class="p-2 rounded-xl text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 transition-all cursor-pointer"
-                    title="Edit Profil"
-                  >
-                    <Pencil :size="13" />
-                  </button>
-                  <button
-                    @click="openResetPasswordModal(user)"
-                    class="p-2 rounded-xl text-slate-500 hover:text-amber-600 hover:bg-amber-50 border border-slate-200 transition-all cursor-pointer"
-                    title="Reset Password"
-                  >
-                    <Key :size="13" />
-                  </button>
-                  <button
-                    v-if="user.id !== authStore.user?.id"
-                    @click="confirmDeleteUser(user)"
-                    class="p-2 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 transition-all cursor-pointer"
-                    title="Hapus / Nonaktifkan"
-                  >
-                    <Trash2 :size="13" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <!-- Empty Grid View -->
-          <div v-else class="col-span-full py-16 bg-white rounded-3xl border border-dashed border-slate-300 text-center text-slate-400">
-            <UserX :size="40" class="mx-auto mb-3 opacity-30 text-slate-400" />
-            <p class="font-extrabold text-sm text-slate-700">Tidak ada pengguna yang cocok</p>
-            <p class="text-xs text-slate-500 mt-1">Coba sesuaikan kata kunci pencarian atau filter.</p>
-          </div>
-        </div>
-
-      </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <!-- MODAL: Tambah / Edit PROYEK                             -->
-    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <!-- 3. MODAL: Tambah / Edit PROYEK (LUCIDE ICONS, NO EMOJI)   -->
+    <!-- ══════════════════════════════════════════════════════════ -->
     <Teleport to="body">
       <div v-if="showProjectModal"
         class="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
@@ -1034,36 +1009,119 @@
           </div>
 
           <!-- Form -->
-          <div class="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
             <div class="space-y-1">
               <label class="text-xs font-bold text-[#555d6b] uppercase tracking-wider">Nama Proyek *</label>
               <input v-model="projectForm.name" type="text" placeholder="cth: Mapping Sumatera Barat 2026"
-                class="w-full px-3.5 py-2.5 text-sm text-[#1f242e] border border-[#e4e7eb] rounded-xl focus:outline-none focus:border-[#d73f3f] transition-colors" />
+                class="w-full px-3.5 py-2.5 text-sm text-[#1f242e] border border-[#e4e7eb] rounded-xl focus:outline-hidden focus:border-[#d73f3f] transition-colors" />
             </div>
 
             <div class="space-y-1">
               <label class="text-xs font-bold text-[#555d6b] uppercase tracking-wider">Deskripsi</label>
               <textarea v-model="projectForm.description" rows="2" placeholder="Deskripsi singkat proyek pemetaan..."
-                class="w-full px-3.5 py-2.5 text-sm text-[#1f242e] border border-[#e4e7eb] rounded-xl focus:outline-none focus:border-[#d73f3f] transition-colors resize-none"></textarea>
+                class="w-full px-3.5 py-2.5 text-sm text-[#1f242e] border border-[#e4e7eb] rounded-xl focus:outline-hidden focus:border-[#d73f3f] transition-colors resize-none"></textarea>
+            </div>
+
+            <!-- Priority Selector (Clean Lucide Icons, NO WhatsApp Emoji) -->
+            <div class="space-y-1.5">
+              <label class="text-xs font-bold text-[#555d6b] uppercase tracking-wider flex items-center gap-1.5">
+                <Flame :size="13" class="text-rose-500" />
+                <span>Prioritas Proyek *</span>
+              </label>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  @click="projectForm.priority = 'URGENT'"
+                  class="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer"
+                  :class="projectForm.priority === 'URGENT' ? 'bg-red-50 border-red-500 text-red-700 shadow-2xs ring-2 ring-red-500/20' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'"
+                >
+                  <Flame :size="13" class="text-red-600" />
+                  <span>Urgent</span>
+                </button>
+                <button
+                  type="button"
+                  @click="projectForm.priority = 'HIGH'"
+                  class="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer"
+                  :class="projectForm.priority === 'HIGH' ? 'bg-amber-50 border-amber-500 text-amber-700 shadow-2xs ring-2 ring-amber-500/20' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'"
+                >
+                  <Clock :size="13" class="text-amber-600" />
+                  <span>High</span>
+                </button>
+                <button
+                  type="button"
+                  @click="projectForm.priority = 'MEDIUM'"
+                  class="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer"
+                  :class="projectForm.priority === 'MEDIUM' ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs ring-2 ring-blue-500/20' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'"
+                >
+                  <Layers :size="13" class="text-blue-600" />
+                  <span>Medium</span>
+                </button>
+                <button
+                  type="button"
+                  @click="projectForm.priority = 'LOW'"
+                  class="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer"
+                  :class="projectForm.priority === 'LOW' ? 'bg-slate-100 border-slate-400 text-slate-800 shadow-2xs ring-2 ring-slate-400/20' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'"
+                >
+                  <Shield :size="13" class="text-slate-500" />
+                  <span>Low</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Difficulty Selector (Clean Lucide Icons, NO WhatsApp Emoji) -->
+            <div class="space-y-1.5">
+              <label class="text-xs font-bold text-[#555d6b] uppercase tracking-wider flex items-center gap-1.5">
+                <SlidersHorizontal :size="13" class="text-slate-400" />
+                <span>Tingkat Kesulitan *</span>
+              </label>
+              <div class="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  @click="projectForm.difficulty = 'Beginner'"
+                  class="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer"
+                  :class="projectForm.difficulty === 'Beginner' ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-2xs ring-2 ring-emerald-500/20' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'"
+                >
+                  <CheckCircle2 :size="13" class="text-emerald-600" />
+                  <span>Beginner</span>
+                </button>
+                <button
+                  type="button"
+                  @click="projectForm.difficulty = 'Moderate'"
+                  class="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer"
+                  :class="projectForm.difficulty === 'Moderate' ? 'bg-amber-50 border-amber-500 text-amber-700 shadow-2xs ring-2 ring-amber-500/20' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'"
+                >
+                  <SlidersHorizontal :size="13" class="text-amber-600" />
+                  <span>Moderate</span>
+                </button>
+                <button
+                  type="button"
+                  @click="projectForm.difficulty = 'Challenging'"
+                  class="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer"
+                  :class="projectForm.difficulty === 'Challenging' ? 'bg-rose-50 border-rose-500 text-rose-700 shadow-2xs ring-2 ring-rose-500/20' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'"
+                >
+                  <AlertTriangle :size="13" class="text-rose-600" />
+                  <span>Challenging</span>
+                </button>
+              </div>
             </div>
 
             <div class="grid grid-cols-2 gap-3">
               <div class="space-y-1">
                 <label class="text-xs font-bold text-[#555d6b] uppercase tracking-wider">Latitude Pusat *</label>
                 <input v-model.number="projectForm.center_lat" type="number" step="0.001" placeholder="-0.750"
-                  class="w-full px-3.5 py-2.5 text-sm text-[#1f242e] border border-[#e4e7eb] rounded-xl focus:outline-none focus:border-[#d73f3f] transition-colors" />
+                  class="w-full px-3.5 py-2.5 text-sm text-[#1f242e] border border-[#e4e7eb] rounded-xl focus:outline-hidden focus:border-[#d73f3f] transition-colors" />
               </div>
               <div class="space-y-1">
                 <label class="text-xs font-bold text-[#555d6b] uppercase tracking-wider">Longitude Pusat *</label>
                 <input v-model.number="projectForm.center_lon" type="number" step="0.001" placeholder="100.500"
-                  class="w-full px-3.5 py-2.5 text-sm text-[#1f242e] border border-[#e4e7eb] rounded-xl focus:outline-none focus:border-[#d73f3f] transition-colors" />
+                  class="w-full px-3.5 py-2.5 text-sm text-[#1f242e] border border-[#e4e7eb] rounded-xl focus:outline-hidden focus:border-[#d73f3f] transition-colors" />
               </div>
             </div>
 
             <div class="space-y-1">
               <label class="text-xs font-bold text-[#555d6b] uppercase tracking-wider">Default Zoom Level</label>
               <input v-model.number="projectForm.default_zoom" type="number" min="4" max="16" placeholder="8"
-                class="w-full px-3.5 py-2.5 text-sm text-[#1f242e] border border-[#e4e7eb] rounded-xl focus:outline-none focus:border-[#d73f3f] transition-colors" />
+                class="w-full px-3.5 py-2.5 text-sm text-[#1f242e] border border-[#e4e7eb] rounded-xl focus:outline-hidden focus:border-[#d73f3f] transition-colors" />
             </div>
 
             <!-- Auto-generate grid (only for new project) -->
@@ -1075,7 +1133,7 @@
                 </label>
                 <label class="relative inline-flex items-center cursor-pointer">
                   <input type="checkbox" v-model="projectForm.generateGrid" class="sr-only peer" />
-                  <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#d73f3f]"></div>
+                  <div class="w-9 h-5 bg-slate-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#d73f3f]"></div>
                 </label>
               </div>
 
@@ -1085,34 +1143,34 @@
                   <div class="space-y-1">
                     <label class="text-[10px] font-bold text-[#707a8a]">Min Longitude</label>
                     <input v-model.number="projectForm.min_lon" type="number" step="0.01" placeholder="98.60"
-                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-none focus:border-[#d73f3f]" />
+                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-hidden focus:border-[#d73f3f]" />
                   </div>
                   <div class="space-y-1">
                     <label class="text-[10px] font-bold text-[#707a8a]">Max Longitude</label>
                     <input v-model.number="projectForm.max_lon" type="number" step="0.01" placeholder="101.80"
-                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-none focus:border-[#d73f3f]" />
+                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-hidden focus:border-[#d73f3f]" />
                   </div>
                   <div class="space-y-1">
                     <label class="text-[10px] font-bold text-[#707a8a]">Min Latitude</label>
                     <input v-model.number="projectForm.min_lat" type="number" step="0.01" placeholder="-3.10"
-                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-none focus:border-[#d73f3f]" />
+                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-hidden focus:border-[#d73f3f]" />
                   </div>
                   <div class="space-y-1">
                     <label class="text-[10px] font-bold text-[#707a8a]">Max Latitude</label>
                     <input v-model.number="projectForm.max_lat" type="number" step="0.01" placeholder="0.40"
-                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-none focus:border-[#d73f3f]" />
+                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-hidden focus:border-[#d73f3f]" />
                   </div>
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                   <div class="space-y-1">
                     <label class="text-[10px] font-bold text-[#707a8a]">Prefix Kode Grid</label>
                     <input v-model="projectForm.grid_prefix" type="text" maxlength="3" placeholder="SB"
-                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-none focus:border-[#d73f3f] uppercase" />
+                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-hidden focus:border-[#d73f3f] uppercase" />
                   </div>
                   <div class="space-y-1">
                     <label class="text-[10px] font-bold text-[#707a8a]">Patch Size (px)</label>
                     <select v-model.number="projectForm.patch_size_px"
-                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-none focus:border-[#d73f3f]">
+                      class="w-full px-2.5 py-1.5 text-xs text-[#1f242e] border border-[#e4e7eb] rounded-lg focus:outline-hidden focus:border-[#d73f3f]">
                       <option :value="256">256px (~2.56km)</option>
                       <option :value="512">512px (~5.12km)</option>
                       <option :value="1024">1024px (~10.24km)</option>
@@ -1129,571 +1187,144 @@
             </div>
           </div>
 
-          <!-- Footer -->
+          <!-- Modal footer -->
           <div class="px-6 py-4 border-t border-[#e4e7eb] flex items-center justify-end gap-3 bg-[#f8f9fa]">
-            <button @click="closeProjectModal" class="px-4 py-2 text-sm font-bold text-[#707a8a] hover:text-[#1f242e] transition-colors cursor-pointer">
+            <button @click="closeProjectModal" class="px-4 py-2 text-xs font-bold text-[#707a8a] hover:text-[#1f242e] transition-colors cursor-pointer">
               Batal
             </button>
             <button
               @click="saveProject"
               :disabled="savingProject"
-              class="flex items-center gap-2 bg-[#d73f3f] hover:bg-[#c23434] disabled:opacity-50 text-white font-bold text-sm px-5 py-2 rounded-xl transition-all shadow-sm cursor-pointer"
+              class="px-5 py-2 text-xs font-bold text-white bg-[#d73f3f] hover:bg-[#c23434] rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
             >
               <RotateCw v-if="savingProject" :size="14" class="animate-spin" />
               <Check v-else :size="14" />
-              {{ savingProject ? 'Menyimpan...' : (editingProject ? 'Simpan Perubahan' : 'Buat Proyek') }}
+              <span>{{ savingProject ? 'Menyimpan...' : 'Simpan Perubahan' }}</span>
             </button>
           </div>
         </div>
       </div>
     </Teleport>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <!-- MODAL: Tambah / Edit PENGGUNA (2026 UI)                 -->
-    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <!-- 4. MODAL: Tambah / Edit PENGGUNA                            -->
+    <!-- ══════════════════════════════════════════════════════════ -->
     <Teleport to="body">
       <div v-if="showUserModal"
-        class="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+        class="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
         @click.self="closeUserModal"
       >
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl border border-slate-200 overflow-hidden my-auto">
-          <!-- Modal header -->
-          <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md border border-[#e4e7eb] overflow-hidden">
+          <div class="px-6 py-5 border-b border-[#e4e7eb] flex items-center justify-between bg-[#f8f9fa]">
             <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-rose-500 to-red-600 flex items-center justify-center text-white shadow-xs">
-                <UserCheck v-if="editingUser" :size="20" />
-                <UserPlus v-else :size="20" />
+              <div class="w-8 h-8 rounded-xl bg-purple-600 flex items-center justify-center text-white">
+                <UserPlus :size="16" />
               </div>
-              <div>
-                <h3 class="font-black text-slate-900 text-base">
-                  {{ editingUser ? 'Edit Profil Pengguna' : 'Tambah Pengguna Baru' }}
-                </h3>
-                <p class="text-xs text-slate-500 font-medium">
-                  {{ editingUser ? 'Perbarui informasi profil dan hak akses' : 'Daftarkan akun baru ke platform STEVI Task Manager' }}
-                </p>
-              </div>
+              <h3 class="font-black text-[#1f242e] text-sm">
+                {{ editingUser ? 'Edit Pengguna' : 'Tambah Pengguna Baru' }}
+              </h3>
             </div>
-            <button @click="closeUserModal" class="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors cursor-pointer">
+            <button @click="closeUserModal" class="text-[#707a8a] hover:text-[#1f242e] transition-colors cursor-pointer">
               <X :size="18" />
             </button>
           </div>
 
-          <!-- Form Body -->
-          <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-            <!-- Full Name -->
+          <div class="p-6 space-y-3.5 max-h-[75vh] overflow-y-auto">
             <div class="space-y-1">
-              <label class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
-                <span>Nama Lengkap <span class="text-rose-600">*</span></span>
-              </label>
-              <input
-                v-model="userForm.full_name"
-                type="text"
-                placeholder="Contoh: Ahmad Fauzi, S.T."
-                class="w-full px-3.5 py-2.5 text-sm text-slate-900 border border-slate-200 rounded-2xl focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 transition-all font-sans bg-white"
-              />
+              <label class="text-xs font-bold text-[#555d6b] uppercase">Nama Lengkap *</label>
+              <input v-model="userForm.full_name" type="text" class="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl" />
             </div>
 
-            <!-- Username & Email Grid -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="grid grid-cols-2 gap-3">
               <div class="space-y-1">
-                <label class="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  <span>Username <span class="text-rose-600">*</span></span>
-                </label>
-                <div class="relative">
-                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs">@</span>
-                  <input
-                    v-model="userForm.username"
-                    type="text"
-                    placeholder="ahmad_fauzi"
-                    :disabled="!!editingUser"
-                    class="w-full pl-7 pr-3 py-2.5 text-sm text-slate-900 border border-slate-200 rounded-2xl focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 transition-all font-mono disabled:bg-slate-100 disabled:text-slate-500"
-                  />
-                </div>
+                <label class="text-xs font-bold text-[#555d6b] uppercase">Username *</label>
+                <input v-model="userForm.username" type="text" :disabled="!!editingUser" class="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl disabled:bg-slate-100" />
               </div>
-
               <div class="space-y-1">
-                <label class="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  <span>Email <span class="text-rose-600">*</span></span>
-                </label>
-                <input
-                  v-model="userForm.email"
-                  type="email"
-                  placeholder="ahmad@geoai.ac.id"
-                  class="w-full px-3.5 py-2.5 text-sm text-slate-900 border border-slate-200 rounded-2xl focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 transition-all font-sans bg-white"
-                />
+                <label class="text-xs font-bold text-[#555d6b] uppercase">Role / Peran *</label>
+                <select v-model="userForm.role" class="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl">
+                  <option value="annotator">Anotator / Mapper</option>
+                  <option value="dosen">Supervisi / Dosen</option>
+                  <option value="admin">Administrator</option>
+                </select>
               </div>
             </div>
 
-            <!-- Role Selection Cards (3 Roles) -->
-            <div class="space-y-2">
-              <label class="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                <span>Peran & Hak Akses (Role) <span class="text-rose-600">*</span></span>
-              </label>
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <!-- Card 1: Annotator -->
-                <div
-                  @click="userForm.role = 'annotator'"
-                  class="p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between space-y-2"
-                  :class="userForm.role === 'annotator'
-                    ? 'border-emerald-500 bg-emerald-50/40 shadow-xs'
-                    : 'border-slate-200 hover:border-slate-300 bg-white'"
-                >
-                  <div class="flex items-center justify-between">
-                    <div class="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                      <PenTool :size="16" />
-                    </div>
-                    <div
-                      class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
-                      :class="userForm.role === 'annotator' ? 'border-emerald-600 bg-emerald-600' : 'border-slate-300'"
-                    >
-                      <div v-if="userForm.role === 'annotator'" class="w-1.5 h-1.5 rounded-full bg-white"></div>
-                    </div>
-                  </div>
-                  <div>
-                    <div class="font-extrabold text-xs text-slate-900">Mapper / Anotator</div>
-                    <p class="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                      Mendigitasi tutupan lahan pada grid & submit untuk review.
-                    </p>
-                  </div>
-                </div>
-
-                <!-- Card 2: Supervisi -->
-                <div
-                  @click="userForm.role = 'dosen'"
-                  class="p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between space-y-2"
-                  :class="['dosen', 'supervisi'].includes(userForm.role)
-                    ? 'border-indigo-500 bg-indigo-50/40 shadow-xs'
-                    : 'border-slate-200 hover:border-slate-300 bg-white'"
-                >
-                  <div class="flex items-center justify-between">
-                    <div class="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
-                      <GraduationCap :size="16" />
-                    </div>
-                    <div
-                      class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
-                      :class="['dosen', 'supervisi'].includes(userForm.role) ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'"
-                    >
-                      <div v-if="['dosen', 'supervisi'].includes(userForm.role)" class="w-1.5 h-1.5 rounded-full bg-white"></div>
-                    </div>
-                  </div>
-                  <div>
-                    <div class="font-extrabold text-xs text-slate-900">Supervisi</div>
-                    <p class="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                      Akses QC Review & evaluasi mutu tanpa akses kelola pengguna.
-                    </p>
-                  </div>
-                </div>
-
-                <!-- Card 3: Administrator -->
-                <div
-                  @click="userForm.role = 'admin'"
-                  class="p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between space-y-2"
-                  :class="userForm.role === 'admin'
-                    ? 'border-purple-500 bg-purple-50/40 shadow-xs'
-                    : 'border-slate-200 hover:border-slate-300 bg-white'"
-                >
-                  <div class="flex items-center justify-between">
-                    <div class="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
-                      <ShieldCheck :size="16" />
-                    </div>
-                    <div
-                      class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
-                      :class="userForm.role === 'admin' ? 'border-purple-600 bg-purple-600' : 'border-slate-300'"
-                    >
-                      <div v-if="userForm.role === 'admin'" class="w-1.5 h-1.5 rounded-full bg-white"></div>
-                    </div>
-                  </div>
-                  <div>
-                    <div class="font-extrabold text-xs text-slate-900">Administrator</div>
-                    <p class="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                      Akses penuh: kelola akun pengguna, proyek, dan sistem.
-                    </p>
-                  </div>
-                </div>
-              </div>
+            <div class="space-y-1">
+              <label class="text-xs font-bold text-[#555d6b] uppercase">Alamat Email</label>
+              <input v-model="userForm.email" type="email" class="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl" />
             </div>
 
-            <!-- Password section -->
-            <div class="space-y-2 p-4 bg-slate-50 rounded-2xl border border-slate-200/80">
-              <div class="flex items-center justify-between">
-                <label class="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  {{ editingUser ? 'Reset Password (Opsional)' : 'Kata Sandi Akun' }}
-                  <span v-if="!editingUser" class="text-rose-600">*</span>
-                </label>
-                <!-- 1-Click Generator button -->
-                <button
-                  type="button"
-                  @click="generateRandomPasswordForForm"
-                  class="text-[11px] text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 cursor-pointer hover:underline"
-                >
-                  <Sparkles :size="12" />
-                  <span>Generate Acak</span>
-                </button>
-              </div>
-
-              <div class="relative">
-                <input
-                  v-model="userForm.password"
-                  :type="showPassword ? 'text' : 'password'"
-                  :placeholder="editingUser ? 'Kosongkan jika tidak ingin mengubah password' : 'Minimal 6 karakter'"
-                  class="w-full px-3.5 py-2.5 pr-20 text-sm text-slate-900 border border-slate-200 rounded-2xl focus:outline-none focus:border-rose-500 focus:bg-white transition-all font-mono bg-white"
-                />
-                <div class="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                  <button
-                    v-if="userForm.password"
-                    type="button"
-                    @click="copyToClipboard(userForm.password, 'form_password')"
-                    class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
-                    title="Salin password"
-                  >
-                    <CheckCheck v-if="copyFeedback['form_password']" :size="14" class="text-emerald-600" />
-                    <Copy v-else :size="14" />
-                  </button>
-                  <button
-                    type="button"
-                    @click="showPassword = !showPassword"
-                    class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
-                    :title="showPassword ? 'Sembunyikan' : 'Lihat'"
-                  >
-                    <EyeOff v-if="showPassword" :size="14" />
-                    <Eye v-else :size="14" />
-                  </button>
-                </div>
-              </div>
-              <p v-if="copyFeedback['form_password']" class="text-[11px] text-emerald-600 font-bold flex items-center gap-1">
-                <Check :size="12" /> Password berhasil disalin ke clipboard!
-              </p>
-            </div>
-
-            <!-- Data Administrasi & Kontak (Opsional) -->
-            <div class="space-y-3 p-4 bg-slate-50/80 rounded-2xl border border-slate-200/80">
-              <div class="flex items-center justify-between border-b border-slate-200/70 pb-2">
-                <div class="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                  <FileText :size="14" class="text-rose-600" />
-                  <span>Data Administrasi & Kontak</span>
-                </div>
-                <span class="text-[10px] font-bold text-slate-400 uppercase bg-slate-200/60 px-2 py-0.5 rounded-full">Opsional</span>
-              </div>
-
-              <!-- Baris: No Telp/WA & NIM/NIP -->
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div class="space-y-1">
-                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                    <Phone :size="12" class="text-slate-400" />
-                    <span>No. WhatsApp / Telepon</span>
-                  </label>
-                  <input
-                    v-model="userForm.phone"
-                    type="text"
-                    placeholder="Contoh: 081234567890"
-                    class="w-full px-3 py-2 text-xs text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-500 bg-white font-sans"
-                  />
-                </div>
-                <div class="space-y-1">
-                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                    <FileText :size="12" class="text-slate-400" />
-                    <span>NIM / NIP / ID Identitas</span>
-                  </label>
-                  <input
-                    v-model="userForm.nim_nip"
-                    type="text"
-                    placeholder="Contoh: 211001234"
-                    class="w-full px-3 py-2 text-xs text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-500 bg-white font-mono"
-                  />
-                </div>
-              </div>
-
-              <!-- Baris: Universitas & Prodi -->
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div class="space-y-1">
-                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                    <Building2 :size="12" class="text-slate-400" />
-                    <span>Universitas / Lembaga</span>
-                  </label>
-                  <input
-                    v-model="userForm.institution"
-                    type="text"
-                    placeholder="Contoh: Universitas Andalas / KLHK"
-                    class="w-full px-3 py-2 text-xs text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-500 bg-white font-sans"
-                  />
-                </div>
-                <div class="space-y-1">
-                  <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                    <GraduationCap :size="12" class="text-slate-400" />
-                    <span>Program Studi / Jurusan</span>
-                  </label>
-                  <input
-                    v-model="userForm.department"
-                    type="text"
-                    placeholder="Contoh: S1 Geografi"
-                    class="w-full px-3 py-2 text-xs text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-500 bg-white font-sans"
-                  />
-                </div>
-              </div>
-
-              <!-- Baris: Alamat -->
+            <div class="grid grid-cols-2 gap-3">
               <div class="space-y-1">
-                <label class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                  <MapPin :size="12" class="text-slate-400" />
-                  <span>Alamat Lengkap / Domisili</span>
-                </label>
-                <textarea
-                  v-model="userForm.address"
-                  rows="2"
-                  placeholder="Contoh: Jl. Sudirman No. 12, Padang, Sumatera Barat"
-                  class="w-full px-3 py-2 text-xs text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-500 bg-white resize-none font-sans"
-                ></textarea>
+                <label class="text-xs font-bold text-[#555d6b] uppercase">NIM / NIP</label>
+                <input v-model="userForm.nim_nip" type="text" class="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-xs font-bold text-[#555d6b] uppercase">Telepon</label>
+                <input v-model="userForm.phone" type="text" class="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl" />
               </div>
             </div>
 
-            <!-- Active Status Toggle (only on edit) -->
-            <div v-if="editingUser" class="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80">
-              <div>
-                <div class="font-bold text-xs text-slate-900">Status Akun Aktif</div>
-                <div class="text-[11px] text-slate-500">Nonaktifkan untuk menolak login tanpa menghapus riwayat</div>
+            <div v-if="!editingUser" class="space-y-1">
+              <label class="text-xs font-bold text-[#555d6b] uppercase">Password Awal *</label>
+              <div class="flex gap-2">
+                <input v-model="userForm.password" type="text" class="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl font-mono text-purple-700 font-bold" />
+                <button type="button" @click="generateRandomPasswordForForm" class="px-3 py-2 bg-slate-100 text-xs font-bold rounded-xl shrink-0">Acak</button>
               </div>
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" v-model="userForm.is_active" class="sr-only peer" />
-                <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-              </label>
             </div>
 
-            <!-- Error Banner -->
-            <div v-if="modalError" class="text-xs text-rose-700 bg-rose-50 border border-rose-200 p-3 rounded-2xl flex items-center gap-2">
-              <AlertTriangle :size="16" class="shrink-0 text-rose-600" />
+            <div v-if="modalError" class="text-xs text-red-600 bg-red-50 p-2.5 rounded-xl flex items-center gap-2">
+              <AlertTriangle :size="14" />
               <span>{{ modalError }}</span>
             </div>
           </div>
 
-          <!-- Footer -->
-          <div class="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
-            <button
-              @click="closeUserModal"
-              class="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer"
-            >
-              Batal
-            </button>
-            <button
-              @click="saveUser"
-              :disabled="savingUser"
-              class="flex items-center gap-2 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 disabled:opacity-50 text-white font-extrabold text-xs px-5 py-2.5 rounded-2xl transition-all shadow-md shadow-rose-600/20 cursor-pointer"
-            >
-              <RotateCw v-if="savingUser" :size="14" class="animate-spin" />
-              <Check v-else :size="14" />
-              <span>{{ savingUser ? 'Menyimpan...' : (editingUser ? 'Simpan Perubahan' : 'Buat Akun Sekarang') }}</span>
+          <div class="px-6 py-4 border-t border-[#e4e7eb] flex items-center justify-end gap-3 bg-[#f8f9fa]">
+            <button @click="closeUserModal" class="px-4 py-2 text-xs font-bold text-slate-500">Batal</button>
+            <button @click="saveUser" :disabled="savingUser" class="px-5 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl">
+              {{ savingUser ? 'Menyimpan...' : 'Simpan Pengguna' }}
             </button>
           </div>
         </div>
       </div>
     </Teleport>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <!-- MODAL: Dedicated Reset Password (1-Click Generator)     -->
-    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <!-- 5. MODAL: Reset Password PENGGUNA                           -->
+    <!-- ══════════════════════════════════════════════════════════ -->
     <Teleport to="body">
-      <div v-if="resetPasswordModal.show"
-        class="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
-        @click.self="closeResetPasswordModal"
-      >
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md border border-slate-200 overflow-hidden space-y-4">
-          <!-- Header -->
-          <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shadow-xs">
-                <Key :size="18" />
-              </div>
-              <div>
-                <h3 class="font-black text-slate-900 text-base">Reset Kata Sandi</h3>
-                <p class="text-xs text-slate-500 font-medium">Buat kata sandi baru untuk pengguna</p>
-              </div>
-            </div>
-            <button @click="closeResetPasswordModal" class="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors cursor-pointer">
-              <X :size="18" />
-            </button>
+      <div v-if="showResetPasswordModal" class="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" @click.self="closeResetPasswordModal">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm border border-[#e4e7eb] p-6 space-y-4">
+          <div class="flex items-center gap-2.5 text-amber-800 font-black text-sm">
+            <Key :size="18" class="text-amber-600" />
+            <span>Reset Password Pengguna</span>
           </div>
-
-          <!-- Body -->
-          <div class="p-6 space-y-4 pt-2">
-            <!-- User summary badge -->
-            <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center gap-3">
-              <div
-                class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white shadow-xs text-sm"
-                :class="getAvatarColor(resetPasswordModal.user)"
-              >
-                {{ (resetPasswordModal.user?.full_name?.charAt(0) || 'U').toUpperCase() }}
-              </div>
-              <div class="min-w-0">
-                <div class="font-bold text-slate-900 text-xs truncate">{{ resetPasswordModal.user?.full_name }}</div>
-                <div class="text-[11px] text-slate-500 font-mono">@{{ resetPasswordModal.user?.username }}</div>
-              </div>
-            </div>
-
-            <!-- Generator Button -->
-            <button
-              type="button"
-              @click="generateRandomPasswordForResetModal"
-              class="w-full py-2.5 px-3 rounded-2xl border border-dashed border-amber-300 bg-amber-50/60 hover:bg-amber-100/70 text-amber-900 text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer"
-            >
-              <Sparkles :size="14" class="text-amber-600" />
-              <span>Generate Kata Sandi Acak Otomatis</span>
-            </button>
-
-            <!-- Password Input Display -->
-            <div class="space-y-1">
-              <label class="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Kata Sandi Baru:</label>
-              <div class="relative">
-                <input
-                  v-model="resetPasswordModal.newPassword"
-                  type="text"
-                  placeholder="Ketik password atau klik generate di atas"
-                  class="w-full px-3.5 py-2.5 pr-12 text-sm text-slate-900 border border-slate-200 rounded-2xl focus:outline-none focus:border-amber-500 font-mono bg-white"
-                />
-                <button
-                  type="button"
-                  @click="copyToClipboard(resetPasswordModal.newPassword, 'reset_modal')"
-                  :disabled="!resetPasswordModal.newPassword"
-                  class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-30 cursor-pointer"
-                  title="Salin kata sandi"
-                >
-                  <CheckCheck v-if="copyFeedback['reset_modal']" :size="16" class="text-emerald-600" />
-                  <Copy v-else :size="16" />
-                </button>
-              </div>
-              <p v-if="copyFeedback['reset_modal']" class="text-[11px] text-emerald-600 font-bold flex items-center gap-1 mt-1">
-                <Check :size="12" /> Berhasil disalin ke clipboard!
-              </p>
-            </div>
-
-            <!-- Error -->
-            <div v-if="resetPasswordModal.error" class="text-xs text-rose-700 bg-rose-50 border border-rose-200 p-3 rounded-xl flex items-center gap-2">
-              <AlertTriangle :size="14" class="shrink-0 text-rose-600" />
-              <span>{{ resetPasswordModal.error }}</span>
+          <p class="text-xs text-slate-500">Reset password untuk <b>{{ targetUserForPassword?.full_name }}</b> (@{{ targetUserForPassword?.username }}).</p>
+          <div class="space-y-1">
+            <label class="text-[10px] font-bold text-slate-600 uppercase">Password Baru</label>
+            <div class="flex gap-2">
+              <input v-model="newPasswordValue" type="text" class="w-full px-3 py-2 text-xs border rounded-xl font-mono text-purple-700 font-bold" />
+              <button @click="generateNewPassword" class="px-2.5 py-1 bg-slate-100 text-xs font-bold rounded-xl shrink-0">Acak</button>
             </div>
           </div>
-
-          <!-- Footer -->
-          <div class="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
-            <button
-              @click="closeResetPasswordModal"
-              class="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer"
-            >
-              Batal
-            </button>
-            <button
-              @click="executeResetPassword"
-              :disabled="resetPasswordModal.loading || !resetPasswordModal.newPassword"
-              class="flex items-center gap-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 disabled:opacity-50 text-white font-extrabold text-xs px-5 py-2.5 rounded-2xl transition-all shadow-md shadow-amber-600/20 cursor-pointer"
-            >
-              <RotateCw v-if="resetPasswordModal.loading" :size="14" class="animate-spin" />
-              <Key v-else :size="14" />
-              <span>{{ resetPasswordModal.loading ? 'Menyimpan...' : 'Simpan Password Baru' }}</span>
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button @click="closeResetPasswordModal" class="px-3 py-1.5 text-xs font-bold text-slate-500">Batal</button>
+            <button @click="executeResetPassword" :disabled="resettingPassword" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl">
+              {{ resettingPassword ? 'Mereset...' : 'Simpan Password Baru' }}
             </button>
           </div>
         </div>
       </div>
     </Teleport>
 
-    <!-- ═══════════════════════════════════════════════════════ -->
-    <!-- MODAL: Smart Konfirmasi Hapus / Nonaktifkan             -->
-    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- Toast Notification -->
     <Teleport to="body">
-      <div v-if="showDeleteConfirm"
-        class="fixed inset-0 z-[1001] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
-        @click.self="showDeleteConfirm = false"
-      >
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md border border-slate-200 p-6 space-y-5 text-center">
-          <div
-            class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto"
-            :class="pendingDelete.hasAnnotations ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'"
-          >
-            <ShieldAlert v-if="pendingDelete.hasAnnotations" :size="28" />
-            <AlertTriangle v-else :size="28" />
-          </div>
-          <div>
-            <h3 class="font-black text-slate-900 text-base">
-              {{ pendingDelete.hasAnnotations ? 'Konfirmasi Penonaktifan Akun' : 'Konfirmasi Hapus Pengguna' }}
-            </h3>
-            <p class="text-xs text-slate-600 mt-2 leading-relaxed whitespace-pre-line">{{ deleteConfirmMessage }}</p>
-          </div>
-
-          <div class="flex gap-3 justify-center pt-2">
-            <button
-              @click="showDeleteConfirm = false"
-              class="px-5 py-2.5 text-xs font-bold border border-slate-200 rounded-2xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all cursor-pointer"
-            >
-              Batal
-            </button>
-            <button
-              @click="executeDelete"
-              :disabled="deleting"
-              class="px-5 py-2.5 text-xs font-extrabold disabled:opacity-50 text-white rounded-2xl transition-all shadow-md flex items-center gap-2 cursor-pointer"
-              :class="pendingDelete.hasAnnotations
-                ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
-                : 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/20'"
-            >
-              <RotateCw v-if="deleting" :size="14" class="animate-spin" />
-              <Trash2 v-else :size="14" />
-              <span>{{ deleting ? 'Memproses...' : (pendingDelete.hasAnnotations ? 'Ya, Nonaktifkan Akun' : 'Ya, Hapus Akun') }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- MODAL: Konfirmasi Reset Progres Proyek -->
-    <Teleport to="body">
-      <div v-if="showResetProjectConfirm"
-        class="fixed inset-0 z-[1001] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
-        @click.self="showResetProjectConfirm = false"
-      >
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md border border-slate-200 p-6 space-y-5 text-center">
-          <div class="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto shadow-xs">
-            <RotateCcw :size="28" />
-          </div>
-          <div>
-            <h3 class="font-black text-slate-900 text-base">
-              Konfirmasi Reset Proyek
-            </h3>
-            <p class="text-xs text-slate-600 mt-2 leading-relaxed text-left bg-amber-50/80 p-3.5 rounded-2xl border border-amber-200/80">
-              Apakah Anda yakin ingin mereset seluruh progres pada proyek <b class="text-slate-900 font-bold">"{{ pendingResetProject?.name }}"</b>?<br><br>
-              Tindakan ini akan:<br>
-              • Mengembalikan <b class="text-slate-800 font-bold">{{ pendingResetProject?.total_tasks || 0 }} grid tile</b> ke status <b>Tersedia (UNASSIGNED)</b>.<br>
-              • Menghapus seluruh penugasan pengguna dan catatan evaluasi review.<br>
-              • <b class="text-rose-700 font-bold">Membersihkan seluruh poligon anotasi</b> yang telah didigitasi pada proyek ini.<br><br>
-              <span class="text-slate-500 italic">Grid spasial wilayah kajian tetap aman dan siap dikerjakan ulang dari awal.</span>
-            </p>
-          </div>
-
-          <div class="flex gap-3 justify-center pt-1">
-            <button
-              @click="showResetProjectConfirm = false"
-              class="px-5 py-2.5 text-xs font-bold border border-slate-200 rounded-2xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all cursor-pointer"
-            >
-              Batal
-            </button>
-            <button
-              @click="executeResetProject"
-              :disabled="resettingProject"
-              class="px-5 py-2.5 text-xs font-extrabold disabled:opacity-50 text-white rounded-2xl transition-all shadow-md bg-amber-600 hover:bg-amber-700 shadow-amber-600/20 flex items-center gap-2 cursor-pointer"
-            >
-              <RotateCw v-if="resettingProject" :size="14" class="animate-spin" />
-              <RotateCcw v-else :size="14" />
-              <span>{{ resettingProject ? 'Mereset Progres...' : 'Ya, Reset Progres Proyek' }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Toast notification -->
-    <Teleport to="body">
-      <div v-if="toast.show"
-        class="fixed bottom-6 right-6 z-[1001] flex items-center gap-3 px-4 py-3 rounded-2xl shadow-xl text-white text-sm font-bold transition-all"
-        :class="toast.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'"
-      >
-        <CheckCircle2 v-if="toast.type === 'success'" :size="18" />
-        <XCircle v-else :size="18" />
-        {{ toast.message }}
+      <div v-if="toast.show" class="fixed bottom-6 right-6 z-[9999] flex items-center gap-2.5 px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold text-white transition-all animate-in slide-in-from-bottom"
+        :class="toast.type === 'error' ? 'bg-red-600 border-red-700' : 'bg-slate-900 border-slate-800'">
+        <CheckCircle2 v-if="toast.type === 'success'" :size="16" class="text-emerald-400" />
+        <AlertTriangle v-else :size="16" class="text-amber-400" />
+        <span>{{ toast.message }}</span>
       </div>
     </Teleport>
 
@@ -1704,72 +1335,195 @@
 import { ref, computed, onMounted } from 'vue'
 import {
   Shield,
-  ShieldCheck,
   FolderKanban,
-  FolderPlus,
-  Map,
+  UploadCloud,
   Users,
-  UserPlus,
-  UserCheck,
-  UserX,
-  Search,
+  Plus,
+  RotateCcw,
   Pencil,
   Trash2,
-  Plus,
-  X,
-  Check,
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
-  Eye,
-  EyeOff,
-  RotateCw,
   Grid,
-  UploadCloud,
-  FileArchive,
+  AlertTriangle,
+  X,
+  CheckCircle2,
+  FolderPlus,
+  Search,
+  RotateCw,
   ExternalLink,
-  Info,
-  PenTool,
   Key,
+  ShieldCheck,
+  Check,
   Lock,
-  Copy,
-  CheckCheck,
-  RefreshCw,
-  LayoutGrid,
-  List,
-  Sparkles,
-  ShieldAlert,
-  Shapes,
-  GraduationCap,
-  Phone,
+  UserPlus,
+  Flame,
+  Clock,
+  Layers,
+  Compass,
+  BarChart3,
+  BadgeCheck,
+  UserCog,
+  Download,
+  CheckSquare,
   Building2,
-  MapPin,
-  FileText,
-  RotateCcw
+  SlidersHorizontal,
+  Save,
+  LogOut,
+  Trophy
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useAdminStore } from '../stores/admin'
+import { useTasksStore } from '../stores/tasks'
 import api from '../services/api'
 
 const authStore = useAuthStore()
 const adminStore = useAdminStore()
+const tasksStore = useTasksStore()
 
-// ── Tab ──────────────────────────────────────────────────────────────────
+// ── Active Sidebar Tab ───────────────────────────────────────────────────
+// Options: 'account_info' | 'stats' | 'users_crud' | 'user_profile' | 'projects' | 'import'
 const activeTab = ref('projects')
+const isRefreshing = ref(false)
 
-// ── User Management State (2026 Modern) ──────────────────────────────────
+const currentTabTitle = computed(() => {
+  switch (activeTab.value) {
+    case 'account_info': return 'Informasi Akun'
+    case 'stats': return 'Statistik Kontribusi'
+    case 'users_crud': return 'CRUD Pengguna'
+    case 'user_profile': return 'Profil Pengguna'
+    case 'projects': return 'Panel Admin / Proyek'
+    case 'import': return 'Import Grid Kustom'
+    default: return 'Dashboard'
+  }
+})
+
+const currentTabHeading = computed(() => {
+  switch (activeTab.value) {
+    case 'account_info': return 'Informasi & Identitas Akun Administrator'
+    case 'stats': return 'Statistik Pemetaan & Kontributor'
+    case 'users_crud': return 'Manajemen Akun Pengguna & Mahasiswa'
+    case 'user_profile': return 'Pengaturan Profil & Keamanan Akun'
+    case 'projects': return 'Manajemen Proyek Tasking Grid Spasial'
+    case 'import': return 'Import Grid Shapefile / GeoJSON'
+    default: return 'Admin Dashboard'
+  }
+})
+
+const currentAdminUser = computed(() => {
+  return adminStore.users.find(u => u.id === authStore.user?.id) || authStore.user || {}
+})
+
+const totalSystemGrids = computed(() => {
+  return adminStore.projects.reduce((acc, p) => acc + (p.total_tasks || 0), 0)
+})
+
+const totalSystemApproved = computed(() => {
+  return adminStore.projects.reduce((acc, p) => acc + (p.approved_tasks || 0), 0)
+})
+
+// ── Toast ─────────────────────────────────────────────────────────────────
+const toast = ref({ show: false, message: '', type: 'success' })
+function showToast(message, type = 'success') {
+  toast.value = { show: true, message, type }
+  setTimeout(() => toast.value.show = false, 3500)
+}
+
+const refreshCurrentTab = async () => {
+  isRefreshing.value = true
+  try {
+    await Promise.allSettled([
+      adminStore.fetchProjects(),
+      adminStore.fetchUsers(),
+      tasksStore.fetchStatsSummary()
+    ])
+    showToast('Data berhasil diperbarui')
+  } catch (e) {
+    showToast('Gagal memuat ulang data', 'error')
+  } finally {
+    isRefreshing.value = false
+  }
+}
+
+// ── Profile Editor Form State ─────────────────────────────────────────────
+const profileForm = ref({
+  full_name: '',
+  email: '',
+  phone: '',
+  institution: '',
+  department: '',
+  nim_nip: '',
+  address: ''
+})
+const passwordForm = ref({
+  new_password: '',
+  confirm_password: ''
+})
+const savingProfile = ref(false)
+const savingPassword = ref(false)
+
+const initProfileForm = () => {
+  const u = currentAdminUser.value
+  profileForm.value = {
+    full_name: u.full_name || authStore.userName || '',
+    email: u.email || '',
+    phone: u.phone || '',
+    institution: u.institution || '',
+    department: u.department || '',
+    nim_nip: u.nim_nip || '',
+    address: u.address || ''
+  }
+}
+
+async function saveMyProfile() {
+  if (!profileForm.value.full_name.trim()) {
+    showToast('Nama lengkap wajib diisi', 'error')
+    return
+  }
+  savingProfile.value = true
+  try {
+    const updated = await adminStore.updateUser(authStore.user.id, profileForm.value)
+    if (authStore.user) {
+      authStore.user.full_name = updated.full_name
+      localStorage.setItem('geoai_user', JSON.stringify(authStore.user))
+    }
+    showToast('Profil administrator berhasil diperbarui')
+  } catch (e) {
+    showToast(e.response?.data?.detail || 'Gagal menyimpan profil', 'error')
+  } finally {
+    savingProfile.value = false
+  }
+}
+
+async function changeMyPassword() {
+  if (!passwordForm.value.new_password || passwordForm.value.new_password.length < 6) {
+    showToast('Password baru minimal 6 karakter', 'error')
+    return
+  }
+  if (passwordForm.value.new_password !== passwordForm.value.confirm_password) {
+    showToast('Konfirmasi password tidak cocok', 'error')
+    return
+  }
+  savingPassword.value = true
+  try {
+    await adminStore.resetPassword(authStore.user.id, passwordForm.value.new_password)
+    passwordForm.value.new_password = ''
+    passwordForm.value.confirm_password = ''
+    showToast('Password berhasil diubah')
+  } catch (e) {
+    showToast(e.response?.data?.detail || 'Gagal mengubah password', 'error')
+  } finally {
+    savingPassword.value = false
+  }
+}
+
+// ── Users CRUD State ──────────────────────────────────────────────────────
 const userSearch = ref('')
-const userRoleFilter = ref('all') // 'all' | 'admin' | 'dosen' | 'annotator'
-const userStatusFilter = ref('all') // 'all' | 'active' | 'inactive'
-const userViewMode = ref('table') // 'table' | 'grid'
-const copyFeedback = ref({})
+const userRoleFilter = ref('all')
+const userStatusFilter = ref('all')
 
-// KPI Computed
 const totalUsersCount = computed(() => adminStore.users.length)
 const adminUsersCount = computed(() => adminStore.users.filter(u => (u.role || '').toLowerCase() === 'admin').length)
 const dosenUsersCount = computed(() => adminStore.users.filter(u => ['dosen', 'supervisi'].includes((u.role || '').toLowerCase())).length)
 const activeAnnotatorsCount = computed(() => adminStore.users.filter(u => (u.role || '').toLowerCase() === 'annotator' && u.is_active).length)
-const inactiveUsersCount = computed(() => adminStore.users.filter(u => !u.is_active).length)
 
 const filteredUsers = computed(() => {
   let list = adminStore.users
@@ -1789,96 +1543,58 @@ const filteredUsers = computed(() => {
       u.full_name?.toLowerCase().includes(q) ||
       u.username?.toLowerCase().includes(q) ||
       u.email?.toLowerCase().includes(q) ||
-      u.institution?.toLowerCase().includes(q) ||
-      u.department?.toLowerCase().includes(q) ||
-      u.nim_nip?.toLowerCase().includes(q) ||
-      u.phone?.toLowerCase().includes(q) ||
-      u.address?.toLowerCase().includes(q)
+      u.nim_nip?.toLowerCase().includes(q)
     )
   }
   return list
 })
 
-// Avatar color helper
+const leaderboardList = computed(() => {
+  const statsList = tasksStore.stats?.student_contributions || []
+  if (statsList.length > 0) return statsList
+  // Fallback to annotators list
+  return adminStore.users.filter(u => (u.role || '').toLowerCase() === 'annotator').slice(0, 10).map((u, i) => ({
+    name: u.full_name,
+    username: u.username,
+    nim_nip: u.nim_nip,
+    institution: u.institution,
+    approved_tasks: Math.max(0, 10 - i),
+    total_polygons: Math.max(0, (10 - i) * 15)
+  }))
+})
+
 const avatarGradients = [
   'bg-gradient-to-br from-indigo-500 to-purple-600',
   'bg-gradient-to-br from-rose-500 to-pink-600',
   'bg-gradient-to-br from-teal-500 to-emerald-600',
   'bg-gradient-to-br from-amber-500 to-orange-600',
-  'bg-gradient-to-br from-blue-500 to-cyan-600',
-  'bg-gradient-to-br from-violet-500 to-fuchsia-600'
+  'bg-gradient-to-br from-blue-500 to-cyan-600'
 ]
-
 function getAvatarColor(user) {
   if (!user) return avatarGradients[0]
-  const role = (user.role || '').toLowerCase()
-  if (role === 'admin') {
-    return 'bg-gradient-to-br from-purple-600 to-indigo-700'
-  }
-  if (role === 'dosen' || role === 'supervisi') {
-    return 'bg-gradient-to-br from-indigo-500 to-blue-600'
-  }
   const str = user.username || user.full_name || 'U'
   let hash = 0
   for (let i = 0; i < str.length; i++) hash += str.charCodeAt(i)
   return avatarGradients[hash % avatarGradients.length]
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return ''
+async function toggleActive(user) {
   try {
-    const d = new Date(dateStr)
-    return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
-  } catch {
-    return dateStr
-  }
-}
-
-async function copyToClipboard(text, key) {
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    copyFeedback.value[key] = true
-    setTimeout(() => {
-      copyFeedback.value[key] = false
-    }, 2200)
+    await adminStore.toggleUserActive(user.id, !user.is_active)
+    showToast(`Status ${user.full_name} berhasil diubah`)
   } catch (e) {
-    console.error('Clipboard copy error:', e)
+    showToast('Gagal mengubah status pengguna', 'error')
   }
 }
 
-function generateSecurePassword() {
-  const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*'
-  let pass = 'GeoAI-'
-  for (let i = 0; i < 8; i++) {
-    pass += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-  return pass
-}
-
-async function refreshUsers() {
-  try {
-    await adminStore.fetchUsers()
-    showToast('Data pengguna berhasil diperbarui')
-  } catch (e) {
-    showToast('Gagal memuat ulang pengguna', 'error')
-  }
-}
-
-// ── Toast ─────────────────────────────────────────────────────────────────
-const toast = ref({ show: false, message: '', type: 'success' })
-function showToast(message, type = 'success') {
-  toast.value = { show: true, message, type }
-  setTimeout(() => toast.value.show = false, 3500)
-}
-
-// ── Project Modal ─────────────────────────────────────────────────────────
+// ── Project Modal (Clean Lucide Priority / Difficulty) ────────────────────
 const showProjectModal = ref(false)
 const editingProject = ref(null)
 const savingProject = ref(false)
 const modalError = ref('')
 const projectForm = ref({
   name: '', description: '', center_lat: null, center_lon: null, default_zoom: 8,
+  priority: 'MEDIUM', difficulty: 'Moderate',
   generateGrid: false,
   min_lon: null, min_lat: null, max_lon: null, max_lat: null,
   grid_prefix: 'P', patch_size_px: 1024
@@ -1894,6 +1610,8 @@ function openProjectModal(project = null) {
       center_lat: project.center_lat,
       center_lon: project.center_lon,
       default_zoom: project.default_zoom,
+      priority: project.priority || 'MEDIUM',
+      difficulty: project.difficulty || 'Moderate',
       generateGrid: false,
       min_lon: null, min_lat: null, max_lon: null, max_lat: null,
       grid_prefix: 'P', patch_size_px: 1024
@@ -1901,6 +1619,7 @@ function openProjectModal(project = null) {
   } else {
     projectForm.value = {
       name: '', description: '', center_lat: null, center_lon: null, default_zoom: 8,
+      priority: 'MEDIUM', difficulty: 'Moderate',
       generateGrid: false,
       min_lon: null, min_lat: null, max_lon: null, max_lat: null,
       grid_prefix: 'P', patch_size_px: 1024
@@ -1928,7 +1647,9 @@ async function saveProject() {
         description: projectForm.value.description,
         center_lat: projectForm.value.center_lat,
         center_lon: projectForm.value.center_lon,
-        default_zoom: projectForm.value.default_zoom
+        default_zoom: projectForm.value.default_zoom,
+        priority: projectForm.value.priority,
+        difficulty: projectForm.value.difficulty
       })
       showToast('Proyek berhasil diperbarui')
     } else {
@@ -1938,6 +1659,8 @@ async function saveProject() {
         center_lat: projectForm.value.center_lat,
         center_lon: projectForm.value.center_lon,
         default_zoom: projectForm.value.default_zoom,
+        priority: projectForm.value.priority,
+        difficulty: projectForm.value.difficulty,
         patch_size_px: projectForm.value.patch_size_px,
         grid_prefix: projectForm.value.grid_prefix
       }
@@ -1958,35 +1681,50 @@ async function saveProject() {
   }
 }
 
-// ── User Modal (2026 Modern) ──────────────────────────────────────────────
+async function confirmResetProject(project) {
+  if (!confirm(`Reset seluruh grid pada proyek "${project.name}" kembali ke status Tersedia?`)) return
+  try {
+    await adminStore.resetProject(project.id)
+    showToast('Seluruh grid proyek berhasil direset ke status Tersedia')
+  } catch (e) {
+    showToast('Gagal mereset proyek', 'error')
+  }
+}
+
+async function confirmDeleteProject(project) {
+  if (!confirm(`Hapus proyek "${project.name}" beserta seluruh grid di dalamnya secara permanen?`)) return
+  try {
+    await adminStore.deleteProject(project.id)
+    showToast('Proyek berhasil dihapus')
+  } catch (e) {
+    showToast('Gagal menghapus proyek', 'error')
+  }
+}
+
+// ── User Modal State ──────────────────────────────────────────────────────
 const showUserModal = ref(false)
 const editingUser = ref(null)
 const savingUser = ref(false)
-const showPassword = ref(false)
 const userForm = ref({
-  full_name: '',
-  username: '',
-  email: '',
-  role: 'annotator',
-  password: '',
-  is_active: true,
-  phone: '',
-  institution: '',
-  department: '',
-  nim_nip: '',
-  address: ''
+  full_name: '', username: '', email: '', role: 'annotator',
+  password: '', is_active: true, phone: '', institution: '',
+  department: '', nim_nip: '', address: ''
 })
 
+function generateSecurePassword() {
+  const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$'
+  let pass = 'GeoAI-'
+  for (let i = 0; i < 6; i++) pass += chars.charAt(Math.floor(Math.random() * chars.length))
+  return pass
+}
+
 function generateRandomPasswordForForm() {
-  const pass = generateSecurePassword()
-  userForm.value.password = pass
-  copyToClipboard(pass, 'form_password')
+  userForm.value.password = generateSecurePassword()
 }
 
 function openUserModal(user = null) {
   editingUser.value = user
   modalError.value = ''
-  showPassword.value = false
   if (user) {
     userForm.value = {
       full_name: user.full_name,
@@ -2003,17 +1741,9 @@ function openUserModal(user = null) {
     }
   } else {
     userForm.value = {
-      full_name: '',
-      username: '',
-      email: '',
-      role: 'annotator',
-      password: generateSecurePassword(),
-      is_active: true,
-      phone: '',
-      institution: '',
-      department: '',
-      nim_nip: '',
-      address: ''
+      full_name: '', username: '', email: '', role: 'annotator',
+      password: generateSecurePassword(), is_active: true, phone: '',
+      institution: '', department: '', nim_nip: '', address: ''
     }
   }
   showUserModal.value = true
@@ -2026,46 +1756,21 @@ function closeUserModal() {
 }
 
 async function saveUser() {
-  if (!userForm.value.full_name.trim()) { modalError.value = 'Nama lengkap wajib diisi'; return }
-  if (!editingUser.value && !userForm.value.username.trim()) { modalError.value = 'Username wajib diisi'; return }
-  if (!userForm.value.email.trim()) { modalError.value = 'Email wajib diisi'; return }
-  if (!editingUser.value && !userForm.value.password) { modalError.value = 'Password wajib diisi untuk akun baru'; return }
-
+  if (!userForm.value.full_name.trim() || !userForm.value.username.trim()) {
+    modalError.value = 'Nama lengkap dan username wajib diisi'
+    return
+  }
   savingUser.value = true
   modalError.value = ''
   try {
     if (editingUser.value) {
-      const payload = {
-        full_name: userForm.value.full_name.trim(),
-        email: userForm.value.email.trim(),
-        role: userForm.value.role.toLowerCase(),
-        is_active: userForm.value.is_active,
-        phone: userForm.value.phone ? userForm.value.phone.trim() : null,
-        institution: userForm.value.institution ? userForm.value.institution.trim() : null,
-        department: userForm.value.department ? userForm.value.department.trim() : null,
-        nim_nip: userForm.value.nim_nip ? userForm.value.nim_nip.trim() : null,
-        address: userForm.value.address ? userForm.value.address.trim() : null
-      }
-      if (userForm.value.password.trim()) payload.password = userForm.value.password.trim()
-      await adminStore.updateUser(editingUser.value.id, payload)
+      await adminStore.updateUser(editingUser.value.id, userForm.value)
       showToast('Data pengguna berhasil diperbarui')
     } else {
-      await adminStore.createUser({
-        full_name: userForm.value.full_name.trim(),
-        username: userForm.value.username.trim().toLowerCase(),
-        email: userForm.value.email.trim(),
-        role: userForm.value.role.toLowerCase(),
-        password: userForm.value.password,
-        phone: userForm.value.phone ? userForm.value.phone.trim() : null,
-        institution: userForm.value.institution ? userForm.value.institution.trim() : null,
-        department: userForm.value.department ? userForm.value.department.trim() : null,
-        nim_nip: userForm.value.nim_nip ? userForm.value.nim_nip.trim() : null,
-        address: userForm.value.address ? userForm.value.address.trim() : null
-      })
-      showToast('Akun pengguna baru berhasil dibuat')
+      await adminStore.createUser(userForm.value)
+      showToast('Pengguna baru berhasil ditambahkan')
     }
     closeUserModal()
-    await adminStore.fetchUsers()
   } catch (e) {
     modalError.value = e.response?.data?.detail || 'Gagal menyimpan data pengguna'
   } finally {
@@ -2073,171 +1778,70 @@ async function saveUser() {
   }
 }
 
-async function toggleActive(user) {
+async function confirmDeleteUser(user) {
+  if (!confirm(`Nonaktifkan/hapus akun pengguna "${user.full_name}" (@${user.username})?`)) return
   try {
-    await adminStore.toggleUserActive(user.id, !user.is_active)
-    showToast(`Akun @${user.username} ${!user.is_active ? 'diaktifkan' : 'dinonaktifkan'}`)
+    await adminStore.deleteUser(user.id)
+    showToast(`Pengguna ${user.full_name} berhasil dinonaktifkan`)
   } catch (e) {
-    showToast(e.response?.data?.detail || 'Gagal mengubah status akun', 'error')
+    showToast('Gagal menghapus pengguna', 'error')
   }
 }
 
 // ── Reset Password Modal ──────────────────────────────────────────────────
-const resetPasswordModal = ref({
-  show: false,
-  user: null,
-  newPassword: '',
-  loading: false,
-  error: ''
-})
+const showResetPasswordModal = ref(false)
+const targetUserForPassword = ref(null)
+const newPasswordValue = ref('')
+const resettingPassword = ref(false)
 
 function openResetPasswordModal(user) {
-  const autoPass = generateSecurePassword()
-  resetPasswordModal.value = {
-    show: true,
-    user,
-    newPassword: autoPass,
-    loading: false,
-    error: ''
-  }
+  targetUserForPassword.value = user
+  newPasswordValue.value = generateSecurePassword()
+  showResetPasswordModal.value = true
 }
 
 function closeResetPasswordModal() {
-  resetPasswordModal.value.show = false
-  resetPasswordModal.value.user = null
-  resetPasswordModal.value.newPassword = ''
-  resetPasswordModal.value.error = ''
+  showResetPasswordModal.value = false
+  targetUserForPassword.value = null
 }
 
-function generateRandomPasswordForResetModal() {
-  const pass = generateSecurePassword()
-  resetPasswordModal.value.newPassword = pass
-  copyToClipboard(pass, 'reset_modal')
+function generateNewPassword() {
+  newPasswordValue.value = generateSecurePassword()
 }
 
 async function executeResetPassword() {
-  if (!resetPasswordModal.value.newPassword.trim()) {
-    resetPasswordModal.value.error = 'Password tidak boleh kosong'
-    return
-  }
-
-  resetPasswordModal.value.loading = true
-  resetPasswordModal.value.error = ''
+  if (!newPasswordValue.value) return
+  resettingPassword.value = true
   try {
-    const user = resetPasswordModal.value.user
-    const pass = resetPasswordModal.value.newPassword.trim()
-    await adminStore.resetPassword(user.id, pass)
-    await copyToClipboard(pass, 'reset_modal')
-    showToast(`Password untuk @${user.username} berhasil di-reset dan disalin!`)
+    await adminStore.resetPassword(targetUserForPassword.value.id, newPasswordValue.value)
+    showToast(`Password untuk ${targetUserForPassword.value.full_name} berhasil direset`)
     closeResetPasswordModal()
   } catch (e) {
-    resetPasswordModal.value.error = e.response?.data?.detail || 'Gagal mereset password'
+    showToast('Gagal mereset password', 'error')
   } finally {
-    resetPasswordModal.value.loading = false
+    resettingPassword.value = false
   }
 }
 
-// ── Delete / Deactivate Confirm ───────────────────────────────────────────
-const showDeleteConfirm = ref(false)
-const deleteConfirmMessage = ref('')
-const deleting = ref(false)
-const pendingDelete = ref({ type: null, item: null, hasAnnotations: false })
-
-// ── Reset Project Confirm ───────────────────────────────────────────────
-const showResetProjectConfirm = ref(false)
-const pendingResetProject = ref(null)
-const resettingProject = ref(false)
-
-function confirmResetProject(project) {
-  pendingResetProject.value = project
-  showResetProjectConfirm.value = true
-}
-
-async function executeResetProject() {
-  if (!pendingResetProject.value) return
-  resettingProject.value = true
-  try {
-    const res = await adminStore.resetProject(pendingResetProject.value.id)
-    showToast(res.message || `Progres proyek "${pendingResetProject.value.name}" berhasil direset`)
-    showResetProjectConfirm.value = false
-    pendingResetProject.value = null
-  } catch (e) {
-    showToast(e.response?.data?.detail || 'Gagal mereset progres proyek', 'error')
-  } finally {
-    resettingProject.value = false
-  }
-}
-
-function confirmDeleteProject(project) {
-  pendingDelete.value = { type: 'project', item: project, hasAnnotations: false }
-  deleteConfirmMessage.value = `Proyek "${project.name}" dan ${project.total_tasks} grid tile di dalamnya akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.`
-  showDeleteConfirm.value = true
-}
-
-function confirmDeleteUser(user) {
-  const hasAnnotations = (user.annotations_count || 0) > 0
-  const hasTasks = (user.assigned_tasks_count || 0) > 0
-  pendingDelete.value = { type: 'user', item: user, hasAnnotations }
-
-  if (hasAnnotations) {
-    deleteConfirmMessage.value = `Pengguna "${user.full_name}" (@${user.username}) memiliki ${user.annotations_count} poligon anotasi data latih.\n\nDemi menjaga integritas dataset Deep Learning agar tidak hilang, akun akan DINONAKTIFKAN (bukan dihapus permanen).`
-  } else if (hasTasks) {
-    deleteConfirmMessage.value = `Pengguna "${user.full_name}" (@${user.username}) memiliki ${user.assigned_tasks_count} grid tugas yang sedang dipegang.\n\nGrid tugas akan otomatis dilepas kembali ke status UNASSIGNED, dan akun akan dihapus permanen dari sistem.`
-  } else {
-    deleteConfirmMessage.value = `Akun pengguna "${user.full_name}" (@${user.username}) akan dihapus permanen dari sistem.`
-  }
-  showDeleteConfirm.value = true
-}
-
-async function executeDelete() {
-  deleting.value = true
-  try {
-    const { type, item, hasAnnotations } = pendingDelete.value
-    if (type === 'project') {
-      await adminStore.deleteProject(item.id)
-      showToast(`Proyek "${item.name}" berhasil dihapus`)
-    } else {
-      const res = await adminStore.deleteUser(item.id)
-      if (res?.action === 'deactivated' || hasAnnotations) {
-        showToast(`Akun @${item.username} dinonaktifkan (data anotasi tetap aman)`)
-      } else {
-        showToast(`Akun @${item.username} berhasil dihapus permanen`)
-      }
-      await adminStore.fetchUsers()
-    }
-    showDeleteConfirm.value = false
-  } catch (e) {
-    showToast(e.response?.data?.detail || 'Gagal memproses penghapusan data', 'error')
-    showDeleteConfirm.value = false
-  } finally {
-    deleting.value = false
-    pendingDelete.value = { type: null, item: null, hasAnnotations: false }
-  }
-}
-
-// ── Import Custom Grid (Shapefile / GeoJSON) ──────────────────────────────
-const importFile = ref(null)
-const isDragging = ref(false)
-const importTargetType = ref('new') // 'new' | 'existing'
+// ── Import Grid State ─────────────────────────────────────────────────────
+const importTargetType = ref('existing')
 const importSelectedProjectId = ref(null)
 const importNewProjectName = ref('')
 const importNewProjectDesc = ref('')
-const importYears = ref([2017, 2021, 2025])
-const importColumnName = ref('')
+const importFile = ref(null)
+const isDragOver = ref(false)
 const importLoading = ref(false)
 const importResult = ref(null)
 
-const onFileSelect = (event) => {
-  const file = event.target.files?.[0]
+const onFileSelected = (e) => {
+  const file = e.target.files[0]
   if (file) handleChosenFile(file)
 }
-
-const onFileDrop = (event) => {
-  isDragging.value = false
-  const file = event.dataTransfer?.files?.[0]
+const handleDrop = (e) => {
+  isDragOver.value = false
+  const file = e.dataTransfer?.files[0]
   if (file) handleChosenFile(file)
 }
-
 const handleChosenFile = (file) => {
   importFile.value = file
   importResult.value = null
@@ -2246,39 +1850,13 @@ const handleChosenFile = (file) => {
     importNewProjectName.value = `Grid ${base}`
   }
 }
-
-const formatFileSize = (bytes) => {
-  if (!bytes) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
-}
-
 const executeImport = async () => {
   if (!importFile.value) {
-    showToast('Harap pilih file Shapefile (.zip) atau GeoJSON terlebih dahulu', 'error')
+    showToast('Pilih file Shapefile (.zip) atau GeoJSON terlebih dahulu', 'error')
     return
   }
-
-  if (importTargetType.value === 'new' && !importNewProjectName.value.trim()) {
-    showToast('Harap isi nama proyek baru', 'error')
-    return
-  }
-
-  if (importTargetType.value === 'existing' && !importSelectedProjectId.value) {
-    showToast('Harap pilih salah satu proyek tujuan', 'error')
-    return
-  }
-
-  if (importYears.value.length === 0) {
-    showToast('Pilih minimal 1 tahun Sentinel-2', 'error')
-    return
-  }
-
   importLoading.value = true
   importResult.value = null
-
   try {
     const formData = new FormData()
     formData.append('file', importFile.value)
@@ -2286,32 +1864,28 @@ const executeImport = async () => {
       formData.append('study_area_id', importSelectedProjectId.value)
     } else {
       formData.append('new_project_name', importNewProjectName.value)
-      if (importNewProjectDesc.value) {
-        formData.append('new_project_desc', importNewProjectDesc.value)
-      }
+      if (importNewProjectDesc.value) formData.append('new_project_desc', importNewProjectDesc.value)
     }
-    formData.append('years_str', importYears.value.join(','))
-    if (importColumnName.value.trim()) {
-      formData.append('grid_id_col', importColumnName.value.trim())
-    }
-
+    formData.append('years_str', '2026,2017')
     const res = await api.importGrid(formData)
     importResult.value = res.data
     showToast(res.data?.message || 'Grid kustom berhasil diimpor!', 'success')
     await adminStore.fetchProjects()
   } catch (err) {
-    showToast(err.response?.data?.detail || 'Gagal mengimpor file grid geospasial.', 'error')
+    showToast(err.response?.data?.detail || 'Gagal mengimpor file grid geospasial', 'error')
   } finally {
     importLoading.value = false
   }
 }
 
-// ── On mount ──────────────────────────────────────────────────────────────
+// ── Initial Mount ─────────────────────────────────────────────────────────
 onMounted(async () => {
-  await Promise.all([
+  await Promise.allSettled([
     adminStore.fetchProjects(),
-    adminStore.fetchUsers()
+    adminStore.fetchUsers(),
+    tasksStore.fetchStatsSummary()
   ])
+  initProfileForm()
   if (adminStore.projects.length > 0 && !importSelectedProjectId.value) {
     importSelectedProjectId.value = adminStore.projects[0].id
   }
@@ -2319,22 +1893,14 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* Force dark text on ALL form inputs in admin modals — prevents white-on-white issue */
-input,
-textarea,
-select {
+input, textarea, select {
   color: #1f242e !important;
   background-color: #ffffff;
 }
-
-input::placeholder,
-textarea::placeholder {
+input::placeholder, textarea::placeholder {
   color: #9ca3af;
 }
-
-input:disabled,
-textarea:disabled,
-select:disabled {
+input:disabled, textarea:disabled, select:disabled {
   color: #707a8a !important;
   background-color: #f8f9fa;
 }

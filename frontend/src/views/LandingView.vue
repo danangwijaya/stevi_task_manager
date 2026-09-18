@@ -24,25 +24,22 @@
       <div class="max-w-7xl mx-auto px-6 lg:px-12 py-16 relative z-10 w-full">
         <div class="max-w-xl space-y-5">
           <h1 class="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight uppercase leading-none font-heading">
-            MAP FOR AI & DEEP LEARNING
+            GEOSTEVIA
           </h1>
-
+          <p class="text-sm sm:text-base font-bold uppercase tracking-wider text-rose-400">
+            Geospatial Ecosystem Services Analytics
+          </p>
           <p class="text-base sm:text-lg text-[#cfd4dc] font-normal leading-relaxed">
-            Platform kolaboratif berbasis spasial untuk pembuatan Dataset Ground Truth dan Training Sample Tutupan Lahan menggunakan citra satelit untuk training model kecerdasan buatan (GeoAI).
+            A geospatial analytical platform for ecosystem services assessment, visualization, and spatial decision support.
           </p>
 
           <div class="pt-2 flex items-center gap-4">
             <router-link
-              to="/project/1"
-              class="inline-block bg-[#d73f3f] hover:bg-[#c23434] text-white font-bold text-sm px-6 py-3 rounded-xl transition-all shadow-md uppercase tracking-wider"
+              to="/projects"
+              class="inline-flex items-center gap-3 bg-[#d73f3f] hover:bg-[#c23434] text-white font-black text-sm sm:text-base px-8 py-3.5 rounded-xl transition-all shadow-lg hover:shadow-rose-600/30 hover:scale-[1.02] active:scale-[0.98] uppercase tracking-wider group cursor-pointer"
             >
-              Mulai Memetakan
-            </router-link>
-            <router-link
-              to="/tasking"
-              class="inline-block bg-slate-800/80 hover:bg-slate-700 text-white font-bold text-sm px-6 py-3 rounded-xl transition-all border border-slate-600 uppercase tracking-wider"
-            >
-              Lihat Tasks Grid
+              <span>Start Mapping</span>
+              <ArrowRight :size="18" class="group-hover:translate-x-1 transition-transform" />
             </router-link>
           </div>
         </div>
@@ -237,8 +234,9 @@
             class="h-8 w-auto object-contain"
           />
           <div>
-            <div class="text-white font-bold text-sm font-heading">STEVI Task Manager</div>
-            <div class="text-[11px] text-[#8c96a5]">Platform Kolaborasi Pembuatan Training Sample</div>
+            <div class="text-white font-bold text-sm font-heading">GEOSTEVIA</div>
+            <div class="text-[11px] text-[#8c96a5]">Geospatial Ecosystem Services Analytics</div>
+            <div class="text-[10px] text-[#616b7c] mt-0.5 max-w-sm">A geospatial analytical platform for ecosystem services assessment, visualization, and spatial decision support.</div>
           </div>
         </div>
 
@@ -251,8 +249,8 @@
         </div>
 
         <div class="text-[#8c96a5] text-center md:text-right">
-          <div>© 2026 STEVI Task Manager</div>
-          <div class="text-xs text-[#616b7c] mt-0.5">Powered by GeoAI Training System & STEVI Grid Engine</div>
+          <div>© 2026 GEOSTEVIA (Geospatial Ecosystem Services Analytics)</div>
+          <div class="text-xs text-[#616b7c] mt-0.5">A geospatial analytical platform for ecosystem services assessment, visualization, and spatial decision support.</div>
         </div>
       </div>
     </footer>

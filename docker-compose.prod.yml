@@ -50,7 +50,7 @@ services:
     container_name: geoai_frontend
     restart: always
     ports:
-      - "${FRONTEND_PORT:-8085}:80"
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
       - backend
 

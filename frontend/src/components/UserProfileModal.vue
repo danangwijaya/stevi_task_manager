@@ -10,7 +10,7 @@
           </div>
           <div>
             <h2 class="text-base font-extrabold text-slate-900 leading-tight">Manajemen Profil & Pengguna</h2>
-            <p class="text-xs text-slate-500 font-medium">STEVI Task Manager • Akun & Kontrol Akses</p>
+            <p class="text-xs text-slate-500 font-medium">GEOSTEVIA • Geospatial Ecosystem Services Analytics</p>
           </div>
         </div>
         <button
@@ -260,10 +260,10 @@
               >
                 <div class="flex items-center justify-between text-emerald-700">
                   <Box :size="16" />
-                  <span class="text-[9px] font-mono font-bold bg-emerald-200 px-1 py-0.2 rounded">U-Net</span>
+                  <span class="text-[9px] font-mono font-bold bg-emerald-200 px-1 py-0.2 rounded">DATASET</span>
                 </div>
-                <div class="mt-2 font-bold text-slate-800 text-xs group-hover:text-emerald-700">Ekspor Dataset</div>
-                <div class="text-[10px] text-slate-500">20-Bands Multi-spectral</div>
+                <div class="mt-2 font-bold text-slate-800 text-xs group-hover:text-emerald-700">Dataset Export</div>
+                <div class="text-[10px] text-slate-500">Raster & Vektor Penutupan Lahan</div>
               </router-link>
 
               <router-link
@@ -360,14 +360,14 @@
           <!-- Table of Users -->
           <div class="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-2xs">
             <div class="overflow-x-auto">
-              <table class="w-full text-left text-xs">
+              <table class="w-full text-left text-xs min-w-[650px]">
                 <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
                   <tr>
-                    <th class="p-3">User</th>
-                    <th class="p-3">Email</th>
-                    <th class="p-3">Role</th>
-                    <th class="p-3">Status</th>
-                    <th class="p-3 text-right">Aksi</th>
+                    <th class="p-3 whitespace-nowrap">User</th>
+                    <th class="p-3 whitespace-nowrap">Email</th>
+                    <th class="p-3 whitespace-nowrap">Role</th>
+                    <th class="p-3 whitespace-nowrap">Status</th>
+                    <th class="p-3 pr-5 text-right whitespace-nowrap">Aksi</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
@@ -396,7 +396,7 @@
                         ● {{ u.is_active ? 'Aktif' : 'Non-aktif' }}
                       </span>
                     </td>
-                    <td class="p-3 text-right space-x-1.5">
+                    <td class="p-3 pr-5 text-right whitespace-nowrap space-x-1.5">
                       <button
                         @click="openEditUserModal(u)"
                         class="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
@@ -425,7 +425,7 @@
 
       <!-- Modal Footer -->
       <div class="px-6 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-        <span class="text-[11px] text-slate-500">STEVI Task Manager • GeoAI Training System</span>
+        <span class="text-[11px] text-slate-500">GEOSTEVIA (Geospatial Ecosystem Services Analytics)</span>
         <button
           @click="closeModal"
           class="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-5 py-2 rounded-xl transition-colors cursor-pointer"

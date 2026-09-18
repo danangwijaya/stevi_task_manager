@@ -49,6 +49,8 @@ class StudyArea(Base):
     center_lat = Column(Float, nullable=False)
     center_lon = Column(Float, nullable=False)
     default_zoom = Column(Integer, default=11)
+    priority = Column(String(20), default="MEDIUM") # URGENT, HIGH, MEDIUM, LOW
+    difficulty = Column(String(30), default="Moderate") # Beginner, Moderate, Challenging
     bounds_geojson = Column(Text, nullable=True) # GeoJSON boundary
     created_at = Column(DateTime, default=datetime.utcnow)
 

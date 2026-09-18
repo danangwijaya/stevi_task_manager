@@ -27,6 +27,11 @@ class StudyAreaResponse(BaseModel):
     total_tasks: int = 0
     approved_tasks: int = 0
     in_progress_tasks: int = 0
+    submitted_tasks: int = 0
+    contributors_count: int = 0
+    priority: Optional[str] = "HIGH"
+    difficulty: Optional[str] = "Moderate"
+    campaign: Optional[str] = "GEOSTEVIA"
     created_at: datetime
 
     class Config:
@@ -38,6 +43,8 @@ class CreateProjectRequest(BaseModel):
     center_lat: float
     center_lon: float
     default_zoom: Optional[int] = 8
+    priority: Optional[str] = "MEDIUM"
+    difficulty: Optional[str] = "Moderate"
     # Bounding box for auto grid generation
     min_lon: Optional[float] = None
     min_lat: Optional[float] = None
@@ -53,6 +60,8 @@ class UpdateProjectRequest(BaseModel):
     center_lat: Optional[float] = None
     center_lon: Optional[float] = None
     default_zoom: Optional[int] = None
+    priority: Optional[str] = None
+    difficulty: Optional[str] = None
 
 # ─────────────────────────────────────────────
 # PROJECT / STUDY AREA ENDPOINTS
@@ -70,9 +79,19 @@ def get_all_projects(
         approved = db.query(func.count(TaskGrid.id)).filter(
             TaskGrid.study_area_id == a.id, TaskGrid.status == "APPROVED"
         ).scalar() or 0
-        in_prog = db.query(func.count(TaskGrid.id)).filter(
-            TaskGrid.study_area_id == a.id, TaskGrid.status == "IN_PROGRESS"
+        submitted = db.query(func.count(TaskGrid.id)).filter(
+            TaskGrid.study_area_id == a.id, TaskGrid.status == "SUBMITTED"
         ).scalar() or 0
+        in_prog = db.query(func.count(TaskGrid.id)).filter(
+            TaskGrid.study_area_id == a.id, TaskGrid.status.in_(["IN_PROGRESS", "ASSIGNED"])
+        ).scalar() or 0
+        contributors = db.query(func.count(func.distinct(TaskGrid.assigned_user_id))).filter(
+            TaskGrid.study_area_id == a.id, TaskGrid.assigned_user_id.isnot(None)
+        ).scalar() or 0
+
+        priority = a.priority or "MEDIUM"
+        difficulty = a.difficulty or "Moderate"
+
         result.append(StudyAreaResponse(
             id=a.id,
             name=a.name,
@@ -83,6 +102,11 @@ def get_all_projects(
             total_tasks=total,
             approved_tasks=approved,
             in_progress_tasks=in_prog,
+            submitted_tasks=submitted,
+            contributors_count=contributors,
+            priority=priority,
+            difficulty=difficulty,
+            campaign="GEOSTEVIA",
             created_at=a.created_at
         ))
     return result
@@ -104,6 +128,8 @@ def create_project(
         center_lat=project_in.center_lat,
         center_lon=project_in.center_lon,
         default_zoom=project_in.default_zoom or 8,
+        priority=project_in.priority or "MEDIUM",
+        difficulty=project_in.difficulty or "Moderate"
     )
     db.add(new_area)
     db.commit()
@@ -157,6 +183,11 @@ def create_project(
         total_tasks=grid_count,
         approved_tasks=0,
         in_progress_tasks=0,
+        submitted_tasks=0,
+        contributors_count=0,
+        priority=new_area.priority or "MEDIUM",
+        difficulty=new_area.difficulty or "Moderate",
+        campaign="GEOSTEVIA",
         created_at=new_area.created_at
     )
 
@@ -186,6 +217,10 @@ def update_project(
         area.center_lon = project_in.center_lon
     if project_in.default_zoom is not None:
         area.default_zoom = project_in.default_zoom
+    if project_in.priority is not None:
+        area.priority = project_in.priority
+    if project_in.difficulty is not None:
+        area.difficulty = project_in.difficulty
 
     db.commit()
     db.refresh(area)
@@ -195,7 +230,13 @@ def update_project(
         TaskGrid.study_area_id == area.id, TaskGrid.status == "APPROVED"
     ).scalar() or 0
     in_prog = db.query(func.count(TaskGrid.id)).filter(
-        TaskGrid.study_area_id == area.id, TaskGrid.status == "IN_PROGRESS"
+        TaskGrid.study_area_id == area.id, TaskGrid.status.in_(["IN_PROGRESS", "ASSIGNED"])
+    ).scalar() or 0
+    submitted = db.query(func.count(TaskGrid.id)).filter(
+        TaskGrid.study_area_id == area.id, TaskGrid.status == "SUBMITTED"
+    ).scalar() or 0
+    contributors = db.query(func.count(func.distinct(TaskGrid.assigned_user_id))).filter(
+        TaskGrid.study_area_id == area.id, TaskGrid.assigned_user_id.isnot(None)
     ).scalar() or 0
 
     return StudyAreaResponse(
@@ -203,6 +244,10 @@ def update_project(
         center_lat=area.center_lat, center_lon=area.center_lon,
         default_zoom=area.default_zoom, total_tasks=total,
         approved_tasks=approved, in_progress_tasks=in_prog,
+        submitted_tasks=submitted, contributors_count=contributors,
+        priority=area.priority or "MEDIUM",
+        difficulty=area.difficulty or "Moderate",
+        campaign="GEOSTEVIA",
         created_at=area.created_at
     )
 

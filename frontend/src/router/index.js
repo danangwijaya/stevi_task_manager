@@ -7,6 +7,7 @@ import AnnotatorMapView from '../views/AnnotatorMapView.vue'
 import AdminQCView from '../views/AdminQCView.vue'
 import AdminPanelView from '../views/AdminPanelView.vue'
 import ExportDatasetView from '../views/ExportDatasetView.vue'
+import ExploreProjectsView from '../views/ExploreProjectsView.vue'
 import LoginView from '../views/LoginView.vue'
 
 const routes = [
@@ -14,6 +15,15 @@ const routes = [
     path: '/',
     name: 'landing',
     component: LandingView
+  },
+  {
+    path: '/projects',
+    name: 'projects',
+    component: ExploreProjectsView
+  },
+  {
+    path: '/explore',
+    redirect: '/projects'
   },
   {
     path: '/project/:id?',

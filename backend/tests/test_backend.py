@@ -6,7 +6,7 @@ client = TestClient(app)
 def test_root():
     response = client.get("/")
     assert response.status_code == 200
-    assert "GeoAI" in response.json()["app"]
+    assert "GEOSTEVIA" in response.json()["app"] or "GeoAI" in response.json()["app"]
 
 def test_login_admin():
     response = client.post("/api/v1/auth/login", json={

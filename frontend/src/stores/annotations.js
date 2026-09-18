@@ -57,6 +57,26 @@ export const useAnnotationsStore = defineStore('annotations', {
       } finally {
         this.saving = false
       }
+    },
+
+    async fetchAnnotationsOverview(params = {}) {
+      try {
+        const response = await api.getAnnotationsOverview(params)
+        return response.data
+      } catch (err) {
+        console.error('Failed to fetch annotations overview:', err)
+        return { summary: {}, by_grid: [], by_mapper: [], by_class: [] }
+      }
+    },
+
+    async fetchAllAnnotationsFeatures(params = {}) {
+      try {
+        const response = await api.getAllAnnotationsFeatures(params)
+        return response.data.features || []
+      } catch (err) {
+        console.error('Failed to fetch all annotations features:', err)
+        return []
+      }
     }
   }
 })

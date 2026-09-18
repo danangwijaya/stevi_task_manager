@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="Collaborative Web Platform for Sentinel-2 Land Cover Deep Learning U-Net Training Samples",
+    description="A geospatial analytical platform for ecosystem services assessment, visualization, and spatial decision support.",
     version="1.0.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
@@ -36,7 +36,7 @@ app.include_router(annotations.router, prefix=f"{settings.API_V1_STR}/annotation
 app.include_router(raster.router, prefix=f"{settings.API_V1_STR}/raster", tags=["Sentinel-2 Dynamic COG Tile Server"])
 app.include_router(gee.router, prefix=f"{settings.API_V1_STR}/gee", tags=["Google Earth Engine & Satellite Layers"])
 app.include_router(arcgis.router, prefix=f"{settings.API_V1_STR}/arcgis", tags=["ArcGIS Sentinel-2 L2A ImageServer"])
-app.include_router(export_dataset.router, prefix=f"{settings.API_V1_STR}/export", tags=["1-Click U-Net Dataset Export"])
+app.include_router(export_dataset.router, prefix=f"{settings.API_V1_STR}/export", tags=["Dataset Export"])
 
 @app.get("/")
 def root():

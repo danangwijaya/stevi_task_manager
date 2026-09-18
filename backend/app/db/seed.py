@@ -7,6 +7,7 @@ from app.db.models import User, StudyArea, TaskGrid, Annotation, LandCoverClass,
 from app.core.security import get_password_hash
 from app.core.config import settings
 from app.services.grid_generator import generate_spatial_grids
+from app.db.seed_mappers import seed_mappers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -83,6 +84,10 @@ def seed_database():
             )
             db.add(admin_user)
             db.commit()
+
+        # 2b. Seed 20 Student Mapper Accounts
+        logger.info("Ensuring 20 Student Mapper Accounts are seeded...")
+        seed_mappers(db)
 
         # 3. Study Areas & Task Grids (Only seed if database is empty)
         existing_grids_count = db.query(TaskGrid).count()

@@ -8,11 +8,27 @@
       <div class="p-6 border-b border-[#e4e7eb] space-y-3 bg-slate-50/50 shrink-0">
         <div class="flex items-center justify-between">
           <span class="text-xs text-[#707a8a] font-mono font-medium">
-            #{{ projectId === 2 ? '62542' : '62541' }} | STEVI · {{ projectArea }}
+            #{{ 64060 + projectId }} | GEOSTEVIA · {{ projectArea }}
           </span>
-          <span class="text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-[#f59e0b] bg-amber-50 text-[#b45309] uppercase tracking-wider flex items-center gap-1">
+          <span
+            v-if="currentProject?.priority === 'URGENT'"
+            class="text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-red-500 bg-red-50 text-red-700 uppercase tracking-wider flex items-center gap-1"
+          >
+            <Flame :size="10" />
+            <span>PRIORITY URGENT</span>
+          </span>
+          <span
+            v-else-if="currentProject?.priority === 'HIGH'"
+            class="text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-amber-500 bg-amber-50 text-amber-700 uppercase tracking-wider flex items-center gap-1"
+          >
             <Clock :size="10" />
             <span>PRIORITY HIGH</span>
+          </span>
+          <span
+            v-else
+            class="text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-blue-400 bg-blue-50 text-blue-700 uppercase tracking-wider flex items-center gap-1"
+          >
+            <span>PRIORITY {{ currentProject?.priority || 'MEDIUM' }}</span>
           </span>
         </div>
 
@@ -301,7 +317,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import { Clock, Grid, LocateFixed, Layers } from 'lucide-vue-next'
+import { Clock, Grid, LocateFixed, Layers, Flame } from 'lucide-vue-next'
 import L from 'leaflet'
 
 import { useAuthStore } from '../stores/auth'

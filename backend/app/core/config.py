@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"))
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "GeoAI Sentinel-2 Land Cover Platform"
+    PROJECT_NAME: str = "GEOSTEVIA (Geospatial Ecosystem Services Analytics)"
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = os.getenv("SECRET_KEY", "geoai_super_secret_jwt_key_2026_landcover_unet_sample")
     ALGORITHM: str = "HS256"
