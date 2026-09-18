@@ -7,6 +7,7 @@ from app.db.session import SessionLocal, engine
 from app.db.models import User
 from app.core.security import get_password_hash
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 MAPPERS = [
     {
