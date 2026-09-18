@@ -604,6 +604,10 @@ class MergePolygonsRequest(BaseModel):
     annotation_ids: List[int]
     target_class_id: int
 
+class GridMergePolygonsRequest(BaseModel):
+    annotation_ids: List[int]
+    target_class_id: int
+
 class UpdateAnnotationClassRequest(BaseModel):
     class_id: int
 
@@ -1060,5 +1064,23 @@ def merge_polygons(
 
     db.commit()
     return {"message": f"Berhasil menggabungkan {len(annotations)} poligon menjadi 1 poligon '{target_class_name}'!"}
+
+
+@router.post("/grid/{task_grid_id}/merge")
+def merge_polygons_grid_alias(
+    task_grid_id: int,
+    req: GridMergePolygonsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Alias endpoint for merging polygons by task_grid_id in the URL path.
+    """
+    unified_req = MergePolygonsRequest(
+        task_grid_id=task_grid_id,
+        annotation_ids=req.annotation_ids,
+        target_class_id=req.target_class_id
+    )
+    return merge_polygons(unified_req, db, current_user)
 
 

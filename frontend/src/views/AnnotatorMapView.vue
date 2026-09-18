@@ -1346,8 +1346,70 @@ const topologyLoading = ref(false)
 
 // Active GIS Digitize Mode
 const activeTool = ref(null) // null | 'split_line' | 'split_poly' | 'draw_poly' | 'merge' | 'edit' | 'delete'
-const selectedForMerge = ref([]) // array of layer indices or feature objects
+const selectedForMerge = ref([]) // array of selected feature objects
 const mergeLoading = ref(false)
+
+let _featureUiCounter = 0
+const getFeatureUiId = (feat) => {
+  if (!feat) return 'f_' + (++_featureUiCounter)
+  if (feat._uiId) return feat._uiId
+  const id = feat.id || feat.properties?.id
+  const uiId = id ? `f_id_${id}` : `f_tmp_${Date.now()}_${++_featureUiCounter}`
+  feat._uiId = uiId
+  return uiId
+}
+
+const findFeatureIndexForLayer = (layer) => {
+  if (!features.value || features.value.length === 0) return -1
+
+  // 1. Direct object identity
+  let idx = features.value.findIndex(f => f === layer.feature)
+  if (idx >= 0) return idx
+
+  // 2. _uiId match
+  const layerUiId = layer._uiId || layer.feature?._uiId
+  if (layerUiId) {
+    idx = features.value.findIndex(f => f._uiId === layerUiId)
+    if (idx >= 0) return idx
+  }
+
+  // 3. Database ID match
+  const featId = layer.feature?.id || layer.feature?.properties?.id
+  if (featId) {
+    idx = features.value.findIndex(f => (f.id && f.id === featId) || (f.properties?.id && f.properties.id === featId))
+    if (idx >= 0) return idx
+  }
+
+  // 4. Layer order in featureGroup
+  if (featureGroup) {
+    let currentIdx = 0
+    let matchedIdx = -1
+    featureGroup.eachLayer(l => {
+      if (l === layer && currentIdx < features.value.length) {
+        matchedIdx = currentIdx
+      }
+      currentIdx++
+    })
+    if (matchedIdx >= 0) return matchedIdx
+  }
+
+  return -1
+}
+
+const isFeatureSelectedForMerge = (feat, layer) => {
+  if (!selectedForMerge.value || selectedForMerge.value.length === 0) return false
+  const layerUiId = layer?._uiId || layer?.feature?._uiId
+  const featUiId = feat?._uiId || feat?.id || feat?.properties?.id
+  const featId = feat?.id || feat?.properties?.id || layer?.feature?.id || layer?.feature?.properties?.id
+
+  return selectedForMerge.value.some(m => {
+    if (m === feat || (layer && m === layer.feature)) return true
+    if (m._uiId && ((layerUiId && m._uiId === layerUiId) || (featUiId && m._uiId === featUiId))) return true
+    const mId = m.id || m.properties?.id
+    if (mId && featId && mId === featId) return true
+    return false
+  })
+}
 
 // ─── UNDO / REDO HISTORY STACK ───────────────────────────
 const history = ref([])
@@ -1410,6 +1472,7 @@ const restoreFeaturesToMap = (snapshotFeatures) => {
   annotationsStore.classes.forEach(c => { classesMap[c.id] = c })
 
   snapshotFeatures.forEach(feat => {
+    feat._uiId = getFeatureUiId(feat)
     const geojsonLayer = L.geoJSON(feat, {
       style: () => {
         const cls = classesMap[feat.properties?.class_id]
@@ -1420,6 +1483,7 @@ const restoreFeaturesToMap = (snapshotFeatures) => {
 
     geojsonLayer.eachLayer((l) => {
       l.feature = feat
+      l._uiId = feat._uiId
       const cls = classesMap[feat.properties?.class_id]
       if (cls) l.feature.properties.color = cls.color
       else l.feature.properties.color = feat.properties?.color || '#9CA3AF'
@@ -1862,11 +1926,17 @@ const initMap = () => {
     // 3. If in standard draw mode
     const currentClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
     
-    layer.feature = layer.feature || { type: 'Feature', properties: {} }
-    layer.feature.properties = {
-      class_id: currentClass?.id || 1,
-      class_name: currentClass?.name || 'Hutan Lahan Kering',
-      color: currentClass?.color || '#006400'
+    const uiId = 'f_draw_' + Date.now() + '_' + (++_featureUiCounter)
+    layer._uiId = uiId
+    layer.feature = {
+      type: 'Feature',
+      _uiId: uiId,
+      geometry: layerGeoJSON.geometry,
+      properties: {
+        class_id: currentClass?.id || 1,
+        class_name: currentClass?.name || 'Hutan Lahan Kering',
+        color: currentClass?.color || '#006400'
+      }
     }
 
     styleLayer(layer, currentClass?.color || '#006400')
@@ -2161,29 +2231,53 @@ const executeMerge = async () => {
   mergeLoading.value = true
 
   const targetClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
+  const targetClassId = targetClass?.id || 1
+  const targetClassName = targetClass?.name || 'Hutan Lahan Kering'
+  const targetColor = targetClass?.color || '#006400'
+
   const annotationIds = selectedForMerge.value.map(f => f.id || f.properties?.id).filter(Boolean)
 
   try {
-    // If backend IDs exist, use backend merge
+    // If backend IDs exist for all selected polygons, use backend merge API
     if (annotationIds.length === selectedForMerge.value.length) {
-      const res = await api.mergePolygons(selectedTaskId.value, annotationIds, targetClass?.id || 1)
+      const res = await api.mergePolygons(selectedTaskId.value, annotationIds, targetClassId)
       showToast(res.data?.message || 'Poligon berhasil digabungkan!')
+      await loadTaskData(selectedTaskId.value, true)
     } else {
-      // Save all features and reload
-      await saveAnnotations()
-      const currentAnn = await annotationsStore.fetchGridAnnotations(selectedTaskId.value)
-      const validIds = currentAnn.slice(0, 2).map(a => a.id)
-      if (validIds.length >= 2) {
-        await api.mergePolygons(selectedTaskId.value, validIds, targetClass?.id || 1)
+      // Fallback: merge using Turf client-side union
+      const validPolys = selectedForMerge.value.map(f => {
+        let p = f.type === 'Feature' ? f : turf.feature(f.geometry || f)
+        return p
+      })
+      const fc = turf.featureCollection(validPolys)
+      const unioned = turf.union(fc)
+      if (!unioned) {
+        throw new Error('Gagal menyatukan poligon. Pastikan poligon saling bersentuhan atau bertampalan.')
       }
+
+      unioned.properties = {
+        class_id: targetClassId,
+        class_name: targetClassName,
+        color: targetColor
+      }
+
+      // Remove merged polygons from current features list
+      const mergeUiIds = new Set(selectedForMerge.value.map(f => f._uiId || f.id || f.properties?.id))
+      const remaining = features.value.filter(f => !mergeUiIds.has(f._uiId || f.id || f.properties?.id))
+      
+      const newFeaturesList = [...remaining, unioned]
+      await annotationsStore.saveGridAnnotations(selectedTaskId.value, newFeaturesList)
+      showToast(`Poligon berhasil digabungkan menjadi '${targetClassName}'!`)
+      await loadTaskData(selectedTaskId.value, true)
     }
-    await loadTaskData(selectedTaskId.value, true)
     selectedForMerge.value = []
     activeTool.value = null
   } catch (err) {
-    alert(err.response?.data?.detail || 'Gagal menggabungkan poligon.')
+    console.error('Merge error:', err)
+    alert(err.response?.data?.detail || err.message || 'Gagal menggabungkan poligon.')
   } finally {
     mergeLoading.value = false
+    refreshMapStyles()
   }
 }
 
@@ -2197,49 +2291,45 @@ const cancelMerge = () => {
 const bindLayerEvents = (layer) => {
   layer.off('click')
   layer.on('click', (e) => {
-    // When in any digitizing/editing mode, NEVER open popup!
-    if (activeTool.value !== null) {
-      if (activeTool.value === 'merge') {
-        L.DomEvent.stopPropagation(e)
-        const layerJson = layer.toGeoJSON()
-        const idx = features.value.findIndex(f => {
-          try {
-            return JSON.stringify(f.geometry) === JSON.stringify(layerJson.geometry)
-          } catch {
-            return false
-          }
+    // 1. Mode Gabung Poligon:
+    if (activeTool.value === 'merge') {
+      L.DomEvent.stopPropagation(e)
+      const idx = findFeatureIndexForLayer(layer)
+      const feat = idx >= 0 ? features.value[idx] : (layer.feature || layer.toGeoJSON())
+      if (feat) {
+        if (!feat._uiId) feat._uiId = getFeatureUiId(feat)
+        if (!layer._uiId) layer._uiId = feat._uiId
+
+        const existingIdx = selectedForMerge.value.findIndex(m => {
+          if (m === feat || m === layer.feature) return true
+          if (m._uiId && m._uiId === feat._uiId) return true
+          const mId = m.id || m.properties?.id
+          const featId = feat.id || feat.properties?.id
+          if (mId && featId && mId === featId) return true
+          return false
         })
-        if (idx >= 0) {
-          const feat = features.value[idx]
-          const existingIdx = selectedForMerge.value.findIndex(f => f === feat || (f.id && f.id === feat.id))
-          if (existingIdx >= 0) {
-            selectedForMerge.value.splice(existingIdx, 1)
-          } else {
-            selectedForMerge.value.push(feat)
-          }
-          refreshMapStyles()
+
+        if (existingIdx >= 0) {
+          selectedForMerge.value.splice(existingIdx, 1)
+        } else {
+          selectedForMerge.value.push(feat)
         }
+        refreshMapStyles()
       }
-      // For split_line, split_poly, draw_poly, edit: let event pass through to Geoman with zero popup!
       return
     }
 
-    // Only in explicit Select / Pointer Mode (activeTool === null):
+    // 2. Mode digitizing / pemotongan lain: biarkan Geoman menangani tanpa popup
+    if (activeTool.value !== null) {
+      return
+    }
+
+    // 3. Mode Pilih Poligon (Pointer / default select mode: activeTool === null):
     L.DomEvent.stopPropagation(e)
-
-    // Find feature index
-    const layerJson = layer.toGeoJSON()
-    const idx = features.value.findIndex(f => {
-      try {
-        return JSON.stringify(f.geometry) === JSON.stringify(layerJson.geometry)
-      } catch {
-        return false
-      }
-    })
-
+    const idx = findFeatureIndexForLayer(layer)
     if (idx < 0) return
-    const feat = features.value[idx]
 
+    const feat = features.value[idx] || layer.feature
     clickedFeatureIdx.value = idx
     rightTab.value = 'classes'
     refreshMapStyles()
@@ -2385,9 +2475,10 @@ const refreshMapStyles = () => {
   if (!featureGroup) return
   let idx = 0
   featureGroup.eachLayer((layer) => {
+    const feat = features.value[idx] || layer.feature
     const isClicked = clickedFeatureIdx.value === idx
-    const isMergedSelected = selectedForMerge.value.some((_, sIdx) => sIdx === idx)
-    const color = layer.feature?.properties?.color || '#9CA3AF'
+    const isMergedSelected = isFeatureSelectedForMerge(feat, layer)
+    const color = layer.feature?.properties?.color || feat?.properties?.color || '#9CA3AF'
 
     let weight = 2
     let strokeColor = color
@@ -2402,7 +2493,7 @@ const refreshMapStyles = () => {
     } else if (isMergedSelected) {
       weight = 3.5
       strokeColor = '#10b981' // Emerald highlight for merge
-      fillOpacity = Math.max(polygonOpacity.value, 0.4)
+      fillOpacity = Math.max(polygonOpacity.value, 0.45)
       strokeOpacity = 1
     }
 
@@ -2569,6 +2660,7 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
 
   if (fetchedFeatures.length > 0) {
     fetchedFeatures.forEach(feat => {
+      feat._uiId = getFeatureUiId(feat)
       const geojsonLayer = L.geoJSON(feat, {
         style: () => {
           const cls = classesMap[feat.properties?.class_id]
@@ -2579,6 +2671,7 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
 
       geojsonLayer.eachLayer((l) => {
         l.feature = feat
+        l._uiId = feat._uiId
         const cls = classesMap[feat.properties?.class_id]
         if (cls) l.feature.properties.color = cls.color
         else l.feature.properties.color = '#9CA3AF'
@@ -2734,13 +2827,20 @@ const syncFeaturesFromMap = () => {
   const newFeatures = []
   featureGroup.eachLayer((layer) => {
     const json = layer.toGeoJSON()
+    if (!layer._uiId) {
+      layer._uiId = layer.feature?._uiId || getFeatureUiId(layer.feature)
+    }
     const currentProps = layer.feature?.properties || {}
+    json.id = layer.feature?.id || currentProps.id || null
+    json._uiId = layer._uiId
     json.properties = {
-      id: layer.feature?.id || currentProps.id || null,
+      id: json.id,
       class_id: currentProps.class_id !== undefined ? currentProps.class_id : 0,
       class_name: currentProps.class_name || 'Belum Terklasifikasi',
-      color: currentProps.color || '#9CA3AF'
+      color: currentProps.color || '#9CA3AF',
+      area_sqm: currentProps.area_sqm || null
     }
+    layer.feature = json
     newFeatures.push(json)
   })
   features.value = newFeatures
