@@ -8,6 +8,7 @@ from app.core.security import get_password_hash
 from app.core.config import settings
 from app.services.grid_generator import generate_spatial_grids
 from app.db.seed_mappers import seed_mappers
+from app.db.seed_projects import seed_projects
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,6 +47,18 @@ def ensure_schema_migrations(db: Session):
                 db.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_name} {col_type};"))
             except Exception as e:
                 logger.debug(f"Schema migration note for {col_name}: {e}")
+
+        logger.info("Ensuring study_areas table schema migrations...")
+        sa_cols = [
+            ("priority", "VARCHAR(20) DEFAULT 'MEDIUM'"),
+            ("difficulty", "VARCHAR(30) DEFAULT 'Moderate'"),
+            ("bounds_geojson", "TEXT"),
+        ]
+        for col_name, col_type in sa_cols:
+            try:
+                db.execute(text(f"ALTER TABLE study_areas ADD COLUMN IF NOT EXISTS {col_name} {col_type};"))
+            except Exception as e:
+                logger.debug(f"Schema migration note for study_areas.{col_name}: {e}")
         db.commit()
 
 def seed_database():
@@ -108,6 +121,9 @@ def seed_database():
             logger.info("Database initialized.")
         else:
             logger.info(f"Database contains {existing_grids_count} task grids. Retaining user data without resetting.")
+
+        # Ensure multi-region projects are seeded
+        seed_projects(db)
 
         # 4. Synchronize all PostgreSQL sequences to MAX(id)
         sync_postgres_sequences(db)
