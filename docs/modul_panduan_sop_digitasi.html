@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Modul Panduan Pengguna & SOP Digitasi - GeoAI STEVIA</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+
+    @page {
+      size: A4 portrait;
+      margin: 18mm 15mm 18mm 15mm;
+      @bottom-right {
+        content: counter(page);
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 9pt;
+        color: #64748b;
+      }
+      @bottom-left {
+        content: "GeoAI STEVIA • Modul Panduan Pengguna & SOP Digitasi";
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 8pt;
+        color: #94a3b8;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 9.8pt;
+      line-height: 1.55;
+      color: #1e293b;
+      background: #ffffff;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* Page Breaks */
+    .page-break {
+      page-break-before: always;
+      break-before: page;
+    }
+
+    .no-break {
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    /* Cover Page */
+    .cover {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 35mm 20mm 20mm 20mm;
+      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 60%, #064e3b 100%);
+      color: #ffffff;
+      page-break-after: always;
+      break-after: page;
+      border-radius: 4px;
+    }
+
+    .cover-header {
+      border-left: 4px solid #10b981;
+      padding-left: 18px;
+    }
+
+    .cover-tag {
+      display: inline-block;
+      padding: 4px 12px;
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid #10b981;
+      color: #34d399;
+      font-size: 8.5pt;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      border-radius: 20px;
+      margin-bottom: 14px;
+    }
+
+    .cover-title {
+      font-size: 26pt;
+      font-weight: 800;
+      line-height: 1.2;
+      margin: 0 0 10px 0;
+      letter-spacing: -0.5px;
+      color: #ffffff;
+    }
+
+    .cover-subtitle {
+      font-size: 13pt;
+      font-weight: 400;
+      color: #cbd5e1;
+      line-height: 1.4;
+      margin: 0;
+    }
+
+    .cover-center {
+      margin: 40px 0;
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+    }
+
+    .cover-center h3 {
+      color: #34d399;
+      margin: 0 0 8px 0;
+      font-size: 11pt;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .cover-center p {
+      margin: 0;
+      color: #e2e8f0;
+      font-size: 9.5pt;
+      line-height: 1.5;
+    }
+
+    .cover-footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.15);
+      padding-top: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      font-size: 8.5pt;
+      color: #94a3b8;
+    }
+
+    .cover-meta strong {
+      color: #f8fafc;
+      display: block;
+      font-size: 10pt;
+      margin-bottom: 2px;
+    }
+
+    /* Headings */
+    h1 {
+      font-size: 18pt;
+      font-weight: 800;
+      color: #0f172a;
+      border-bottom: 2.5px solid #059669;
+      padding-bottom: 6px;
+      margin-top: 0;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    h2 {
+      font-size: 13pt;
+      font-weight: 700;
+      color: #1e293b;
+      margin-top: 18px;
+      margin-bottom: 8px;
+      border-left: 3.5px solid #10b981;
+      padding-left: 10px;
+    }
+
+    h3 {
+      font-size: 10.8pt;
+      font-weight: 600;
+      color: #334155;
+      margin-top: 12px;
+      margin-bottom: 6px;
+    }
+
+    p {
+      margin: 0 0 10px 0;
+      text-align: justify;
+    }
+
+    ul, ol {
+      margin: 0 0 12px 0;
+      padding-left: 20px;
+    }
+
+    li {
+      margin-bottom: 4px;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 16px 0;
+      font-size: 8.8pt;
+    }
+
+    th {
+      background: #0f172a;
+      color: #ffffff;
+      font-weight: 600;
+      text-align: left;
+      padding: 7px 10px;
+      border: 1px solid #334155;
+    }
+
+    td {
+      padding: 6px 10px;
+      border: 1px solid #e2e8f0;
+      vertical-align: top;
+    }
+
+    tr:nth-child(even) td {
+      background: #f8fafc;
+    }
+
+    /* Badges & Pills */
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 7.8pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-primary { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+    .badge-success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .badge-warning { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+    .badge-danger { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+
+    /* Callout Boxes */
+    .callout {
+      padding: 10px 14px;
+      margin: 12px 0;
+      border-radius: 6px;
+      border-left: 4px solid;
+      font-size: 9pt;
+      line-height: 1.5;
+    }
+
+    .callout-info {
+      background: #f0f9ff;
+      border-color: #0284c7;
+      color: #0369a1;
+    }
+
+    .callout-tip {
+      background: #ecfdf5;
+      border-color: #10b981;
+      color: #047857;
+    }
+
+    .callout-warning {
+      background: #fffbeb;
+      border-color: #f59e0b;
+      color: #b45309;
+    }
+
+    .callout-title {
+      font-weight: 700;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Tool Cards Grid */
+    .tool-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 10px 0 16px 0;
+    }
+
+    .tool-card {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 10px 12px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .tool-card-title {
+      font-weight: 700;
+      font-size: 9.8pt;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .tool-card p {
+      font-size: 8.5pt;
+      color: #475569;
+      margin: 0;
+      line-height: 1.45;
+    }
+
+    .shortcut-key {
+      font-family: 'JetBrains Mono', monospace;
+      background: #e2e8f0;
+      color: #1e293b;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 8pt;
+      font-weight: 600;
+      border: 1px solid #cbd5e1;
+    }
+
+    /* Class Color Swatch */
+    .color-swatch {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.2);
+      vertical-align: middle;
+      margin-right: 5px;
+    }
+
+    /* Diagram / Workflow visual */
+    .flow-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 10px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 8px 12px;
+    }
+
+    .flow-num {
+      background: #059669;
+      color: white;
+      font-weight: 800;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9pt;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .flow-content h4 {
+      margin: 0 0 2px 0;
+      font-size: 9.5pt;
+      color: #0f172a;
+    }
+
+    .flow-content p {
+      margin: 0;
+      font-size: 8.5pt;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ================= COVER PAGE ================= -->
+  <div class="cover">
+    <div class="cover-header">
+      <div class="cover-tag">STANDAR OPERASIONAL PROSEDUR (SOP)</div>
+      <h1 class="cover-title">PANDUAN OPERASIONAL & SOP DIGITASI TRAINING SAMPLE</h1>
+      <p class="cover-subtitle">Platform GeoAI STEVIA (Sentinel Training Evaluation & Verification Interface for AI)</p>
+    </div>
+
+    <div class="cover-center">
+      <h3>Cakupan Dokumen</h3>
+      <p>
+        Pedoman komprehensif bagi <b>Mapper / Digitasi On-Screen</b>, <b>Reviewer / Quality Control</b>, dan <b>Administrator Sistem</b> dalam pemetaan penutupan lahan multi-temporal (2017–2025) berbasis citra Sentinel-2, manajemen task grid, tools digitasi bebas tumpang-tindih (topologically clean), serta ekspor dataset pelatihan Deep Learning (Vektor SHP/GeoJSON & Citra Patch).
+      </p>
+    </div>
+
+    <div class="cover-footer">
+      <div class="cover-meta">
+        <strong>Pusat Data & Pemantauan Sumber Daya Hutan / Lingkungan Hidup</strong>
+        <span>Sistem Informasi Geospasial & Kecerdasan Buatan (GeoAI)</span>
+      </div>
+      <div style="text-align: right;">
+        <div><b>Versi:</b> 2.4 (Enterprise Edition)</div>
+        <div><b>Domain VPS:</b> https://geostevia.id</div>
+        <div><b>Tahun Rilis:</b> 2026</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= DAFTAR ISI ================= -->
+  <div class="no-break" style="padding-top: 10px;">
+    <h1>Daftar Isi</h1>
+    <table style="border: none; margin-top: 15px;">
+      <tr style="background: none;"><td style="border: none; font-weight: 700;">BAB 1</td><td style="border: none;"><b>Pendahuluan & Gambaran Umum Platform STEVIA</b></td><td style="border: none; text-align: right; font-weight: 700;">Hal. 2</td></tr>
+      <tr style="background: none;"><td style="border: none; font-weight: 700;">BAB 2</td><td style="border: none;"><b>Peran Pengguna, Manajemen Akun & Hak Akses</b></td><td style="border: none; text-align: right; font-weight: 700;">Hal. 3</td></tr>
+      <tr style="background: none;"><td style="border: none; font-weight: 700;">BAB 3</td><td style="border: none;"><b>Alur Kerja Task Manager & Penugasan Grid Multi-Tahun</b></td><td style="border: none; text-align: right; font-weight: 700;">Hal. 4</td></tr>
+      <tr style="background: none;"><td style="border: none; font-weight: 700;">BAB 4</td><td style="border: none;"><b>Standar Mutu Digitasi On-Screen & Kaidah Kartografi</b></td><td style="border: none; text-align: right; font-weight: 700;">Hal. 5</td></tr>
+      <tr style="background: none;"><td style="border: none; font-weight: 700;">BAB 5</td><td style="border: none;"><b>Panduan Lengkap Tools Digitasi & Topologi Bersih</b></td><td style="border: none; text-align: right; font-weight: 700;">Hal. 6</td></tr>
+      <tr style="background: none;"><td style="border: none; font-weight: 700;">BAB 6</td><td style="border: none;"><b>Kunci Interpretasi Visual & Analisis Spektral Sentinel-2</b></td><td style="border: none; text-align: right; font-weight: 700;">Hal. 8</td></tr>
+      <tr style="background: none;"><td style="border: none; font-weight: 700;">BAB 7</td><td style="border: none;"><b>Validasi Kualitas (QA/QC) & Smart Multi-Year Replication</b></td><td style="border: none; text-align: right; font-weight: 700;">Hal. 10</td></tr>
+      <tr style="background: none;"><td style="border: none; font-weight: 700;">BAB 8</td><td style="border: none;"><b>Ekspor Dataset Pelatihan Deep Learning & Atribut Vektor</b></td><td style="border: none; text-align: right; font-weight: 700;">Hal. 11</td></tr>
+      <tr style="background: none;"><td style="border: none; font-weight: 700;">BAB 9</td><td style="border: none;"><b>Shortcut Keyboard, Tips Efisiensi & Troubleshooting</b></td><td style="border: none; text-align: right; font-weight: 700;">Hal. 12</td></tr>
+    </table>
+  </div>
+
+  <div class="callout callout-info">
+    <div class="callout-title">📌 Tujuan Pembentukan Modul</div>
+    Modul ini dirancang agar seluruh proses pembuatan sampel pelatihan kecerdasan buatan (AI/Deep Learning) untuk klasifikasi tutupan lahan memiliki standar operasional yang konsisten, akurat secara spasial, valid secara topologi (tanpa gap/overlap), dan dapat dipertanggungjawabkan dalam skala nasional.
+  </div>
+
+  <!-- ================= BAB 1 ================= -->
+  <div class="page-break"></div>
+  <h1><span style="color:#059669;">BAB 1</span> Pendahuluan & Gambaran Umum Platform</h1>
+  
+  <h2>1.1 Mengenal GeoAI STEVIA</h2>
+  <p>
+    <b>GeoAI STEVIA</b> (<i>Sentinel Training Evaluation & Verification Interface for AI</i>) adalah platform komputasi awan geospasial berbasis web yang dirancang khusus untuk memfasilitasi pembuatan, verifikasi, dan standarisasi data sampel pelatihan (<i>ground truth training data</i>) penutupan lahan multi-temporal di Indonesia.
+  </p>
+  <p>
+    Platform ini mengintegrasikan citra satelit resolusi spasial 10-meter <b>Sentinel-2 MSI (Multi-Spectral Instrument)</b> dari Google Earth Engine (GEE), basis data spasial relasional <b>PostgreSQL/PostGIS</b> berkinerja tinggi, dan mesin GIS berbasis peramban modern untuk menghasilkan data vektor yang bersih dari celah (<i>gap-free</i>) dan bebas tumpang tindih (<i>overlap-free</i>).
+  </p>
+
+  <h2>1.2 Arsitektur Sistem</h2>
+  <div class="flow-step">
+    <div class="flow-num">1</div>
+    <div class="flow-content">
+      <h4>Katalog Citra Satelit Sentinel-2 (GEE & Cloud Optimized GeoTIFF)</h4>
+      <p>Menyajikan data citra satelit beresolusi 10 meter bebas awan untuk tahun 2017, 2018, 2022, dan 2025 secara instan tanpa perlu mengunduh file raster berukuran puluhan gigabyte ke komputer lokal.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">2</div>
+    <div class="flow-content">
+      <h4>Antarmuka Digitasi Web (Leaflet & Geoman GIS Core)</h4>
+      <p>Menyediakan perkakas digitasi presisi: Potong Garis (Blade), Potong Area (Cookie Cutter), Freehand Lasso Cut, Penggabungan Poligon (Merge), dan Single-Vertex Undo.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">3</div>
+    <div class="flow-content">
+      <h4>Pusat Validasi Topologi & Database PostGIS</h4>
+      <p>Setiap batas poligon divalidasi langsung secara matematis menggunakan operasi geometri spasial Shapely dan PostGIS untuk menjamin keutuhan batas spasial (ST_IsValid, ST_Union).</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">4</div>
+    <div class="flow-content">
+      <h4>Mesin Ekspor Dataset Pelatihan Deep Learning</h4>
+      <p>Secara otomatis memotong citra dan merasterisasi poligon menjadi pasangan gambar dan mask siap latih untuk model arsitektur Deep Learning (seperti U-Net/FPN/SegNet) serta paket vektor Shapefile (.shp) dan GeoJSON lengkap dengan atribut resmi.</p>
+    </div>
+  </div>
+
+  <h2>1.3 Akses Platform</h2>
+  <p>
+    Aplikasi dapat diakses melalui peramban web modern (Google Chrome, Microsoft Edge, atau Mozilla Firefox) pada alamat resmi:
+  </p>
+  <div style="background: #f1f5f9; padding: 10px 14px; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 9pt; border: 1px solid #cbd5e1; margin-bottom: 12px;">
+    🌐 Alamat URL Produksi: <b>https://geostevia.id</b>
+  </div>
+
+  <!-- ================= BAB 2 ================= -->
+  <div class="page-break"></div>
+  <h1><span style="color:#059669;">BAB 2</span> Peran Pengguna & Hak Akses</h1>
+
+  <h2>2.1 Struktur Peran (Role Hierarchy)</h2>
+  <p>
+    Untuk menjaga integritas dan akuntabilitas data, STEVIA menerapkan <i>Role-Based Access Control</i> (RBAC) yang terbagi menjadi tiga tingkatan peran:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 20%;">Peran (Role)</th>
+        <th style="width: 35%;">Wewenang Utama</th>
+        <th style="width: 45%;">Tanggung Jawab Teknis</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Annotator / Mapper</b></td>
+        <td>
+          • Mengambil (assign) grid penugasan<br>
+          • Melakukan digitasi & potong poligon<br>
+          • Menyimpan draf & submit hasil kerja
+        </td>
+        <td>
+          Memetakan seluruh penutupan lahan di dalam grid kerjanya hingga tuntas 100% tanpa menyisakan poligon "Belum Terklasifikasi".
+        </td>
+      </tr>
+      <tr>
+        <td><b>Reviewer / QC</b></td>
+        <td>
+          • Memeriksa grid yang di-submit<br>
+          • Menyetujui (Approve) hasil digitasi<br>
+          • Menolak (Reject) dengan catatan revisi
+        </td>
+        <td>
+          Memastikan kepatuhan terhadap kaidah interpretasi visual, batas minimum poligon, dan akurasi spektral sebelum data masuk ke tahap pelatihan model AI.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Superadmin / Koordinator</b></td>
+        <td>
+          • Manajemen akun & kata sandi tim<br>
+          • Membuat wilayah studi & grid baru<br>
+          • Monitoring progres nasional & export data
+        </td>
+        <td>
+          Memantau produktivitas mapper, mengelola alokasi beban kerja multi-tahun, dan menjalankan pipeline pemotongan citra (Dataset Export).
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>2.2 Alur Masuk (Login) & Pengaturan Profil</h2>
+  <ol>
+    <li>Buka peramban dan navigasikan ke <b>https://geostevia.id/login</b>.</li>
+    <li>Masukkan <b>Username</b> atau <b>NIM/NIP</b> yang telah didaftarkan oleh Administrator.</li>
+    <li>Ketik kata sandi akun Anda, lalu klik tombol <b>Masuk ke Sistem</b>.</li>
+    <li>Setelah berhasil masuk, Anda akan diarahkan ke Dashboard Penugasan (Task Manager).</li>
+    <li>Untuk memperbarui nama lengkap, instansi, atau mengganti kata sandi, klik menu <b>Profil Pengguna</b> pada bilah navigasi kanan atas.</li>
+  </ol>
+
+  <div class="callout callout-warning">
+    <div class="callout-title">⚠️ Keamanan Akun</div>
+    Jangan pernah membagikan kredensial akun Anda kepada orang lain. Setiap poligon yang didigitasi mencatat ID dan nama Anda sebagai kontributor resmi dalam riwayat audit dataset.
+  </div>
+
+  <!-- ================= BAB 3 ================= -->
+  <div class="page-break"></div>
+  <h1><span style="color:#059669;">BAB 3</span> Alur Kerja Task Manager</h1>
+
+  <h2>3.1 Pemilihan Wilayah Studi & Grid Kerja</h2>
+  <p>
+    Task Manager membagi wilayah kajian menjadi kotak-kotak kisi (grid kerja) berukuran standar (masing-masing seluas ribuan hektar) untuk memastikan beban kerja terbagi merata di antara seluruh mapper.
+  </p>
+
+  <div class="flow-step">
+    <div class="flow-num">1</div>
+    <div class="flow-content">
+      <h4>Pilih Wilayah Studi (Study Area)</h4>
+      <p>Pilih wilayah yang ditugaskan kepada Anda, misalnya: <i>Provinsi Sumatera Barat</i>, <i>IKN Nusantara</i>, <i>Kawasan Restorasi Mangrove Riau</i>, atau <i>Danau Toba</i>.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">2</div>
+    <div class="flow-content">
+      <h4>Pilih Tahun Pengamatan (Temporal Filter)</h4>
+      <p>Saring grid berdasarkan tahun target: <b>2025</b> (terbaru), <b>2022</b>, <b>2018</b>, atau <b>2017</b>. Pemetaan dilakukan per tahun pengamatan untuk mendeteksi perubahan tutupan lahan historis.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">3</div>
+    <div class="flow-content">
+      <h4>Klaim Penugasan Grid (Self-Assignment)</h4>
+      <p>Pilih grid berstatus <span class="badge badge-warning">Unassigned</span> lalu klik <b>Ambil Tugas Ini</b>. Grid tersebut akan terkunci atas nama Anda sehingga mapper lain tidak akan mengerjakan area yang sama.</p>
+    </div>
+  </div>
+
+  <h2>3.2 Siklus Status Grid Kerja (Task Lifecycle)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Status Grid</th>
+        <th>Warna Label</th>
+        <th>Keterangan Operasional</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Unassigned</b></td>
+        <td><span class="badge" style="background:#f1f5f9; color:#475569;">Abu-abu</span></td>
+        <td>Grid baru tersedia, belum dikerjakan oleh mapper manapun. Siap untuk diambil.</td>
+      </tr>
+      <tr>
+        <td><b>In Progress</b></td>
+        <td><span class="badge badge-warning">Kuning Oranye</span></td>
+        <td>Sedang aktif didigitasi oleh mapper. Perubahan tersimpan secara draf ke database.</td>
+      </tr>
+      <tr>
+        <td><b>Submitted</b></td>
+        <td><span class="badge badge-primary">Biru</span></td>
+        <td>Mapper telah menyelesaikan 100% area grid dan mengajukannya ke Reviewer untuk diperiksa.</td>
+      </tr>
+      <tr>
+        <td><b>Approved</b></td>
+        <td><span class="badge badge-success">Hijau</span></td>
+        <td>Hasil digitasi telah diperiksa dan disetujui oleh Reviewer. Siap diekspor untuk AI.</td>
+      </tr>
+      <tr>
+        <td><b>Rejected</b></td>
+        <td><span class="badge badge-danger">Merah</span></td>
+        <td>Digitasi dikembalikan oleh Reviewer karena ada ketidaksinkronan batas/kelas. Perlu revisi.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ================= BAB 4 ================= -->
+  <div class="page-break"></div>
+  <h1><span style="color:#059669;">BAB 4</span> SOP Digitasi & Kaidah Kartografi</h1>
+
+  <h2>4.1 Prinsip Dasar: "Topologi Bersih & Tanpa Celah"</h2>
+  <p>
+    Model Deep Learning memerlukan masker segmentasi piksel yang kontinu dan tegas. Oleh karena itu, platform STEVIA menggunakan prinsip <b>Base Polygon Partitioning</b>:
+  </p>
+  <ul>
+    <li>Saat grid pertama kali dibuka, sistem menyediakan <b>Satu Poligon Dasar (Base Polygon)</b> berukuran penuh seluas grid dengan status <i>Belum Terklasifikasi</i>.</li>
+    <li>Mapper <b>TIDAK PERLU</b> menggambar poligon dari nol di luar poligon dasar!</li>
+    <li>Mapper cukup <b>MEMOTONG</b> poligon dasar tersebut menggunakan alat <b>Potong Garis (Blade)</b> atau <b>Potong Area (Cookie Cutter)</b> sesuai kenampakan tutupan lahan pada citra.</li>
+    <li>Setiap potongan baru akan langsung menjadi poligon mandiri yang bersinggungan secara presisi (<i>snapped</i>) tanpa pernah meninggalkan celah kosong (<i>gap</i>) maupun menindih area lain (<i>overlap</i>).</li>
+  </ul>
+
+  <h2>4.2 Standar Kualitas Geometris</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 30%;">Parameter</th>
+        <th style="width: 25%;">Ketentuan Standar</th>
+        <th style="width: 45%;">Rasionalisasi Teknis</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Luas Minimum Poligon (MMU)</b></td>
+        <td>0.25 Hektar (2.500 m²)</td>
+        <td>Setara dengan 5 × 5 piksel Sentinel-2 (resolusi 10m). Menghindari poligon kerdil (sliver polygon) yang membingungkan konvolusi AI.</td>
+      </tr>
+      <tr>
+        <td><b>Skala Tampilan Kerja</b></td>
+        <td>1:5.000 – 1:15.000 (Zoom 15–17)</td>
+        <td>Rentang skala optimal agar detail tekstur kanopi pohon dan batas bangunan terlihat tajam tanpa distorsi pikselasi.</td>
+      </tr>
+      <tr>
+        <td><b>Kelengkapan Area</b></td>
+        <td>100% Terklasifikasi</td>
+        <td>Seluruh poligon "Belum Terklasifikasi" (warna abu-abu) harus terbagi dan diberi kelas resmi sebelum tombol submit aktif.</td>
+      </tr>
+      <tr>
+        <td><b>Kerapatan Titik Sudut</b></td>
+        <td>Optimal & Teratur</td>
+        <td>Hindari membuat terlalu banyak titik pada garis lurus. Gunakan kurva dinamis hanya pada badan air atau alur alami.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>4.3 Alur Kerja Standar Digitasi</h2>
+  <div class="flow-step">
+    <div class="flow-num">1</div>
+    <div class="flow-content">
+      <h4>Eksplorasi Grid & Pengaturan Spektral</h4>
+      <p>Buka grid kerja, nyalakan komposit False Color NIR (B8-B4-B3) untuk memisahkan vegetasi dengan tubuh air/lahan terbuka.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">2</div>
+    <div class="flow-content">
+      <h4>Potong Fitur Geometris Besar (Sungai / Danau / Jalan Utama)</h4>
+      <p>Gunakan perkakas <b>Potong Garis (Blade)</b> melintasi grid dari batas ke batas untuk memisahkan batas-batas bentang alam utama.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">3</div>
+    <div class="flow-content">
+      <h4>Isolasi Area Terbangun & Perkebunan</h4>
+      <p>Gunakan <b>Potong Area (Cookie Cutter)</b> untuk mengiris komplek pemukiman atau blok kebun sawit dari poligon hutan sekitar.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">4</div>
+    <div class="flow-content">
+      <h4>Penugasan Kelas & Penggabungan Poligon</h4>
+      <p>Klik setiap poligon hasil potongan untuk mengganti kelasnya. Jika terdapat pecahan poligon kecil yang memiliki kelas sejenis, gabungkan menggunakan <b>Gabung Poligon (Merge)</b>.</p>
+    </div>
+  </div>
+
+  <!-- ================= BAB 5 ================= -->
+  <div class="page-break"></div>
+  <h1><span style="color:#059669;">BAB 5</span> Panduan Lengkap Tools Digitasi</h1>
+
+  <div class="tool-grid">
+    <div class="tool-card">
+      <div class="tool-card-title">
+        <span>👆 1. Pilih Poligon</span>
+        <span class="shortcut-key">Default / Esc</span>
+      </div>
+      <p>
+        Klik poligon manapun pada peta untuk memeriksa luas (Ha), nama kelas saat ini, dan membuka popup pemilihan kelas instan. Poligon terpilih akan di-highlight garis biru indigo tebal.
+      </p>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-card-title">
+        <span>✂️ 2. Potong Garis (Blade)</span>
+        <span class="shortcut-key">Mode Garis</span>
+      </div>
+      <p>
+        Menarik garis lurus atau berbelok melintasi poligon dari tepi luar ke tepi luar. Begitu klik ganda (finish), poligon target akan terbelah menjadi dua bagian mandiri secara instan.
+      </p>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-card-title">
+        <span>🔪 3. Potong Area (Cookie Cutter)</span>
+        <span class="shortcut-key">Mode Poligon</span>
+      </div>
+      <p>
+        Gambar poligon melingkari kenampakan tertentu (misal pulau di tengah danau atau kluster pemukiman di tengah kebun). Poligon akan otomatis terpotong menjadi bagian dalam dan luar.
+      </p>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-card-title">
+        <span>✂️ 4. Potong Bebas (Lasso Cut)</span>
+        <span class="shortcut-key">Tahan Drag Mouse</span>
+      </div>
+      <p>
+        Tahan tombol kiri mouse dan gerakkan secara bebas mengelilingi objek yang ingin dipotong, lalu lepaskan. Garis lasso akan menutup otomatis dan membelah area secara cepat.
+      </p>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-card-title">
+        <span>✏️ 5. Gambar Poligon Biasa</span>
+        <span class="shortcut-key">Titik demi Titik</span>
+      </div>
+      <p>
+        Menggambar poligon bebas klik demi klik. Mendukung pembatalan titik sudut terakhir dengan menekan tombol <span class="shortcut-key">Backspace</span> tanpa membatalkan seluruh gambar.
+      </p>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-card-title">
+        <span>〰️ 6. Freehand Stream</span>
+        <span class="shortcut-key">Alur Kurva Mulus</span>
+      </div>
+      <p>
+        Klik dan tahan mouse untuk menggambar kurva meliuk yang dinamis mengikuti kelokan sungai atau garis pantai. Sistem secara otomatis menyederhanakan titik sudut berlebih.
+      </p>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-card-title">
+        <span>🔗 7. Gabung Poligon (Merge)</span>
+        <span class="shortcut-key">Multi-Select</span>
+      </div>
+      <p>
+        Klik tool Gabung Poligon, lalu klik 2 atau lebih poligon bertetangga pada peta (terpilih akan menyala hijau emerald). Klik tombol <b>Satukan Poligon</b> untuk menggabungkannya menjadi 1 poligon utuh.
+      </p>
+    </div>
+
+    <div class="tool-card">
+      <div class="tool-card-title">
+        <span>✋ 8. Edit Titik Sudut</span>
+        <span class="shortcut-key">Vertex Editor</span>
+      </div>
+      <p>
+        Mengaktifkan mode penyesuaian titik sudut. Klik dan geser titik sudut poligon untuk merapikan batas kenampakan yang kurang pas dengan citra satelit.
+      </p>
+    </div>
+  </div>
+
+  <h2>5.1 Tata Cara Menggabungkan Poligon (Merge Workflow)</h2>
+  <ol>
+    <li>Pilih kelas target yang diinginkan pada panel daftar kelas di sebelah kanan (misalnya: <i>Hutan Lahan Kering</i>).</li>
+    <li>Klik tombol <b>Gabung Poligon</b> pada bilah peralatan di sisi kiri peta. Bilah status mode gabung akan muncul di bagian atas peta.</li>
+    <li>Klik poligon pertama pada peta. Poligon akan menyala dengan batas tebal warna <b>Hijau Emerald (#10b981)</b>.</li>
+    <li>Klik poligon kedua (dan poligon berikutnya yang ingin disatukan). Bilah status akan memperbarui jumlah: <code>Terpilih: 2</code>.</li>
+    <li>Klik tombol <b>Satukan Poligon</b> pada bilah atas. Sistem akan menggabungkan geometri poligon tersebut dan menerapkan kelas target secara otomatis.</li>
+  </ol>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Fitur Single-Vertex Undo</div>
+    Saat menggambar poligon atau garis potong, jika Anda salah mengklik suatu titik, jangan tekan Escape! Cukup tekan tombol <span class="shortcut-key">Backspace</span> atau <span class="shortcut-key">Delete</span> pada keyboard untuk menghapus satu titik terakhir saja.
+  </div>
+
+  <!-- ================= BAB 6 ================= -->
+  <div class="page-break"></div>
+  <h1><span style="color:#059669;">BAB 6</span> Kunci Interpretasi Visual Sentinel-2</h1>
+
+  <h2>6.1 Dua Belas Kelas Tutupan Lahan Resmi</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 8%;">ID</th>
+        <th style="width: 25%;">Nama Kelas</th>
+        <th style="width: 15%;">Warna Hex</th>
+        <th style="width: 52%;">Karakteristik Visual & Spektral Sentinel-2</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>0</b></td>
+        <td>Belum Terklasifikasi</td>
+        <td><span class="color-swatch" style="background:#9CA3AF;"></span>#9CA3AF</td>
+        <td>Kelas draf poligon dasar. Wajib dipotong dan di-assign ke kelas 1-12 sebelum disubmit.</td>
+      </tr>
+      <tr>
+        <td><b>1</b></td>
+        <td>Hutan Lahan Kering</td>
+        <td><span class="color-swatch" style="background:#006400;"></span>#006400</td>
+        <td>Kanopi pohon rapat tinggi, hijau tua gelap pada TCI, merah tua membara pada NIR False Color.</td>
+      </tr>
+      <tr>
+        <td><b>2</b></td>
+        <td>Hutan Lahan Basah & Mangrove</td>
+        <td><span class="color-swatch" style="background:#2E8B57;"></span>#2E8B57</td>
+        <td>Zona pesisir, estuari, atau rawa air tawar/gambut. Nilai pantulan SWIR rendah karena kelembapan air.</td>
+      </tr>
+      <tr>
+        <td><b>3</b></td>
+        <td>Semak dan Belukar</td>
+        <td><span class="color-swatch" style="background:#9ACD32;"></span>#9ACD32</td>
+        <td>Vegetasi transisi, kanopi terbuka bercampur rumput liar. Tekstur kasar sedang, NDVI menengah.</td>
+      </tr>
+      <tr>
+        <td><b>4</b></td>
+        <td>Pertanian Lahan Kering</td>
+        <td><span class="color-swatch" style="background:#FFD700;"></span>#FFD700</td>
+        <td>Tegalan, ladang jagung, ubi, atau palawija. Pola petak tidak seragam, respon bervariasi sesuai musim tanam.</td>
+      </tr>
+      <tr>
+        <td><b>5</b></td>
+        <td>Tanaman Perkebunan</td>
+        <td><span class="color-swatch" style="background:#808000;"></span>#808000</td>
+        <td>Kelapa sawit, karet, teh. Memiliki pola barisan (grid tanam) teratur yang sangat rapi dan seragam.</td>
+      </tr>
+      <tr>
+        <td><b>6</b></td>
+        <td>Infrastruktur / Lahan Terbangun</td>
+        <td><span class="color-swatch" style="background:#FF0000;"></span>#FF0000</td>
+        <td>Atap seng, genteng, jalan aspal, beton perkotaan. Nilai NDBI tinggi, tekstur persegi tegas geometris.</td>
+      </tr>
+      <tr>
+        <td><b>7</b></td>
+        <td>Lahan Terbuka Bebas Vegetasi</td>
+        <td><span class="color-swatch" style="background:#D2B48C;"></span>#D2B48C</td>
+        <td>Tanah gundul, pasir pantai, albedo pantulan sangat tinggi pada seluruh saluran cahaya tampak.</td>
+      </tr>
+      <tr>
+        <td><b>8</b></td>
+        <td>Wilayah Operasi Tambang</td>
+        <td><span class="color-swatch" style="background:#8B4513;"></span>#8B4513</td>
+        <td>Kawah galian tambang terbuka, kolam pengendapan limbah (tailing), lereng terasering kontras tinggi.</td>
+      </tr>
+      <tr>
+        <td><b>9</b></td>
+        <td>Tubuh Air</td>
+        <td><span class="color-swatch" style="background:#0000FF;"></span>#0000FF</td>
+        <td>Danau, waduk, laut, sungai lebar. Menyerap seluruh energi inframerah (NIR mendekati 0), biru pekat/hitam.</td>
+      </tr>
+      <tr>
+        <td><b>10</b></td>
+        <td>Tanaman Padi Lahan Basah</td>
+        <td><span class="color-swatch" style="background:#00FFFF;"></span>#00FFFF</td>
+        <td>Sawah irigasi berpetak teratur. Menunjukkan siklus genangan air saat membajak dan merah cerah saat panen.</td>
+      </tr>
+      <tr>
+        <td><b>11</b></td>
+        <td>Savanna</td>
+        <td><span class="color-swatch" style="background:#F0E68C;"></span>#F0E68C</td>
+        <td>Padang rumput terbuka luas dengan tutupan pohon sangat jarang (&lt;20%). Kering menguning di kemarau.</td>
+      </tr>
+      <tr>
+        <td><b>12</b></td>
+        <td>Tambak</td>
+        <td><span class="color-swatch" style="background:#008B8B;"></span>#008B8B</td>
+        <td>Kolam budidaya ikan/udang di pesisir dengan tanggul/pematang tanah persegi panjang yang sangat rapi.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>6.2 Memanfaatkan Band Citra & Komposit Spektral</h2>
+  <p>
+    Gunakan tombol <b>Citra & Spektral</b> di pojok kanan atas peta untuk beralih komposit band:
+  </p>
+  <ul>
+    <li><b>True Color (B4-B3-B2):</b> Warna alami seperti mata manusia memandang. Sangat baik untuk mendeteksi pemukiman, tanah terbuka, dan perairan keruh.</li>
+    <li><b>False Color NIR (B8-B4-B3):</b> Saluran Inframerah Dekat. Vegetasi sehat tampak berwarna merah cerah, air tampak hitam/biru tua. Sangat efektif untuk delineasi batas hutan dan rawa.</li>
+    <li><b>Short-Wave Infrared / SWIR (B12-B8-B4):</b> Sangat tajam menembus kabut tipis dan mempertegas kadar kelembapan tanah, bekas kebakaran hutan, dan perbedaan tambang dengan tanah biasa.</li>
+  </ul>
+
+  <!-- ================= BAB 7 ================= -->
+  <div class="page-break"></div>
+  <h1><span style="color:#059669;">BAB 7</span> Quality Control & Smart Multi-Year</h1>
+
+  <h2>7.1 Prosedur Pengecekan Kualitas (Reviewer QA)</h2>
+  <p>
+    Setelah mapper menekan tombol <b>Submit Tugas</b>, status grid berubah menjadi <span class="badge badge-primary">Submitted</span>. Reviewer akan melakukan tahapan inspeksi berikut:
+  </p>
+  <div class="flow-step">
+    <div class="flow-num">1</div>
+    <div class="flow-content">
+      <h4>Pemeriksaan Kelengkapan & Celah (Coverage Audit)</h4>
+      <p>Memastikan persentase kelengkapan mencapai 100% dan tidak ada satupun poligon yang tertinggal dengan kelas "Belum Terklasifikasi".</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">2</div>
+    <div class="flow-content">
+      <h4>Verifikasi Kesesuaian Spektral (Spectral Truth)</h4>
+      <p>Menguji apakah batas vegetasi (misal Hutan vs Kelapa Sawit) konsisten saat dilihat pada komposit True Color maupun False Color NIR.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">3</div>
+    <div class="flow-content">
+      <h4>Keputusan Review (Approve / Reject)</h4>
+      <p>Jika memenuhi standar, klik <b>Approve</b> (Grid terkunci sebagai sampel resmi). Jika ada kekeliruan batas, klik <b>Reject</b> dan masukkan catatan koreksi spesifik bagi mapper.</p>
+    </div>
+  </div>
+
+  <h2>7.2 Fitur Smart Multi-Year Copy</h2>
+  <p>
+    Dalam pemetaan multi-temporal (misalnya tahun 2017, 2018, 2022, dan 2025 pada grid yang sama), mayoritas batas bentang alam (seperti tubuh air atau kawasan lindung) tidak berubah secara drastis.
+  </p>
+  <p>
+    STEVIA menyediakan fitur <b>Smart Multi-Year Copy</b>:
+  </p>
+  <ul>
+    <li>Saat mapper membuka grid tahun 2022 yang masih kosong, sistem secara cerdas akan mendeteksi apakah grid saudara (sibling grid) pada tahun 2025 telah selesai didigitasi.</li>
+    <li>Muncul banner notifikasi: <i>"Salin Vektor dari Tahun 2025"</i>.</li>
+    <li>Dengan satu klik, seluruh batas poligon dan kelas dari tahun referensi disalin ke tahun aktif.</li>
+    <li>Mapper cukup fokus melakukan <b>update perubahan (change detection)</b> pada area yang mengalami deforestasi atau pembangunan baru, sehingga menghemat waktu kerja hingga 70%.</li>
+  </ul>
+
+  <!-- ================= BAB 8 ================= -->
+  <div class="page-break"></div>
+  <h1><span style="color:#059669;">BAB 8</span> Dataset Export & Atribut Vektor</h1>
+
+  <h2>8.1 Halaman Dataset Export</h2>
+  <p>
+    Menu <b>Dataset Export</b> (dapat diakses pada bilah navigasi utama) memungkinkan administrator mengunduh hasil seluruh proses digitasi onscreen ke dalam format standar sains data geospasial dan kecerdasan buatan.
+  </p>
+
+  <h2>8.2 Struktur Atribut Vektor (Shapefile & GeoJSON)</h2>
+  <p>
+    Setiap berkas vektor yang diunduh (baik format <code>.geojson</code> maupun arsip ESRI Shapefile <code>.zip</code>) menyertakan tabel atribut terstandarisasi yang siap dibuka di QGIS, ArcGIS, atau pustaka Python GeoPandas:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 18%;">Nama Kolom</th>
+        <th style="width: 15%;">Tipe Data</th>
+        <th style="width: 67%;">Deskripsi & Contoh Nilai</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>KODE_PL</b></td>
+        <td>Integer (2)</td>
+        <td>Kode numerik kelas tutupan lahan (0 hingga 12). Contoh: <code>1</code> untuk Hutan, <code>9</code> untuk Air.</td>
+      </tr>
+      <tr>
+        <td><b>NAMA_PL</b></td>
+        <td>String (50)</td>
+        <td>Nama resmi penutupan lahan. Contoh: <code>Hutan Lahan Kering</code>, <code>Tanaman Perkebunan</code>.</td>
+      </tr>
+      <tr>
+        <td><b>GRID_CODE</b></td>
+        <td>String (25)</td>
+        <td>Kode unik grid penugasan. Contoh: <code>SB_GRID_014_2025</code>.</td>
+      </tr>
+      <tr>
+        <td><b>TAHUN</b></td>
+        <td>Integer (4)</td>
+        <td>Tahun akuisisi citra Sentinel-2 pengamatan. Contoh: <code>2025</code>.</td>
+      </tr>
+      <tr>
+        <td><b>STATUS</b></td>
+        <td>String (20)</td>
+        <td>Status validasi poligon. Contoh: <code>APPROVED</code>, <code>SUBMITTED</code>.</td>
+      </tr>
+      <tr>
+        <td><b>MAPPER</b></td>
+        <td>String (50)</td>
+        <td>Nama atau username mapper yang mendigitasi poligon tersebut.</td>
+      </tr>
+      <tr>
+        <td><b>LUAS_HA</b></td>
+        <td>Float (10, 2)</td>
+        <td>Luas poligon dalam satuan Hektar. Contoh: <code>142.50</code>.</td>
+      </tr>
+      <tr>
+        <td><b>LUAS_M2</b></td>
+        <td>Float (12, 1)</td>
+        <td>Luas poligon dalam satuan Meter Persegi. Contoh: <code>1425032.4</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>8.3 Pasangan Citra & Mask Pelatihan AI (Deep Learning)</h2>
+  <p>
+    Selain format vektor, sistem menyediakan fitur <b>Generate Deep Learning Tensors</b>:
+  </p>
+  <ul>
+    <li>Memotong citra Sentinel-2 multi-spektral menjadi tile berukuran <b>256 × 256 piksel</b> pada resolusi murni 10 meter.</li>
+    <li>Menghasilkan pasangan citra (GeoTIFF) dan citra masker biner/kategorikal (mask PNG/TIF berlabel kelas 1–12).</li>
+    <li>Menyusun folder siap latih dengan pembagian otomatis: <code>train/</code> (70%), <code>val/</code> (20%), dan <code>test/</code> (10%) untuk arsitektur segmentasi semantik AI.</li>
+  </ul>
+
+  <!-- ================= BAB 9 ================= -->
+  <div class="page-break"></div>
+  <h1><span style="color:#059669;">BAB 9</span> Shortcut Keyboard & Troubleshooting</h1>
+
+  <h2>9.1 Pintasan Keyboard (Shortcuts)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 30%;">Tombol Pintas</th>
+        <th style="width: 70%;">Aksi yang Dijalankan</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="shortcut-key">Spasi (Tahan)</span></td>
+        <td><b>Quick Satellite Peek:</b> Menyembunyikan seluruh warna poligon untuk mengintip citra satelit murni di bawahnya. Lepas spasi untuk memunculkan warna kembali.</td>
+      </tr>
+      <tr>
+        <td><span class="shortcut-key">Backspace / Delete</span></td>
+        <td><b>Single-Vertex Undo:</b> Menghapus 1 titik sudut terakhir yang baru saja diklik saat menggambar garis/poligon tanpa mereset seluruh garis.</td>
+      </tr>
+      <tr>
+        <td><span class="shortcut-key">Ctrl + Z / Cmd + Z</span></td>
+        <td><b>Global Undo:</b> Membatalkan aksi pemotongan, penghapusan, atau perubahan kelas poligon sebelumnya (tersedia hingga 40 langkah riwayat).</td>
+      </tr>
+      <tr>
+        <td><span class="shortcut-key">Ctrl + Y / Cmd + Shift + Z</span></td>
+        <td><b>Global Redo:</b> Mengulangi kembali aksi yang sebelumnya dibatalkan.</td>
+      </tr>
+      <tr>
+        <td><span class="shortcut-key">Esc (Escape)</span></td>
+        <td>Membatalkan mode alat yang sedang aktif dan kembali ke mode <b>Pilih Poligon (Pointer)</b>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>9.2 Masalah Umum & Solusi (Troubleshooting)</h2>
+  <div class="callout callout-warning">
+    <div class="callout-title">⚠️ Poligon tidak terpotong saat menggunakan Potong Garis</div>
+    <b>Penyebab:</b> Garis yang Anda tarik tidak melintasi batas poligon target dari sisi luar ke sisi luar secara tuntas.<br>
+    <b>Solusi:</b> Pastikan titik awal garis dimulai sedikit di luar batas poligon, dan titik akhir garis diakhiri di luar batas sisi seberang, lalu klik ganda untuk memotong.
+  </div>
+
+  <div class="callout callout-warning">
+    <div class="callout-title">⚠️ Tombol "Satukan Poligon" mati / disable</div>
+    <b>Penyebab:</b> Poligon yang dipilih kurang dari 2 poligon.<br>
+    <b>Solusi:</b> Aktifkan tool Gabung Poligon, lalu klik minimal 2 poligon yang ingin disatukan hingga berwarna hijau emerald. Tombol akan otomatis aktif.
+  </div>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Koneksi Internet Lambat di Lapangan</div>
+    Citra satelit Sentinel-2 pada platform STEVIA telah dioptimalkan dengan sistem cache ubin (tile caching). Begitu suatu area grid pernah Anda buka, citra akan tersimpan sementara di memori peramban sehingga navigasi pan/zoom berikutnya akan berjalan sangat cepat dan hemat kuota data.
+  </div>
+
+  <div style="margin-top: 40px; text-align: center; border-top: 1px solid #cbd5e1; padding-top: 15px; color: #64748b; font-size: 8.5pt;">
+    <b>GeoAI STEVIA Platform</b> • Dokumen SOP & Panduan Pengguna v2.4 • Dicetak secara digital pada 2026
+  </div>
+
+</body>
+</html>

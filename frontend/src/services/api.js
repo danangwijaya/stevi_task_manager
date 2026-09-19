@@ -91,6 +91,7 @@ export default {
   getAnnotationsOverview: (params) => api.get('/annotations/overview', { params }),
   getAllAnnotationsFeatures: (params) => api.get('/annotations/all-features', { params }),
   getGridAnnotations: (taskGridId) => api.get(`/annotations/grid/${taskGridId}`),
+  getNeighborAnnotations: (taskGridId) => api.get(`/annotations/grid/${taskGridId}/neighbors-features`),
   saveGridAnnotations: (taskGridId, features) => api.post(`/annotations/grid/${taskGridId}`, {
     task_grid_id: taskGridId,
     features: features

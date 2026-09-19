@@ -582,6 +582,79 @@
               </div>
             </div>
 
+            <!-- Kontrol Transparansi Grid Sebelah / Luar Grid -->
+            <div class="p-1.5 bg-slate-50 rounded-xl border border-slate-200 text-[10px] space-y-1">
+              <div class="flex items-center justify-between text-[9px] font-bold text-slate-500">
+                <span class="uppercase">Citra Luar Grid:</span>
+                <span class="font-mono text-slate-700 font-bold">{{ outsideDimOpacity === 0 ? 'Jernih (0% Dim)' : `${Math.round(outsideDimOpacity * 100)}% Dim` }}</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <input
+                  type="range"
+                  min="0.0"
+                  max="0.8"
+                  step="0.05"
+                  v-model.number="outsideDimOpacity"
+                  @input="updateOutsideMask"
+                  class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-600"
+                  title="Atur tingkat transparansi/kegelapan area di luar grid untuk melihat citra di grid sebelah"
+                />
+              </div>
+            </div>
+
+            <!-- Fitur Edge-Matching: Intip Poligon Grid Sebelah -->
+            <div class="p-2 bg-gradient-to-br from-indigo-50/70 to-slate-50 rounded-xl border border-indigo-100 text-[10px] space-y-2">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5 font-bold text-indigo-900">
+                  <component :is="showNeighborPolygons ? Eye : EyeOff" :size="12" class="text-indigo-600" />
+                  <span>Poligon Grid Sebelah</span>
+                </div>
+                <button
+                  @click="toggleNeighborPolygons"
+                  type="button"
+                  class="relative inline-flex h-4 w-7 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                  :class="showNeighborPolygons ? 'bg-indigo-600' : 'bg-slate-300'"
+                  title="Aktifkan untuk mengintip hasil digitasi grid sekitar agar batas tutupan lahan pas tersambung (Edge-Matching)"
+                >
+                  <span
+                    class="pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                    :class="showNeighborPolygons ? 'translate-x-3' : 'translate-x-0'"
+                  />
+                </button>
+              </div>
+
+              <!-- Status Penjelasan & Badge -->
+              <div class="flex items-center justify-between text-[9px] text-slate-500">
+                <span>Edge-Matching</span>
+                <span v-if="isLoadingNeighbors" class="text-indigo-600 animate-pulse font-semibold">Memuat...</span>
+                <span v-else-if="showNeighborPolygons" class="text-indigo-700 font-semibold bg-indigo-100/70 px-1 py-0.2 rounded text-[8.5px]">
+                  {{ neighborFeaturesCount }} Poligon Terdeteksi
+                </span>
+                <span v-else class="text-slate-400">Non-Aktif</span>
+              </div>
+
+              <!-- Slider Transparansi Poligon Tetangga (jika aktif) -->
+              <div v-if="showNeighborPolygons" class="space-y-1 pt-1 border-t border-indigo-100/80">
+                <div class="flex items-center justify-between text-[9px] text-indigo-950">
+                  <span class="text-slate-500">Transparansi Poligon:</span>
+                  <span class="font-mono font-bold">{{ Math.round(neighborPolygonsOpacity * 100) }}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="0.8"
+                  step="0.05"
+                  v-model.number="neighborPolygonsOpacity"
+                  @input="updateNeighborOpacity"
+                  class="w-full h-1 bg-indigo-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  title="Atur transparansi warna poligon grid sebelah"
+                />
+                <div class="text-[8px] text-slate-400 leading-tight">
+                  * Garis putus-putus acuan sambungan (read-only)
+                </div>
+              </div>
+            </div>
+
             <!-- Keyboard Quick Tips (Smooth GIS Experience) -->
             <div class="px-2 py-1.5 bg-slate-100/90 rounded-xl text-[9px] text-slate-500 leading-tight space-y-1 border border-slate-200/60">
               <div class="flex items-center justify-between">
@@ -1569,8 +1642,122 @@ let arcgisLayer = null
 let focusMaskLayer = null
 let gridBoundingLayer = null
 let neighboringGridsLayer = null
+let neighborPolygonsLayer = null
 let featureGroup = null
 const features = ref([])
+const outsideDimOpacity = ref(0.12) // Default lembut agar citra grid sebelah terlihat jernih
+const showNeighborPolygons = ref(false) // Default OFF agar kanvas bersih, mapper bisa aktifkan saat perlu edge-matching
+const neighborPolygonsOpacity = ref(0.4)
+const neighborFeaturesCount = ref(0)
+const isLoadingNeighbors = ref(false)
+
+const updateOutsideMask = () => {
+  if (focusMaskLayer) {
+    focusMaskLayer.setStyle({ fillOpacity: outsideDimOpacity.value })
+  }
+}
+
+const updateNeighborOpacity = () => {
+  if (neighborPolygonsLayer) {
+    neighborPolygonsLayer.setStyle((feature) => {
+      const color = feature?.properties?.color_hex || '#9CA3AF'
+      return {
+        color: color,
+        weight: 1.8,
+        dashArray: '5, 5',
+        fillColor: color,
+        fillOpacity: neighborPolygonsOpacity.value
+      }
+    })
+  }
+}
+
+const loadNeighborPolygons = async (taskId) => {
+  if (!map || !taskId) return
+  if (neighborPolygonsLayer) {
+    map.removeLayer(neighborPolygonsLayer)
+    neighborPolygonsLayer = null
+  }
+
+  if (!showNeighborPolygons.value) {
+    neighborFeaturesCount.value = 0
+    return
+  }
+
+  try {
+    isLoadingNeighbors.value = true
+    const res = await api.getNeighborAnnotations(taskId)
+    const fc = res.data || { type: 'FeatureCollection', features: [] }
+    const feats = fc.features || []
+    neighborFeaturesCount.value = feats.length
+
+    if (!showNeighborPolygons.value) return
+
+    neighborPolygonsLayer = L.geoJSON(fc, {
+      style: (feature) => {
+        const color = feature?.properties?.color_hex || '#9CA3AF'
+        return {
+          color: color,
+          weight: 1.8,
+          dashArray: '5, 5',
+          fillColor: color,
+          fillOpacity: neighborPolygonsOpacity.value,
+          interactive: true
+        }
+      },
+      onEachFeature: (feature, layer) => {
+        layer.options.pmIgnore = true
+        layer.options.snapIgnore = false
+        const p = feature.properties || {}
+        layer.bindTooltip(`
+          <div class="text-xs font-sans">
+            <div class="flex items-center gap-1.5 font-bold text-slate-800 border-b border-slate-200 pb-1 mb-1">
+              <span class="inline-block w-2.5 h-2.5 rounded-sm" style="background-color: ${p.color_hex || '#9CA3AF'}"></span>
+              <span>${p.class_name || 'Tutupan Lahan'}</span>
+            </div>
+            <div class="text-[10px] text-slate-600 space-y-0.5 font-mono">
+              <div>Grid: <b class="text-indigo-700">${p.grid_code || '-'}</b></div>
+              <div>Luas: <b>${p.area_ha || 0} ha</b></div>
+            </div>
+            <div class="mt-1 text-[9px] font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
+              🔒 Referensi Grid Sebelah (Read-Only)
+            </div>
+          </div>
+        `, { sticky: true })
+
+        layer.on('click', (e) => {
+          L.DomEvent.stopPropagation(e)
+          showToast(`🔒 Poligon Grid Sebelah [${p.grid_code || 'Tetangga'}]: ${p.class_name} (Hanya Referensi Edge-Matching)`)
+        })
+      }
+    })
+
+    if (showNeighborPolygons.value) {
+      neighborPolygonsLayer.addTo(map)
+      if (featureGroup) featureGroup.bringToFront()
+      if (gridBoundingLayer) gridBoundingLayer.bringToFront()
+    }
+  } catch (err) {
+    console.warn('Gagal memuat poligon grid tetangga:', err)
+  } finally {
+    isLoadingNeighbors.value = false
+  }
+}
+
+const toggleNeighborPolygons = async () => {
+  showNeighborPolygons.value = !showNeighborPolygons.value
+  const currentTaskId = selectedTaskId.value || tasksStore.currentTask?.id
+  if (showNeighborPolygons.value) {
+    if (currentTaskId) {
+      await loadNeighborPolygons(currentTaskId)
+    }
+  } else {
+    if (neighborPolygonsLayer && map) {
+      map.removeLayer(neighborPolygonsLayer)
+      neighborPolygonsLayer = null
+    }
+  }
+}
 
 const getArcgisRasterFunction = (layerId) => {
   switch (layerId) {
@@ -1707,7 +1894,7 @@ const updateTileLayer = async () => {
       : api.getMosaicRasterTileUrl(yr, mode, imagerySettings.value.gamma)
 
     tileLayer = L.tileLayer(tileUrl, {
-      maxZoom: 20,
+      maxZoom: 16,
       maxNativeZoom: 16,
       attribution: `Citra Sentinel-2 Sumbar (${yr}) 10m Cloud-Optimized GeoTIFF`
     }).addTo(map)
@@ -1740,7 +1927,7 @@ const updateTileLayer = async () => {
           sortValue: '0'
         },
         format: 'jpgpng',
-        maxZoom: 20,
+        maxZoom: 16,
         attribution: `ArcGIS Sentinel-2 L2A ${yr} (10m) © European Space Agency & Esri Living Atlas`
       }).addTo(map)
 
@@ -1756,7 +1943,7 @@ const updateTileLayer = async () => {
   // 3. Standard Tile Layers (EOX Sentinel-2, Google Satellite, Esri World Imagery, OSM)
   const conf = getTileUrl(currentLayer.value, currentYear.value)
   tileLayer = L.tileLayer(conf.url, {
-    maxZoom: 20,
+    maxZoom: 16,
     maxNativeZoom: conf.maxNativeZoom,
     attribution: conf.attr
   }).addTo(map)
@@ -1866,6 +2053,8 @@ const initMap = () => {
   map = L.map('map-container', {
     center: [-0.947, 100.370],
     zoom: 13,
+    maxZoom: 16, // Maksimal zoom in dibatasi di level 16 (skala ~300 meter)
+    minZoom: 9,
     zoomControl: false
   })
 
@@ -1887,7 +2076,7 @@ const initMap = () => {
   // Satellite Basemap
   updateTileLayer()
 
-  // Feature Group for drawn polygons
+  // Feature Group for actively drawn/editable polygons
   featureGroup = L.featureGroup().addTo(map)
 
   map.pm.setGlobalOptions({
@@ -2602,8 +2791,12 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
   if (focusMaskLayer) map.removeLayer(focusMaskLayer)
   if (gridBoundingLayer) map.removeLayer(gridBoundingLayer)
   if (neighboringGridsLayer) map.removeLayer(neighboringGridsLayer)
+  if (neighborPolygonsLayer) {
+    map.removeLayer(neighborPolygonsLayer)
+    neighborPolygonsLayer = null
+  }
 
-  // 2. Build Inverted Mask around Active Grid: Dims the outside world with dark transparent overlay
+  // 2. Build Inverted Mask around Active Grid: Dims the outside world with adjustable light transparent overlay
   const worldOuterRing = [[-90, -180], [-90, 180], [90, 180], [90, -180], [-90, -180]]
   const activeGridHole = [
     [task.min_lat, task.min_lon],
@@ -2617,11 +2810,11 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
     color: '#334155',
     weight: 1,
     fillColor: '#020617',
-    fillOpacity: 0.45,
+    fillOpacity: outsideDimOpacity.value,
     interactive: false
   }).addTo(map)
 
-  // 3. Draw Neighboring Task Grids (Inactive with dark transparent tint & dashed border)
+  // 3. Draw Neighboring Task Grids (Transparent footprint & dashed border to clearly see neighboring satellite imagery)
   neighboringGridsLayer = L.featureGroup().addTo(map)
   tasksStore.tasks.forEach(t => {
     if (t.id !== task.id) {
@@ -2630,10 +2823,10 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
         weight: 1.5,
         dashArray: '5, 5',
         fillColor: '#0f172a',
-        fillOpacity: 0.35,
+        fillOpacity: 0.0, // 100% transparan agar citra di grid sebelah terlihat jernih dan natural
         interactive: true
       })
-      rect.bindTooltip(`Grid Lain (Non-Aktif): <b>${t.grid_code}</b><br><span class="text-[10px] text-slate-300">Pilih di dropdown kiri untuk berpindah</span>`, { sticky: true })
+      rect.bindTooltip(`Grid Sebelah: <b>${t.grid_code}</b><br><span class="text-[10px] text-slate-300">Pilih di dropdown kiri untuk berpindah</span>`, { sticky: true })
       rect.addTo(neighboringGridsLayer)
     }
   })
@@ -2648,9 +2841,13 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
     interactive: false
   }).addTo(map)
 
-  map.fitBounds(bounds, { padding: [60, 60] })
+  // FIX PENTING: Hanya panggil fitBounds jika bukan preserveHistory (bukan reload setelah digitasi/split/merge)
+  // agar posisi zoom mapper tidak meloncat keluar / zoom out
+  if (!preserveHistory) {
+    map.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 })
+  }
 
-  // 4. Load Existing Polygons
+  // 5. Load Existing Polygons
   featureGroup.clearLayers()
   const fetchedFeatures = await annotationsStore.fetchGridAnnotations(taskId)
   features.value = fetchedFeatures
@@ -2688,6 +2885,11 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
     showSmartCopyBanner.value = true
   } catch (err) {
     taskSiblings.value = []
+  }
+
+  // 6. Load Neighboring Polygons (if enabled for Edge-Matching)
+  if (showNeighborPolygons.value) {
+    loadNeighborPolygons(taskId)
   }
 
   // 6. Sync Year & Refresh Basemap Tile Layer

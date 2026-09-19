@@ -250,6 +250,86 @@ def get_grid_annotations(
         "features": features
     }
 
+@router.get("/grid/{task_grid_id}/neighbors-features")
+def get_neighbors_annotations(
+    task_grid_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Returns a GeoJSON FeatureCollection of polygons from neighboring task grids
+    for edge-matching and border alignment. Read-only for mapper.
+    """
+    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task grid not found")
+
+    # Buffer around current task's bbox (1.5x grid extent to catch all surrounding neighbors)
+    d_lat = abs(task.max_lat - task.min_lat) * 1.5 if (task.max_lat and task.min_lat) else 0.05
+    d_lon = abs(task.max_lon - task.min_lon) * 1.5 if (task.max_lon and task.min_lon) else 0.05
+
+    min_lat_b = task.min_lat - d_lat
+    max_lat_b = task.max_lat + d_lat
+    min_lon_b = task.min_lon - d_lon
+    max_lon_b = task.max_lon + d_lon
+
+    # Query neighboring grids in the same study area and year
+    neighbor_tasks = db.query(TaskGrid).filter(
+        TaskGrid.id != task_grid_id,
+        TaskGrid.study_area_id == task.study_area_id,
+        TaskGrid.year == task.year,
+        TaskGrid.min_lat <= max_lat_b,
+        TaskGrid.max_lat >= min_lat_b,
+        TaskGrid.min_lon <= max_lon_b,
+        TaskGrid.max_lon >= min_lon_b
+    ).all()
+
+    if not neighbor_tasks:
+        return {
+            "type": "FeatureCollection",
+            "total_features": 0,
+            "features": []
+        }
+
+    neighbor_ids = [t.id for t in neighbor_tasks]
+    neighbor_code_map = {t.id: t.grid_code for t in neighbor_tasks}
+
+    # Fetch annotations from these neighboring grids (exclude unclassified class 0)
+    annotations = db.query(Annotation).filter(
+        Annotation.task_grid_id.in_(neighbor_ids),
+        Annotation.class_id > 0
+    ).all()
+
+    classes_meta = {c["id"]: c for c in settings.LAND_COVER_CLASSES}
+    features = []
+    for ann in annotations:
+        try:
+            geom = json.loads(ann.geom_geojson)
+            c_meta = classes_meta.get(ann.class_id, {})
+            features.append({
+                "type": "Feature",
+                "id": f"neighbor_{ann.id}",
+                "geometry": geom,
+                "properties": {
+                    "id": ann.id,
+                    "task_grid_id": ann.task_grid_id,
+                    "grid_code": neighbor_code_map.get(ann.task_grid_id, ""),
+                    "class_id": ann.class_id,
+                    "class_name": ann.class_name,
+                    "color_hex": c_meta.get("color", "#9CA3AF"),
+                    "area_ha": round((ann.area_sqm or 0) / 10000.0, 2),
+                    "is_neighbor": True
+                }
+            })
+        except Exception:
+            continue
+
+    return {
+        "type": "FeatureCollection",
+        "total_features": len(features),
+        "features": features
+    }
+
 @router.post("/grid/{task_grid_id}")
 def save_grid_annotations(
     task_grid_id: int,
