@@ -897,7 +897,52 @@
         <!-- ────────────────────────────────────────────────── -->
         <div v-if="activeTab === 'import'" class="space-y-4 max-w-4xl">
           
-          <div class="bg-white rounded-2xl border border-[#e4e7eb] p-6 space-y-6 shadow-xs">
+          <!-- Sub-Tab Navigation Header -->
+          <div class="flex items-center gap-2 border-b border-[#e4e7eb] pb-3">
+            <button
+              type="button"
+              @click="rasterUploadActiveTab = 'grid'"
+              class="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              :class="rasterUploadActiveTab === 'grid'
+                ? 'bg-[#d73f3f] text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50'"
+            >
+              <Grid :size="15" />
+              <span>1. Import Grid Geospasial (.zip / .geojson)</span>
+            </button>
+
+            <button
+              type="button"
+              @click="rasterUploadActiveTab = 'raster'; if (!rasterPackagesList.length) fetchRasterPackages()"
+              class="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              :class="rasterUploadActiveTab === 'raster'
+                ? 'bg-[#d73f3f] text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50'"
+            >
+              <Layers :size="15" />
+              <span>2. Upload Citra Raster COG (.zip)</span>
+            </button>
+
+            <button
+              type="button"
+              @click="rasterUploadActiveTab = 'packages'; fetchRasterPackages()"
+              class="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ml-auto"
+              :class="rasterUploadActiveTab === 'packages'
+                ? 'bg-slate-800 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50'"
+            >
+              <FolderKanban :size="15" />
+              <span>Daftar Raster di Server</span>
+              <span v-if="rasterPackagesList.length" class="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-mono">
+                {{ rasterPackagesList.length }}
+              </span>
+            </button>
+          </div>
+
+          <!-- ══════════════════════════════════════════════════════════ -->
+          <!-- SUB-VIEW 1: IMPORT GRID GEOSPASIAL (.zip / .geojson)      -->
+          <!-- ══════════════════════════════════════════════════════════ -->
+          <div v-if="rasterUploadActiveTab === 'grid'" class="bg-white rounded-2xl border border-[#e4e7eb] p-6 space-y-6 shadow-xs">
             <div>
               <h3 class="font-extrabold text-base text-slate-900 font-heading">Import Grid Geospasial Kustom</h3>
               <p class="text-xs text-slate-500 mt-0.5">Unggah Shapefile (.zip) atau file GeoJSON (.geojson / .json) untuk membuat petak grid tasking otomatis.</p>
@@ -909,7 +954,7 @@
               <div class="flex items-center gap-4 text-xs font-bold">
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" v-model="importTargetType" value="existing" class="text-rose-600" />
-                  <span>Tambahkan ke Proyek yang Sudah Ada</span>
+                  <span>Tambahkan / Ganti ke Proyek yang Sudah Ada</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer">
                   <input type="radio" v-model="importTargetType" value="new" class="text-rose-600" />
@@ -918,21 +963,81 @@
               </div>
             </div>
 
-            <div v-if="importTargetType === 'existing'" class="space-y-1">
-              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Pilih Proyek:</label>
-              <select v-model="importSelectedProjectId" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800">
-                <option v-for="p in adminStore.projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-              </select>
+            <div v-if="importTargetType === 'existing'" class="space-y-3">
+              <div class="space-y-1">
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Pilih Proyek Target:</label>
+                <select v-model="importSelectedProjectId" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800 font-medium">
+                  <option v-for="p in adminStore.projects" :key="p.id" :value="p.id">
+                    {{ p.name }} ({{ p.total_tasks || 0 }} grid)
+                  </option>
+                </select>
+              </div>
+
+              <!-- Mode Import: Append vs Replace -->
+              <div class="space-y-1.5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Metode Impor Grid:</label>
+                <div class="space-y-2 text-xs">
+                  <label class="flex items-start gap-2.5 cursor-pointer">
+                    <input type="radio" v-model="importMode" value="append" class="mt-0.5 text-rose-600" />
+                    <div>
+                      <div class="font-bold text-slate-800">Tambah Grid Baru (Append)</div>
+                      <div class="text-[11px] text-slate-500">Menjaga grid yang sudah ada, hanya menambahkan grid baru yang belum terdaftar.</div>
+                    </div>
+                  </label>
+                  <label class="flex items-start gap-2.5 cursor-pointer">
+                    <input type="radio" v-model="importMode" value="replace" class="mt-0.5 text-rose-600" />
+                    <div>
+                      <div class="font-bold text-rose-700">Timpa / Ganti Seluruh Grid (Replace)</div>
+                      <div class="text-[11px] text-slate-500">Menghapus seluruh grid lama pada proyek ini dan menggantinya utuh dengan file grid baru.</div>
+                    </div>
+                  </label>
+                </div>
+
+                <div v-if="importMode === 'replace'" class="mt-2 p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-[11px] text-rose-800 flex items-center gap-2">
+                  <AlertTriangle :size="14" class="text-rose-600 shrink-0" />
+                  <span><b>Perhatian:</b> Seluruh data grid lama pada proyek terpilih akan dihapus dan digantikan dengan grid baru dari file ini.</span>
+                </div>
+              </div>
             </div>
 
             <div v-else class="space-y-3">
               <div class="space-y-1">
                 <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Nama Proyek Baru *</label>
-                <input v-model="importNewProjectName" type="text" placeholder="cth: Kawasan Hutan Lindung Riau 2026" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800" />
+                <input v-model="importNewProjectName" type="text" placeholder="cth: Kawasan Pulau Kalimantan 2026" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800" />
               </div>
               <div class="space-y-1">
                 <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Deskripsi Proyek</label>
                 <textarea v-model="importNewProjectDesc" rows="2" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800 resize-none"></textarea>
+              </div>
+            </div>
+
+            <!-- Target Years Input -->
+            <div class="space-y-1.5">
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Target Tahun Citra Satelit:</label>
+              <div class="flex items-center gap-2">
+                <input v-model="importYearsStr" type="text" placeholder="2026,2017" class="flex-1 bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800 font-mono" />
+                <div class="flex gap-1">
+                  <button
+                    type="button"
+                    v-for="yr in ['2026', '2025', '2022', '2017']"
+                    :key="yr"
+                    @click="toggleYearInList(yr)"
+                    class="px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer"
+                    :class="importYearsStr.includes(yr) ? 'bg-rose-100 border-rose-300 text-rose-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'"
+                  >
+                    {{ yr }}
+                  </button>
+                </div>
+              </div>
+              <div class="text-[11px] text-slate-400">Pisahkan dengan koma jika lebih dari satu tahun (misal: <code>2026,2017</code>).</div>
+            </div>
+
+            <!-- Grid ID Column (Optional) -->
+            <div class="space-y-1">
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Kolom ID Grid (Atribut File):</label>
+              <input v-model="importGridIdCol" type="text" placeholder="Otomatis (cth: tile_id, grid_code, atau AUTO)" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800" />
+              <div class="text-[11px] text-slate-400 leading-normal">
+                Bila kosong atau tidak ditemukan, sistem otomatis mengurutkan posisi grid dari <b>kiri-atas ke kanan-bawah</b> dengan kode teratur <code>GRID_01</code>, <code>GRID_02</code>, dst.
               </div>
             </div>
 
@@ -952,7 +1057,7 @@
               <div class="text-sm font-bold text-slate-800">
                 {{ importFile ? importFile.name : 'Klik atau seret file Shapefile (.zip) / GeoJSON ke sini' }}
               </div>
-              <div class="text-xs text-slate-400 mt-1">Maksimum ukuran file: 25 MB</div>
+              <div class="text-xs text-slate-400 mt-1">Format: Shapefile (.zip berisi .shp, .shx, .dbf, .prj) atau GeoJSON (.geojson / .json) • Maks: 25 MB</div>
             </div>
 
             <button
@@ -962,18 +1067,243 @@
             >
               <RotateCw v-if="importLoading" :size="16" class="animate-spin" />
               <UploadCloud v-else :size="16" />
-              <span>{{ importLoading ? 'Memproses & Mengimpor Grid...' : 'Proses & Import Grid Sekarang' }}</span>
+              <span>
+                {{ importLoading ? 'Memproses & Mengimpor Grid...' : (importTargetType === 'existing' && importMode === 'replace' ? 'Timpa & Ganti Seluruh Grid' : 'Proses & Import Grid Sekarang') }}
+              </span>
             </button>
 
             <!-- Success Card -->
-            <div v-if="importResult" class="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl space-y-2">
+            <div v-if="importResult" class="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl space-y-3">
               <div class="flex items-center gap-2 text-emerald-900 font-extrabold text-xs">
-                <CheckCircle2 :size="16" class="text-emerald-600" />
+                <CheckCircle2 :size="18" class="text-emerald-600 shrink-0" />
                 <span>{{ importResult.message }}</span>
               </div>
-              <div class="text-[11px] text-emerald-800 space-y-0.5 font-mono">
-                <div>• Proyek: <b>{{ importResult.study_area_name }}</b></div>
-                <div>• Total Tugas Dibuat: <b>{{ importResult.created_tasks_count }} grid</b></div>
+              <div class="text-[11px] text-emerald-800 space-y-1 font-mono bg-white/70 p-3 rounded-xl border border-emerald-200">
+                <div>• Proyek: <b class="text-slate-900">{{ importResult.study_area_name }}</b></div>
+                <div>• Total Tugas Dibuat: <b class="text-emerald-700">{{ importResult.created_tasks_count }} grid</b> ({{ importResult.feature_count }} poligon × {{ importResult.years?.length || 1 }} tahun)</div>
+                <div>• Mode Aksi: <b class="text-slate-800">{{ importResult.import_mode === 'replace' ? 'Ganti Total (Replace)' : 'Tambah (Append)' }}</b></div>
+              </div>
+
+              <!-- Quick Navigation Action Buttons -->
+              <div class="flex flex-col sm:flex-row gap-2 pt-1">
+                <router-link
+                  :to="{ path: '/tasking', query: { area: importResult.study_area_id } }"
+                  class="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold text-center flex items-center justify-center gap-1.5 shadow-xs transition-colors"
+                >
+                  <Grid :size="14" />
+                  <span>Buka di Tasking Map</span>
+                </router-link>
+                <router-link
+                  :to="`/project/${importResult.study_area_id}`"
+                  class="flex-1 py-2 px-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 rounded-xl text-xs font-bold text-center flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <span>Lihat Detail Proyek →</span>
+                </router-link>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ══════════════════════════════════════════════════════════ -->
+          <!-- SUB-VIEW 2: UPLOAD CITRA RASTER COG (.zip)                -->
+          <!-- ══════════════════════════════════════════════════════════ -->
+          <div v-else-if="rasterUploadActiveTab === 'raster'" class="bg-white rounded-2xl border border-[#e4e7eb] p-6 space-y-6 shadow-xs">
+            <div>
+              <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold border border-blue-200 mb-2">
+                <Layers :size="13" />
+                <span>Sentinel-2 Cloud Optimized GeoTIFF (COG)</span>
+              </div>
+              <h3 class="font-extrabold text-base text-slate-900 font-heading">Upload Citra Raster COG (.zip)</h3>
+              <p class="text-xs text-slate-500 mt-0.5">
+                Unggah arsip <b>.zip</b> yang berisi satu atau beberapa file citra satelit GeoTIFF (<code>.tif</code> / <code>.tiff</code>) untuk melengkapi layer raster Sentinel-2 resolusi tinggi 10m.
+              </p>
+            </div>
+
+            <!-- Target Project -->
+            <div class="space-y-1.5">
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Wilayah Kajian / Proyek Target *</label>
+              <select v-model="rasterSelectedProjectId" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800 font-medium">
+                <option v-for="p in adminStore.projects" :key="p.id" :value="p.id">
+                  📍 {{ p.name }} ({{ p.total_tasks || 0 }} grid tasking)
+                </option>
+              </select>
+            </div>
+
+            <!-- Target Year Selector -->
+            <div class="space-y-1.5">
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Tahun Citra Raster *</label>
+              <div class="flex items-center gap-2">
+                <input
+                  v-model.number="rasterYear"
+                  type="number"
+                  placeholder="2026"
+                  class="w-32 bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800 font-mono font-bold"
+                />
+                <div class="flex gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    v-for="yr in [2026, 2025, 2022, 2018, 2017]"
+                    :key="yr"
+                    @click="rasterYear = yr"
+                    class="px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer"
+                    :class="rasterYear === yr ? 'bg-blue-600 text-white border-blue-600 shadow-2xs' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'"
+                  >
+                    {{ yr }}
+                  </button>
+                </div>
+              </div>
+              <div class="text-[11px] text-slate-400">Pilih tahun akuisisi citra satelit Sentinel-2.</div>
+            </div>
+
+            <!-- Mode Upload Raster: Append vs Replace -->
+            <div class="space-y-1.5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Metode Penyimpanan Raster:</label>
+              <div class="space-y-2 text-xs">
+                <label class="flex items-start gap-2.5 cursor-pointer">
+                  <input type="radio" v-model="rasterMode" value="append" class="mt-0.5 text-blue-600" />
+                  <div>
+                    <div class="font-bold text-slate-800">Tambah / Perbarui File (Append)</div>
+                    <div class="text-[11px] text-slate-500">Mengekstrak file GeoTIFF ke direktori raster target tanpa menghapus file lama yang sudah ada.</div>
+                  </div>
+                </label>
+                <label class="flex items-start gap-2.5 cursor-pointer">
+                  <input type="radio" v-model="rasterMode" value="replace" class="mt-0.5 text-blue-600" />
+                  <div>
+                    <div class="font-bold text-rose-700">Timpa / Ganti Seluruh Citra (Replace)</div>
+                    <div class="text-[11px] text-slate-500">Menghapus seluruh file citra raster lama untuk tahun dan proyek ini sebelum mengekstrak file baru.</div>
+                  </div>
+                </label>
+              </div>
+
+              <div v-if="rasterMode === 'replace'" class="mt-2 p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-[11px] text-rose-800 flex items-center gap-2">
+                <AlertTriangle :size="14" class="text-rose-600 shrink-0" />
+                <span><b>Perhatian:</b> Seluruh file citra .tif lama untuk tahun {{ rasterYear }} pada proyek terpilih akan dihapus dan digantikan dengan file dari arsip zip ini.</span>
+              </div>
+            </div>
+
+            <!-- Upload File Box for Raster ZIP -->
+            <div
+              @dragover.prevent="isRasterDragOver = true"
+              @dragleave.prevent="isRasterDragOver = false"
+              @drop.prevent="handleRasterDrop"
+              class="border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer"
+              :class="isRasterDragOver ? 'border-blue-500 bg-blue-50/40' : 'border-slate-300 bg-slate-50/50 hover:bg-slate-50'"
+              @click="$refs.rasterFileInput.click()"
+            >
+              <input ref="rasterFileInput" type="file" accept=".zip" class="hidden" @change="onRasterFileSelected" />
+              <div class="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-2 shadow-2xs">
+                <Layers :size="24" />
+              </div>
+              <div class="text-sm font-bold text-slate-800">
+                {{ rasterFile ? rasterFile.name : 'Klik atau seret file ZIP citra raster COG (.zip) ke sini' }}
+              </div>
+              <div class="text-xs text-slate-400 mt-1">
+                Format: Arsip <b>.zip</b> berisi file citra GeoTIFF (<code>.tif</code> / <code>.tiff</code>) • Mendukung multi-band RGB dan False Color (CIR)
+              </div>
+            </div>
+
+            <!-- Submit Upload Button -->
+            <button
+              @click="executeRasterUpload"
+              :disabled="!rasterFile || rasterUploading"
+              class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-sm"
+            >
+              <RotateCw v-if="rasterUploading" :size="16" class="animate-spin" />
+              <UploadCloud v-else :size="16" />
+              <span>
+                {{ rasterUploading ? 'Mengekstrak & Mengindeks Citra Raster...' : (rasterMode === 'replace' ? 'Timpa & Upload Citra Raster COG' : 'Upload & Ekstrak Citra Raster COG Sekarang') }}
+              </span>
+            </button>
+
+            <!-- Success Card Raster -->
+            <div v-if="rasterUploadResult" class="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl space-y-3">
+              <div class="flex items-center gap-2 text-emerald-900 font-extrabold text-xs">
+                <CheckCircle2 :size="18" class="text-emerald-600 shrink-0" />
+                <span>{{ rasterUploadResult.message }}</span>
+              </div>
+              <div class="text-[11px] text-emerald-800 space-y-1 font-mono bg-white/70 p-3 rounded-xl border border-emerald-200">
+                <div>• Wilayah Kajian: <b class="text-slate-900">{{ rasterUploadResult.study_area_name }}</b> (Tahun {{ rasterUploadResult.year }})</div>
+                <div>• Total File Citra COG: <b class="text-emerald-700">{{ rasterUploadResult.files_count }} file .tif</b> ({{ rasterUploadResult.total_size_mb }} MB)</div>
+                <div>• Sistem Koordinat (CRS): <b class="text-slate-900">{{ rasterUploadResult.crs_detected }}</b></div>
+                <div>• Direktori Penyimpanan: <code>{{ rasterUploadResult.target_folder }}</code></div>
+                <div>• Grid Tasking Tercakup: <b class="text-blue-700">{{ rasterUploadResult.matched_tasks_count }} grid</b></div>
+                <div v-if="rasterUploadResult.sample_files?.length" class="text-slate-500 pt-1 text-[10px]">
+                  Contoh file: {{ rasterUploadResult.sample_files.join(', ') }}
+                </div>
+              </div>
+
+              <!-- Quick Navigation Action Buttons -->
+              <div class="flex flex-col sm:flex-row gap-2 pt-1">
+                <router-link
+                  :to="{ path: '/tasking', query: { area: rasterUploadResult.study_area_id } }"
+                  class="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold text-center flex items-center justify-center gap-1.5 shadow-xs transition-colors"
+                >
+                  <Grid :size="14" />
+                  <span>Lihat di Tasking Map</span>
+                </router-link>
+                <router-link
+                  :to="`/project/${rasterUploadResult.study_area_id}`"
+                  class="flex-1 py-2 px-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 rounded-xl text-xs font-bold text-center flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <span>Lihat Detail Proyek →</span>
+                </router-link>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ══════════════════════════════════════════════════════════ -->
+          <!-- SUB-VIEW 3: DAFTAR RASTER DI SERVER                       -->
+          <!-- ══════════════════════════════════════════════════════════ -->
+          <div v-else-if="rasterUploadActiveTab === 'packages'" class="bg-white rounded-2xl border border-[#e4e7eb] p-6 space-y-4 shadow-xs">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-extrabold text-base text-slate-900 font-heading">Daftar Paket Citra Raster di Server</h3>
+                <p class="text-xs text-slate-500 mt-0.5">Menampilkan seluruh folder citra satelit GeoTIFF yang tersimpan dan aktif melayani tile server.</p>
+              </div>
+              <button
+                @click="fetchRasterPackages"
+                :disabled="loadingPackages"
+                class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <RotateCw :size="13" :class="loadingPackages ? 'animate-spin' : ''" />
+                <span>Segarkan</span>
+              </button>
+            </div>
+
+            <div v-if="loadingPackages" class="py-8 text-center text-xs text-slate-400">
+              <RotateCw :size="18" class="animate-spin mx-auto mb-2 text-slate-500" />
+              <span>Memuat daftar paket raster...</span>
+            </div>
+
+            <div v-else-if="rasterPackagesList.length === 0" class="py-8 text-center text-xs text-slate-400">
+              Belum ada direktori citra raster yang terdeteksi di server.
+            </div>
+
+            <div v-else class="space-y-2">
+              <div
+                v-for="pkg in rasterPackagesList"
+                :key="pkg.folder_name"
+                class="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-4"
+              >
+                <div class="flex items-center gap-3 min-w-0">
+                  <div class="w-9 h-9 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                    <Layers :size="18" />
+                  </div>
+                  <div class="min-w-0">
+                    <div class="font-bold text-xs text-slate-900 font-mono truncate">{{ pkg.folder_name }}</div>
+                    <div class="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                      <span v-if="pkg.year" class="px-1.5 py-0.2 rounded bg-slate-200 text-slate-800 font-bold font-mono">Tahun {{ pkg.year }}</span>
+                      <span>{{ pkg.files_count }} file GeoTIFF (.tif)</span>
+                      <span>•</span>
+                      <span>{{ pkg.total_size_mb }} MB</span>
+                    </div>
+                  </div>
+                </div>
+
+                <span class="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[11px] font-bold shrink-0">
+                  Aktif & Siap Disajikan
+                </span>
               </div>
             </div>
 
@@ -1826,12 +2156,27 @@ async function executeResetPassword() {
 // ── Import Grid State ─────────────────────────────────────────────────────
 const importTargetType = ref('existing')
 const importSelectedProjectId = ref(null)
+const importMode = ref('append')
 const importNewProjectName = ref('')
 const importNewProjectDesc = ref('')
+const importYearsStr = ref('2026,2017')
+const importGridIdCol = ref('')
 const importFile = ref(null)
 const isDragOver = ref(false)
 const importLoading = ref(false)
 const importResult = ref(null)
+
+const toggleYearInList = (yr) => {
+  let years = importYearsStr.value.split(',').map(y => y.trim()).filter(Boolean)
+  if (years.includes(yr)) {
+    if (years.length > 1) {
+      years = years.filter(y => y !== yr)
+    }
+  } else {
+    years.push(yr)
+  }
+  importYearsStr.value = years.join(',')
+}
 
 const onFileSelected = (e) => {
   const file = e.target.files[0]
@@ -1843,6 +2188,11 @@ const handleDrop = (e) => {
   if (file) handleChosenFile(file)
 }
 const handleChosenFile = (file) => {
+  if (file.name.toLowerCase().endsWith('.shp')) {
+    showToast('File .shp membutuhkan file pendamping (.shx, .dbf, .prj). Harap pilih file .zip atau .geojson.', 'error')
+    importFile.value = null
+    return
+  }
   importFile.value = file
   importResult.value = null
   if (!importNewProjectName.value) {
@@ -1855,26 +2205,133 @@ const executeImport = async () => {
     showToast('Pilih file Shapefile (.zip) atau GeoJSON terlebih dahulu', 'error')
     return
   }
+
+  if (importTargetType.value === 'existing' && importMode.value === 'replace') {
+    const selectedProj = adminStore.projects.find(p => p.id === importSelectedProjectId.value)
+    const confirmed = confirm(`PERINGATAN: Apakah Anda yakin ingin menimpa (replace) seluruh grid lama pada proyek "${selectedProj?.name || ''}"?\n\nSeluruh grid lama akan dihapus dan digantikan sepenuhnya dengan file grid baru.`)
+    if (!confirmed) return
+  }
+
   importLoading.value = true
   importResult.value = null
   try {
     const formData = new FormData()
     formData.append('file', importFile.value)
+    formData.append('import_mode', importMode.value)
+    
     if (importTargetType.value === 'existing' && importSelectedProjectId.value) {
       formData.append('study_area_id', importSelectedProjectId.value)
     } else {
       formData.append('new_project_name', importNewProjectName.value)
       if (importNewProjectDesc.value) formData.append('new_project_desc', importNewProjectDesc.value)
     }
-    formData.append('years_str', '2026,2017')
+
+    formData.append('years_str', importYearsStr.value.trim() || '2026,2017')
+    if (importGridIdCol.value && importGridIdCol.value.trim()) {
+      formData.append('grid_id_col', importGridIdCol.value.trim())
+    }
+
     const res = await api.importGrid(formData)
     importResult.value = res.data
     showToast(res.data?.message || 'Grid kustom berhasil diimpor!', 'success')
-    await adminStore.fetchProjects()
+    await Promise.allSettled([
+      adminStore.fetchProjects(),
+      tasksStore.fetchProjects()
+    ])
+    if (res.data?.study_area_id) {
+      tasksStore.selectedArea = res.data.study_area_id
+      if (res.data.years && res.data.years.length > 0) {
+        tasksStore.selectedYear = res.data.years[0]
+      }
+    }
   } catch (err) {
     showToast(err.response?.data?.detail || 'Gagal mengimpor file grid geospasial', 'error')
   } finally {
     importLoading.value = false
+  }
+}
+
+// ── Upload Citra Raster COG State ─────────────────────────────────────────
+const rasterUploadActiveTab = ref('grid') // 'grid' | 'raster' | 'packages'
+const rasterSelectedProjectId = ref(null)
+const rasterYear = ref(2026)
+const rasterMode = ref('append') // 'append' | 'replace'
+const rasterFile = ref(null)
+const isRasterDragOver = ref(false)
+const rasterUploading = ref(false)
+const rasterUploadResult = ref(null)
+const rasterPackagesList = ref([])
+const loadingPackages = ref(false)
+
+const fetchRasterPackages = async () => {
+  loadingPackages.value = true
+  try {
+    const res = await api.getRasterPackages()
+    rasterPackagesList.value = res.data || []
+  } catch (err) {
+    console.error('Failed to load raster packages:', err)
+  } finally {
+    loadingPackages.value = false
+  }
+}
+
+const onRasterFileSelected = (e) => {
+  const file = e.target.files[0]
+  if (file) handleChosenRasterFile(file)
+}
+
+const handleRasterDrop = (e) => {
+  isRasterDragOver.value = false
+  const file = e.dataTransfer?.files[0]
+  if (file) handleChosenRasterFile(file)
+}
+
+const handleChosenRasterFile = (file) => {
+  if (!file.name.toLowerCase().endsWith('.zip')) {
+    showToast('File citra raster COG harus berekstensi .zip (berisi satu atau beberapa file .tif / .tiff)', 'error')
+    rasterFile.value = null
+    return
+  }
+  rasterFile.value = file
+  rasterUploadResult.value = null
+}
+
+const executeRasterUpload = async () => {
+  if (!rasterFile.value) {
+    showToast('Pilih file ZIP citra raster COG (.zip) terlebih dahulu', 'error')
+    return
+  }
+  if (!rasterSelectedProjectId.value) {
+    showToast('Pilih wilayah kajian target terlebih dahulu', 'error')
+    return
+  }
+
+  if (rasterMode.value === 'replace') {
+    const selectedProj = adminStore.projects.find(p => p.id === rasterSelectedProjectId.value)
+    const confirmed = confirm(`PERINGATAN: Apakah Anda yakin ingin menimpa (replace) seluruh citra raster COG lama untuk proyek "${selectedProj?.name || ''}" tahun ${rasterYear.value}?\n\nFile raster lama pada folder tahun tersebut akan dihapus dan diganti dengan file baru dari arsip .zip ini.`)
+    if (!confirmed) return
+  }
+
+  rasterUploading.value = true
+  rasterUploadResult.value = null
+  try {
+    const formData = new FormData()
+    formData.append('file', rasterFile.value)
+    formData.append('study_area_id', rasterSelectedProjectId.value)
+    formData.append('year', rasterYear.value)
+    formData.append('mode', rasterMode.value)
+
+    const res = await api.uploadRasterZip(formData)
+    rasterUploadResult.value = res.data
+    showToast(res.data?.message || 'Citra raster COG berhasil diunggah!', 'success')
+    await Promise.allSettled([
+      fetchRasterPackages(),
+      tasksStore.fetchProjects()
+    ])
+  } catch (err) {
+    showToast(err.response?.data?.detail || 'Gagal mengunggah file citra raster COG', 'error')
+  } finally {
+    rasterUploading.value = false
   }
 }
 
@@ -1883,11 +2340,13 @@ onMounted(async () => {
   await Promise.allSettled([
     adminStore.fetchProjects(),
     adminStore.fetchUsers(),
-    tasksStore.fetchStatsSummary()
+    tasksStore.fetchStatsSummary(),
+    fetchRasterPackages()
   ])
   initProfileForm()
-  if (adminStore.projects.length > 0 && !importSelectedProjectId.value) {
-    importSelectedProjectId.value = adminStore.projects[0].id
+  if (adminStore.projects.length > 0) {
+    if (!importSelectedProjectId.value) importSelectedProjectId.value = adminStore.projects[0].id
+    if (!rasterSelectedProjectId.value) rasterSelectedProjectId.value = adminStore.projects[0].id
   }
 })
 </script>

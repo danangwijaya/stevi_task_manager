@@ -253,7 +253,7 @@
         <!-- Bottom action bar inside scrollable area -->
         <div class="p-4 border-t border-[#e4e7eb] bg-slate-50/80">
           <router-link
-            to="/tasking"
+            :to="{ path: '/tasking', query: { area: projectId } }"
             class="w-full bg-[#d73f3f] hover:bg-[#c23434] text-white font-bold text-xs py-2.5 px-4 rounded-xl transition-colors uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm cursor-pointer"
           >
             <Grid :size="14" />
@@ -418,8 +418,16 @@ let gridLayerGroup = null
 onMounted(async () => {
   try {
     tasksStore.selectedArea = projectId.value
+    await tasksStore.fetchProjects()
+    const proj = tasksStore.projects.find(p => p.id === projectId.value)
+    if (proj?.available_years && proj.available_years.length > 0) {
+      tasksStore.selectedYear = proj.available_years[0]
+    } else if (projectId.value === 1) {
+      tasksStore.selectedYear = 2025
+    } else {
+      tasksStore.selectedYear = 2026
+    }
     await Promise.allSettled([
-      tasksStore.fetchProjects(),
       annotationsStore.fetchClasses(),
       tasksStore.fetchTasks(),
       tasksStore.fetchStatsSummary()
@@ -448,12 +456,13 @@ const initMap = () => {
   }
 
   const proj = currentProject.value
-  const centerLat = proj ? proj.center_lat : (projectId.value === 2 ? 0.000 : -0.750)
-  const centerLon = proj ? proj.center_lon : (projectId.value === 2 ? 114.000 : 100.500)
-  const zoomLevel = proj ? proj.default_zoom : (projectId.value === 2 ? 6 : 8)
+  const centerLat = proj?.center_lat !== undefined ? proj.center_lat : -0.750
+  const centerLon = proj?.center_lon !== undefined ? proj.center_lon : 100.500
+  const zoomLevel = proj?.default_zoom !== undefined ? proj.default_zoom : 8
   
   map = L.map('project-overview-map', {
-    zoomControl: false
+    zoomControl: false,
+    preferCanvas: true
   }).setView([centerLat, centerLon], zoomLevel)
 
   L.control.zoom({ position: 'topright' }).addTo(map)
@@ -482,7 +491,7 @@ const renderGrids = () => {
   if (!gridLayerGroup || !map) return
   gridLayerGroup.clearLayers()
 
-  const targetAreaId = projectId.value === 2 ? 2 : 1
+  const targetAreaId = projectId.value
   let filtered = tasksStore.tasks.filter(t => t.study_area_id === targetAreaId)
   
   // If no tasks from backend yet, use fallback generated grid boxes
@@ -566,11 +575,14 @@ const fitProjectBounds = () => {
     const groupBounds = L.featureGroup(layers).getBounds()
     if (groupBounds.isValid()) {
       map.fitBounds(groupBounds, { padding: [30, 30] })
+      return
     }
-  } else {
-    const center = projectId.value === 2 ? [-1.120, 116.880] : [-0.947, 100.370]
-    map.setView(center, 12)
   }
+  const proj = currentProject.value
+  const centerLat = proj?.center_lat !== undefined ? proj.center_lat : -0.750
+  const centerLon = proj?.center_lon !== undefined ? proj.center_lon : 100.500
+  const zoomLevel = proj?.default_zoom !== undefined ? proj.default_zoom : 8
+  map.setView([centerLat, centerLon], zoomLevel)
 }
 
 const getGridStrokeColor = (status) => {

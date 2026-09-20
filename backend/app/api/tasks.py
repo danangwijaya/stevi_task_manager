@@ -32,6 +32,7 @@ class StudyAreaResponse(BaseModel):
     priority: Optional[str] = "HIGH"
     difficulty: Optional[str] = "Moderate"
     campaign: Optional[str] = "GEOSTEVIA"
+    available_years: List[int] = []
     created_at: datetime
 
     class Config:
@@ -88,6 +89,7 @@ def get_all_projects(
         contributors = db.query(func.count(func.distinct(TaskGrid.assigned_user_id))).filter(
             TaskGrid.study_area_id == a.id, TaskGrid.assigned_user_id.isnot(None)
         ).scalar() or 0
+        years = [r[0] for r in db.query(TaskGrid.year).filter(TaskGrid.study_area_id == a.id).distinct().order_by(TaskGrid.year.desc()).all()]
 
         priority = a.priority or "MEDIUM"
         difficulty = a.difficulty or "Moderate"
@@ -107,6 +109,7 @@ def get_all_projects(
             priority=priority,
             difficulty=difficulty,
             campaign="GEOSTEVIA",
+            available_years=years,
             created_at=a.created_at
         ))
     return result
@@ -326,9 +329,10 @@ def reset_project_progress(
 async def import_custom_grid(
     file: UploadFile = File(...),
     study_area_id: Optional[int] = Form(None),
+    import_mode: str = Form("append"),
     new_project_name: Optional[str] = Form(None),
     new_project_desc: Optional[str] = Form(None),
-    years_str: str = Form("2017,2021,2025"),
+    years_str: str = Form("2026,2017"),
     grid_id_col: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     admin: User = Depends(get_current_active_admin)
@@ -336,8 +340,8 @@ async def import_custom_grid(
     """
     Imports custom grids from an uploaded Shapefile (.zip) or GeoJSON (.geojson / .json).
     - Reprojects to EPSG:4326 (WGS84) automatically
-    - Calculates bounds and center coordinates
-    - Creates task grids for specified years (e.g. 2017, 2021, 2025)
+    - Supports 'append' (tambah grid baru) or 'replace' (ganti seluruh grid)
+    - If ID column not found, automatically sorts top-left to bottom-right and names GRID_01, GRID_02, etc.
     """
     import tempfile, zipfile, os, shutil
     import geopandas as gpd
@@ -353,13 +357,19 @@ async def import_custom_grid(
             detail="Format file tidak didukung. Harap unggah Shapefile (.zip) atau GeoJSON (.geojson / .json)"
         )
 
+    if filename.endswith('.shp'):
+        raise HTTPException(
+            status_code=400,
+            detail="File Shapefile (.shp) membutuhkan file pendamping (.shx, .dbf, dan .prj). Harap gabungkan dalam file arsip .zip (misal: kalimantan_tiles.zip) atau gunakan file .geojson."
+        )
+
     # Parse years
     try:
         years = [int(y.strip()) for y in years_str.split(',') if y.strip()]
         if not years:
-            years = [2017, 2021, 2025]
+            years = [2026, 2017]
     except Exception:
-        years = [2017, 2021, 2025]
+        years = [2026, 2017]
 
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_file_path = os.path.join(tmpdir, file.filename)
@@ -408,13 +418,14 @@ async def import_custom_grid(
         target_area = None
         if study_area_id:
             target_area = db.query(StudyArea).filter(StudyArea.id == study_area_id).first()
+
+        total_bounds = gdf.total_bounds # minx, miny, maxx, maxy
+        center_lon = float((total_bounds[0] + total_bounds[2]) / 2.0)
+        center_lat = float((total_bounds[1] + total_bounds[3]) / 2.0)
             
         if not target_area:
             base_name = os.path.splitext(file.filename)[0].replace('_', ' ')
             proj_name = new_project_name or f"Proyek Custom ({base_name})"
-            total_bounds = gdf.total_bounds # minx, miny, maxx, maxy
-            center_lon = float((total_bounds[0] + total_bounds[2]) / 2.0)
-            center_lat = float((total_bounds[1] + total_bounds[3]) / 2.0)
             
             target_area = StudyArea(
                 name=proj_name,
@@ -426,18 +437,54 @@ async def import_custom_grid(
             db.add(target_area)
             db.commit()
             db.refresh(target_area)
+        else:
+            # If replacing existing project, delete old tasks and update coordinates
+            if import_mode == "replace":
+                db.query(TaskGrid).filter(TaskGrid.study_area_id == target_area.id).delete()
+                target_area.center_lat = center_lat
+                target_area.center_lon = center_lon
+                db.commit()
 
-        # Detect grid code column if not provided
-        code_col = grid_id_col
-        if not code_col or code_col not in gdf.columns:
-            candidates = ['grid_code', 'grid_id', 'id', 'kode', 'kode_grid', 'name', 'nama', 'grid', 'fid']
-            for c in candidates:
-                for col in gdf.columns:
-                    if col.lower() == c:
-                        code_col = col
+        # Detect grid code column if requested or automatically
+        code_col = None
+        is_auto_requested = bool(grid_id_col and grid_id_col.strip().upper() == "AUTO")
+        
+        if not is_auto_requested:
+            if grid_id_col and grid_id_col.strip() in gdf.columns:
+                code_col = grid_id_col.strip()
+            elif not grid_id_col or not grid_id_col.strip():
+                # Auto-detect candidates
+                candidates = ['tile_id', 'tile', 'grid_code', 'grid_id', 'id', 'kode', 'kode_grid', 'name', 'nama', 'grid', 'fid']
+                for c in candidates:
+                    for col in gdf.columns:
+                        if col.lower() == c:
+                            code_col = col
+                            break
+                    if code_col:
                         break
-                if code_col:
-                    break
+
+        # If no ID column found or user requested AUTO:
+        # Spatially sort features from top-left (North-West) to bottom-right (South-East)
+        digits = max(2, len(str(len(gdf))))
+        if not code_col or code_col not in gdf.columns:
+            step_est = (gdf.bounds['maxy'] - gdf.bounds['miny']).median()
+            gdf['_centroid_y'] = gdf.geometry.centroid.y
+            gdf['_centroid_x'] = gdf.geometry.centroid.x
+            if step_est and step_est > 0:
+                gdf['_row_key'] = (gdf['_centroid_y'] / (step_est * 0.9)).round()
+                gdf = gdf.sort_values(by=['_row_key', '_centroid_x'], ascending=[False, True]).reset_index(drop=True)
+            else:
+                gdf = gdf.sort_values(by=['_centroid_y', '_centroid_x'], ascending=[False, True]).reset_index(drop=True)
+
+        # Fetch existing codes globally and for this project to prevent unique constraint collisions
+        global_codes = set(
+            row[0] for row in db.query(TaskGrid.grid_code).all()
+        )
+        project_codes = set(
+            row[0] for row in db.query(TaskGrid.grid_code)
+            .filter(TaskGrid.study_area_id == target_area.id)
+            .all()
+        )
 
         created_tasks = []
         for idx, row in gdf.iterrows():
@@ -451,19 +498,25 @@ async def import_custom_grid(
             if code_col and code_col in row and str(row[code_col]).strip():
                 raw_code = str(row[code_col]).strip().replace(' ', '_')
             else:
-                raw_code = f"GRID_{idx+1:03d}"
+                raw_code = f"GRID_{idx+1:0{digits}d}"
                 
             geom_json = mapping(geom)
             
             for yr in years:
                 grid_code_yr = f"{raw_code}_{yr}"
-                existing = db.query(TaskGrid).filter(
-                    TaskGrid.study_area_id == target_area.id,
-                    TaskGrid.grid_code == grid_code_yr
-                ).first()
                 
-                if existing:
+                # If already in this project, skip (in append mode)
+                if grid_code_yr in project_codes:
                     continue
+
+                # If this code belongs to another project, add project prefix to guarantee global uniqueness
+                if grid_code_yr in global_codes:
+                    grid_code_yr = f"P{target_area.id}_{grid_code_yr}"
+                    if grid_code_yr in global_codes:
+                        continue
+
+                project_codes.add(grid_code_yr)
+                global_codes.add(grid_code_yr)
                     
                 task = TaskGrid(
                     grid_code=grid_code_yr,
@@ -480,14 +533,16 @@ async def import_custom_grid(
                 created_tasks.append(task)
 
         db.commit()
+        mode_label = "Ganti Total (Replace)" if import_mode == "replace" else "Tambah (Append)"
         return {
-            "message": f"Berhasil mengimpor {len(gdf)} grid menjadi {len(created_tasks)} tugas!",
+            "message": f"Berhasil mengimpor {len(gdf)} grid menjadi {len(created_tasks)} tugas ({mode_label})!",
             "study_area_id": target_area.id,
             "study_area_name": target_area.name,
             "feature_count": len(gdf),
             "created_tasks_count": len(created_tasks),
+            "import_mode": import_mode,
             "years": years,
-            "columns": [c for c in gdf.columns if c != 'geometry']
+            "columns": [c for c in gdf.columns if not c.startswith('_') and c != 'geometry']
         }
 
 

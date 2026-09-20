@@ -154,6 +154,10 @@ export default {
 
   // Dynamic Sentinel-2 COG Raster Layer (2025, 2022, 2018+)
   getRasterYears: () => api.get('/raster/years'),
+  getRasterPackages: () => api.get('/raster/packages'),
+  uploadRasterZip: (formData) => api.post('/raster/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
   getGridRasterInfo: (gridCode) => api.get(`/raster/info/${gridCode}`),
   getGridRasterTileUrl: (year, gridCode, mode = 'rgb', gamma = 1.0) =>
     `${getBaseUrl()}/raster/tiles/${year}/${gridCode}/{z}/{x}/{y}.png?mode=${mode}&gamma=${gamma}`,

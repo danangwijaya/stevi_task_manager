@@ -6,6 +6,7 @@
 # MUST NOT be committed to Git. Transfer directly to VPS via rsync/scp.
 backend/data/raster/
 data/raster/
+backend/data/vector/kalimantan_tiles/
 *.tif
 *.tiff
 *.aux.xml

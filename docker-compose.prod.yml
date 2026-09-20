@@ -39,8 +39,8 @@ services:
         condition: service_healthy
     volumes:
       - exports_data:/app/exports
-      - ./backend/data/raster:/app/data/raster:ro
-      - ./backend/data/vector:/app/data/vector:ro
+      - ./backend/data/raster:/app/data/raster
+      - ./backend/data/vector:/app/data/vector
 
   # Frontend: Vue 3 + Nginx Reverse Proxy
   frontend:

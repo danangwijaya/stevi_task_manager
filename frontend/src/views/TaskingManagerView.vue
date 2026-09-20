@@ -106,32 +106,13 @@
                 Semua
               </button>
               <button
-                @click="switchYear(2025)"
+                v-for="yr in availableYears"
+                :key="yr"
+                @click="switchYear(yr)"
                 class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
-                :class="selectedYear === 2025 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
+                :class="selectedYear === yr ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
               >
-                2025
-              </button>
-              <button
-                @click="switchYear(2022)"
-                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
-                :class="selectedYear === 2022 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
-              >
-                2022
-              </button>
-              <button
-                @click="switchYear(2018)"
-                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
-                :class="selectedYear === 2018 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
-              >
-                2018
-              </button>
-              <button
-                @click="switchYear(2017)"
-                class="px-2 py-0.5 text-xs font-bold rounded-md transition-colors cursor-pointer"
-                :class="selectedYear === 2017 ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
-              >
-                2017
+                {{ yr }}
               </button>
             </div>
           </div>
@@ -391,7 +372,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import L from 'leaflet'
 import {
   Grid,
@@ -421,17 +402,36 @@ import { useTasksStore } from '../stores/tasks'
 import api from '../services/api'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const tasksStore = useTasksStore()
 
-const activeAreaId = ref(1)
-const selectedYear = ref(2025)
+const activeAreaId = ref(Number(route.query.area || route.query.project) || tasksStore.selectedArea || 1)
+const selectedYear = ref(2026)
 const selectedTask = ref(null)
 const actionLoading = ref(false)
 
 const activeProject = computed(() => {
   return tasksStore.projects.find(p => p.id === activeAreaId.value)
 })
+
+const availableYears = computed(() => {
+  if (activeProject.value?.available_years && activeProject.value.available_years.length > 0) {
+    return activeProject.value.available_years
+  }
+  return [2026, 2025, 2022, 2018, 2017]
+})
+
+const syncYearForActiveProject = () => {
+  const years = availableYears.value
+  if (years && years.length > 0) {
+    if (selectedYear.value !== null && !years.includes(selectedYear.value)) {
+      selectedYear.value = years[0]
+    } else if (selectedYear.value === undefined) {
+      selectedYear.value = years[0]
+    }
+  }
+}
 
 const showResetModal = ref(false)
 const resettingActiveProject = ref(false)
@@ -452,21 +452,20 @@ async function executeResetActiveProject() {
   }
 }
 
-// Search & Filter State
-const searchQuery = ref('')
-const searchFeedback = ref('')
+// Filter Status Pills
 const activeStatusFilter = ref('ALL')
-
 const filterPills = [
-  { id: 'ALL', label: 'Semua', icon: Layers },
-  { id: 'MY_TASKS', label: 'Grid Saya', icon: UserCheck },
-  { id: 'REVISION_NEEDED', label: 'Perlu Revisi', icon: AlertTriangle },
-  { id: 'UNASSIGNED', label: 'Tersedia', icon: CheckCircle2 },
-  { id: 'IN_PROGRESS', label: 'Dikerjakan', icon: Loader2 },
-  { id: 'SUBMITTED', label: 'Review', icon: Clock },
-  { id: 'APPROVED', label: 'Disetujui', icon: ShieldCheck },
+  { id: 'ALL', label: 'Semua Status', icon: Layers },
+  { id: 'MY_TASKS', label: 'Tugas Saya', icon: UserCheck },
+  { id: 'UNASSIGNED', label: 'Tersedia', icon: LockOpen },
+  { id: 'ASSIGNED', label: 'Dikerjakan', icon: Clock },
+  { id: 'SUBMITTED', label: 'Review QC', icon: ClipboardCheck },
+  { id: 'APPROVED', label: 'Disetujui', icon: CheckCircle2 },
+  { id: 'REVISION_NEEDED', label: 'Perlu Revisi', icon: AlertTriangle }
 ]
 
+const searchQuery = ref('')
+const searchFeedback = ref('')
 
 let map = null
 let gridLayerGroup = null
@@ -498,13 +497,23 @@ const filteredTasks = computed(() => {
 
 onMounted(async () => {
   await tasksStore.fetchProjects()
-  if (tasksStore.projects.length > 0 && !tasksStore.projects.some(p => p.id === activeAreaId.value)) {
+  
+  const queryArea = parseInt(route.query.area || route.query.project)
+  if (queryArea && tasksStore.projects.some(p => p.id === queryArea)) {
+    activeAreaId.value = queryArea
+  } else if (tasksStore.selectedArea && tasksStore.projects.some(p => p.id === tasksStore.selectedArea)) {
+    activeAreaId.value = tasksStore.selectedArea
+  } else if (tasksStore.projects.length > 0 && !tasksStore.projects.some(p => p.id === activeAreaId.value)) {
     activeAreaId.value = tasksStore.projects[0].id
   }
+
+  // Auto-sync year based on active project available years
+  syncYearForActiveProject()
+
   await tasksStore.fetchStats()
-  await loadTasksForArea()
   await nextTick()
   initMap()
+  await loadTasksForArea()
 })
 
 onUnmounted(() => {
@@ -519,13 +528,26 @@ const loadTasksForArea = async () => {
   tasksStore.selectedYear = selectedYear.value
   await tasksStore.fetchTasks()
   renderGridTilesOnMap()
+  if (map && gridLayerGroup && gridLayerGroup.getLayers().length > 0) {
+    const b = gridLayerGroup.getBounds()
+    if (b.isValid()) {
+      map.fitBounds(b, { padding: [25, 25], maxZoom: 14 })
+    }
+  }
 }
 
 const onProjectSelectChange = async () => {
   selectedTask.value = null
   const selectedProj = tasksStore.projects.find(p => p.id === activeAreaId.value)
+  syncYearForActiveProject()
+  
   await loadTasksForArea()
-  if (map && selectedProj) {
+  if (map && gridLayerGroup && gridLayerGroup.getLayers().length > 0) {
+    const b = gridLayerGroup.getBounds()
+    if (b.isValid()) {
+      map.fitBounds(b, { padding: [25, 25], maxZoom: 14 })
+    }
+  } else if (map && selectedProj) {
     map.flyTo([selectedProj.center_lat, selectedProj.center_lon], selectedProj.default_zoom || 8, { duration: 1.2 })
   }
 }
@@ -578,7 +600,8 @@ const initMap = () => {
   map = L.map('hot-map-container', {
     center: [centerLat, centerLon],
     zoom: zoom,
-    zoomControl: false
+    zoomControl: false,
+    preferCanvas: true
   })
 
   L.control.zoom({ position: 'bottomleft' }).addTo(map)
@@ -589,14 +612,22 @@ const initMap = () => {
     attribution: 'Satellite Imagery © Esri'
   }).addTo(map)
 
-  // Local Sentinel-2 COG Mosaic Layer (2025 10m)
-  L.tileLayer(api.getMosaicRasterTileUrl(2025, 'rgb'), {
-    maxZoom: 18,
-    attribution: 'Sentinel-2 Sumbar (2025) 10m COG'
-  }).addTo(map)
+  // Local Sentinel-2 COG Mosaic Layer (Only active for Sumbar / area 1)
+  if (activeAreaId.value === 1) {
+    L.tileLayer(api.getMosaicRasterTileUrl(2025, 'rgb'), {
+      maxZoom: 18,
+      attribution: 'Sentinel-2 Sumbar (2025) 10m COG'
+    }).addTo(map)
+  }
 
   gridLayerGroup = L.featureGroup().addTo(map)
   renderGridTilesOnMap()
+  if (gridLayerGroup.getLayers().length > 0) {
+    const b = gridLayerGroup.getBounds()
+    if (b.isValid()) {
+      map.fitBounds(b, { padding: [25, 25], maxZoom: 14 })
+    }
+  }
 }
 
 const highlightTaskOnMap = (task) => {
