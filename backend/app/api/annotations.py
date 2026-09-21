@@ -107,6 +107,7 @@ def get_annotations_overview(
             "task_id": grid.id,
             "grid_code": grid.grid_code,
             "year": grid.year,
+            "study_area_id": grid.study_area_id,
             "study_area_name": grid.study_area.name if grid.study_area else "",
             "status": grid.status,
             "assigned_user_id": grid.assigned_user_id,
@@ -115,6 +116,10 @@ def get_annotations_overview(
             "assigned_user_nim": grid.assignee.nim_nip if grid.assignee else "",
             "annotation_count": len(anns),
             "total_area_ha": round(grid_sqm / 10000.0, 2),
+            "min_lat": grid.min_lat,
+            "min_lon": grid.min_lon,
+            "max_lat": grid.max_lat,
+            "max_lon": grid.max_lon,
             "bounds": [[grid.min_lat, grid.min_lon], [grid.max_lat, grid.max_lon]],
             "center": [(grid.min_lat + grid.max_lat)/2.0, (grid.min_lon + grid.max_lon)/2.0],
             "classes": sorted(list(grid_classes.values()), key=lambda x: x["count"], reverse=True)

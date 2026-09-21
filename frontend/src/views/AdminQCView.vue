@@ -1043,18 +1043,65 @@ const setQcYear = async (yr) => {
 
 // All digitized grids (merged from overviewData.by_grid and tasksStore)
 const allDigitizedGrids = computed(() => {
+  const byGridMap = new Map()
+  if (overviewData.value.by_grid) {
+    overviewData.value.by_grid.forEach(g => {
+      byGridMap.set(g.task_id || g.id, g)
+    })
+  }
+
+  const pId = selectedProjectId.value ? Number(selectedProjectId.value) : null
+  const targetYr = selectedYear.value !== 'ALL' ? Number(selectedYear.value) : null
+
   let list = []
-  if (overviewData.value.by_grid && overviewData.value.by_grid.length > 0) {
-    list = overviewData.value.by_grid
-  } else {
-    list = tasksStore.tasks.filter(t => (t.annotation_count || 0) > 0 || ['SUBMITTED', 'REVISION_NEEDED', 'APPROVED'].includes(t.status))
+  if (tasksStore.tasks && tasksStore.tasks.length > 0) {
+    tasksStore.tasks.forEach(t => {
+      const gOverview = byGridMap.get(t.id)
+      list.push({
+        task_id: t.id,
+        id: t.id,
+        grid_code: t.grid_code,
+        year: t.year,
+        study_area_id: t.study_area_id,
+        study_area_name: t.study_area_name,
+        status: t.status,
+        assigned_user_id: t.assigned_user_id,
+        assigned_user_name: t.assigned_user_name || (t.assignee?.full_name) || 'Belum Diambil',
+        annotation_count: gOverview?.annotation_count != null ? gOverview.annotation_count : (t.annotation_count || 0),
+        total_area_ha: gOverview?.total_area_ha || 0,
+        min_lat: t.min_lat,
+        min_lon: t.min_lon,
+        max_lat: t.max_lat,
+        max_lon: t.max_lon,
+        bounds: t.min_lat != null ? [[t.min_lat, t.min_lon], [t.max_lat, t.max_lon]] : (gOverview?.bounds || null),
+        classes: gOverview?.classes || []
+      })
+    })
+  } else if (overviewData.value.by_grid) {
+    list = [...overviewData.value.by_grid]
   }
-  if (selectedProjectId.value) {
-    list = list.filter(g => g.study_area_id === selectedProjectId.value)
+
+  if (pId) {
+    list = list.filter(g => {
+      const aId = g.study_area_id != null ? Number(g.study_area_id) : null
+      return aId != null ? aId === pId : true
+    })
   }
-  if (selectedYear.value !== 'ALL') {
-    list = list.filter(g => g.year === selectedYear.value)
+
+  if (targetYr != null) {
+    list = list.filter(g => Number(g.year) === targetYr)
   }
+
+  // Prioritas grid yang memiliki digitasi / status SUBMITTED / REVISION di urutan teratas
+  list.sort((a, b) => {
+    const aAnns = a.annotation_count || 0
+    const bAnns = b.annotation_count || 0
+    if (bAnns !== aAnns) return bAnns - aAnns
+    if (a.status === 'SUBMITTED' && b.status !== 'SUBMITTED') return -1
+    if (b.status === 'SUBMITTED' && a.status !== 'SUBMITTED') return 1
+    return (a.grid_code || '').localeCompare(b.grid_code || '')
+  })
+
   return list
 })
 
@@ -1115,6 +1162,9 @@ onMounted(async () => {
       userList.value = await authStore.fetchAllUsers()
     } catch (_) {}
   }
+
+  await nextTick()
+  ensureMapInitialized()
   await refreshAllData()
 })
 
@@ -1128,15 +1178,20 @@ onUnmounted(() => {
 const refreshAllData = async () => {
   loadingTasks.value = true
   loadingOverview.value = true
-  const yrParam = selectedYear.value === 'ALL' ? null : selectedYear.value
+  const yrParam = selectedYear.value === 'ALL' ? null : Number(selectedYear.value)
   try {
     tasksStore.selectedYear = yrParam
-    tasksStore.selectedArea = selectedProjectId.value
+    tasksStore.selectedArea = selectedProjectId.value ? Number(selectedProjectId.value) : null
+    tasksStore.selectedStatus = null
+    tasksStore.filterMyTasks = false
     await Promise.all([
       tasksStore.fetchTasks(),
       loadOverviewData(yrParam),
       loadMosaicFeatures(yrParam)
     ])
+
+    await nextTick()
+    ensureMapInitialized()
 
     // Update QC tile layer to selected year if map ready
     const tileYr = yrParam || selectedTask.value?.year || 2025
@@ -1150,6 +1205,8 @@ const refreshAllData = async () => {
       const stillInList = displayGridList.value.find(g => (g.task_id || g.id) === curId)
       if (!stillInList) {
         await selectTaskByGridItem(displayGridList.value[0])
+      } else {
+        await selectTaskByGridItem(stillInList)
       }
     } else {
       selectedTask.value = null
@@ -1158,6 +1215,12 @@ const refreshAllData = async () => {
       if (qcGridBoundingLayer) {
         qcMap.removeLayer(qcGridBoundingLayer)
         qcGridBoundingLayer = null
+      }
+      if (activeProject.value && qcMap) {
+        qcMap.setView(
+          [activeProject.value.center_lat, activeProject.value.center_lon],
+          activeProject.value.default_zoom || 9
+        )
       }
     }
   } finally {
@@ -1246,18 +1309,41 @@ const selectTask = async (task) => {
 const initOrUpdateQCMap = (task, features) => {
   ensureMapInitialized()
 
-  updateQCTileLayer(task.year || 2025)
+  const tileYr = task.year || (selectedYear.value !== 'ALL' ? Number(selectedYear.value) : 2025)
+  updateQCTileLayer(tileYr)
+
+  // Extract coordinates safely
+  let minLat = task.min_lat
+  let minLon = task.min_lon
+  let maxLat = task.max_lat
+  let maxLon = task.max_lon
+
+  if ((minLat == null || isNaN(minLat)) && task.bounds && task.bounds.length === 2) {
+    minLat = task.bounds[0][0]
+    minLon = task.bounds[0][1]
+    maxLat = task.bounds[1][0]
+    maxLon = task.bounds[1][1]
+  }
 
   // Draw Grid Bounding Box
-  if (qcGridBoundingLayer) qcMap.removeLayer(qcGridBoundingLayer)
-  const bounds = [[task.min_lat, task.min_lon], [task.max_lat, task.max_lon]]
-  qcGridBoundingLayer = L.rectangle(bounds, {
-    color: '#ffffff',
-    weight: 2.5,
-    dashArray: '5, 5',
-    fillOpacity: 0.0,
-    interactive: false
-  }).addTo(qcMap)
+  if (qcGridBoundingLayer && qcMap) {
+    qcMap.removeLayer(qcGridBoundingLayer)
+    qcGridBoundingLayer = null
+  }
+
+  let gridBounds = null
+  if (minLat != null && minLon != null && maxLat != null && maxLon != null && !isNaN(minLat) && !isNaN(minLon)) {
+    gridBounds = [[minLat, minLon], [maxLat, maxLon]]
+    qcGridBoundingLayer = L.rectangle(gridBounds, {
+      color: '#ffffff',
+      weight: 2.5,
+      dashArray: '5, 5',
+      fillOpacity: 0.0,
+      interactive: false
+    }).addTo(qcMap)
+
+    qcMap.fitBounds(gridBounds, { padding: [30, 30] })
+  }
 
   // Render Polygons for active grid
   qcFeatureGroup.clearLayers()
@@ -1306,7 +1392,9 @@ const initOrUpdateQCMap = (task, features) => {
   // Render context polygons from other grids if enabled
   renderContextPolygons(task.id)
 
-  qcMap.fitBounds(bounds, { padding: [30, 30] })
+  if (gridBounds && qcMap) {
+    qcMap.fitBounds(gridBounds, { padding: [30, 30] })
+  }
 }
 
 const renderContextPolygons = (currentTaskId) => {
@@ -1452,9 +1540,13 @@ const ensureMapInitialized = () => {
     const container = document.getElementById('qc-map-container')
     if (!container) return
 
+    const centerLat = activeProject.value?.center_lat || -0.75
+    const centerLon = activeProject.value?.center_lon || 100.5
+    const zoom = activeProject.value?.default_zoom || 9
+
     qcMap = L.map('qc-map-container', {
-      center: [-0.947, 100.370],
-      zoom: 12,
+      center: [centerLat, centerLon],
+      zoom: zoom,
       zoomControl: false
     })
 
@@ -1470,14 +1562,31 @@ const ensureMapInitialized = () => {
     qcContextFeatureGroup = L.featureGroup().addTo(qcMap)
     // Primary layer group (foreground)
     qcFeatureGroup = L.featureGroup().addTo(qcMap)
+
+    const tileYr = selectedYear.value !== 'ALL' ? Number(selectedYear.value) : 2025
+    updateQCTileLayer(tileYr)
   }
 }
 
 const fitMapBounds = () => {
   if (!qcMap) return
   if (viewScope.value === 'single' && selectedTask.value) {
-    const bounds = [[selectedTask.value.min_lat, selectedTask.value.min_lon], [selectedTask.value.max_lat, selectedTask.value.max_lon]]
-    qcMap.fitBounds(bounds, { padding: [30, 30] })
+    let minLat = selectedTask.value.min_lat
+    let minLon = selectedTask.value.min_lon
+    let maxLat = selectedTask.value.max_lat
+    let maxLon = selectedTask.value.max_lon
+
+    if ((minLat == null || isNaN(minLat)) && selectedTask.value.bounds && selectedTask.value.bounds.length === 2) {
+      minLat = selectedTask.value.bounds[0][0]
+      minLon = selectedTask.value.bounds[0][1]
+      maxLat = selectedTask.value.bounds[1][0]
+      maxLon = selectedTask.value.bounds[1][1]
+    }
+
+    if (minLat != null && minLon != null && !isNaN(minLat) && !isNaN(minLon)) {
+      const bounds = [[minLat, minLon], [maxLat, maxLon]]
+      qcMap.fitBounds(bounds, { padding: [30, 30] })
+    }
   } else if (qcFeatureGroup && qcFeatureGroup.getLayers().length > 0) {
     qcMap.fitBounds(qcFeatureGroup.getBounds(), { padding: [30, 30] })
   }
