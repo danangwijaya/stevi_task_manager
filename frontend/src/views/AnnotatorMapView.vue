@@ -483,17 +483,6 @@
               <span class="text-[11px]">Edit Titik</span>
             </button>
 
-            <!-- Tool: Delete Polygon -->
-            <button
-              @click="setDigitizeMode('delete')"
-              class="p-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer text-left"
-              :class="activeTool === 'delete' ? 'bg-rose-100 text-rose-700 border border-rose-300' : 'text-slate-700 hover:bg-slate-100'"
-              title="Hapus Poligon yang Diklik"
-            >
-              <Trash2 :size="15" />
-              <span class="text-[11px]">Hapus Poligon</span>
-            </button>
-
             <!-- Quick Undo & Redo in Toolbox -->
             <div class="grid grid-cols-2 gap-1 pt-0.5">
               <button
@@ -1122,20 +1111,13 @@
           </div>
         </div>
 
-        <div class="flex items-center gap-2 pt-1 border-t border-indigo-200/60">
-          <button
-            @click="deleteClickedPolygon"
-            class="flex-1 py-1 px-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer"
-          >
-            <Trash2 :size="12" />
-            <span>Hapus Poligon</span>
-          </button>
+        <div class="pt-1 border-t border-indigo-200/60">
           <button
             @click="flyToFeature(clickedFeatureIdx)"
-            class="py-1 px-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer"
+            class="w-full py-1.5 px-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
           >
             <Crosshair :size="12" />
-            <span>Zoom</span>
+            <span>Zoom ke Poligon Ini</span>
           </button>
         </div>
       </div>
@@ -2361,8 +2343,8 @@ const setDigitizeMode = (mode, force = false) => {
       break
 
     case 'delete':
-      showToast('🗑️ Mode Hapus: Klik poligon yang ingin dihapus')
-      map.pm.enableGlobalRemovalMode()
+      showToast('🛡️ Fitur Hapus Poligon dinonaktifkan untuk mencegah lubang pada tutupan lahan. Gunakan Gabung Poligon atau Ubah Kelas.')
+      activeTool.value = null
       break
 
     case 'merge':
@@ -2620,24 +2602,7 @@ const reassignClassToClickedPolygon = async (cls) => {
 }
 
 const deleteClickedPolygon = () => {
-  if (clickedFeatureIdx.value === null || !featureGroup) return
-  
-  let layerIdx = 0
-  let targetLayer = null
-  featureGroup.eachLayer((layer) => {
-    if (layerIdx === clickedFeatureIdx.value) {
-      targetLayer = layer
-    }
-    layerIdx++
-  })
-
-  if (targetLayer) {
-    featureGroup.removeLayer(targetLayer)
-    clickedFeatureIdx.value = null
-    syncFeaturesFromMap()
-    pushHistory()
-    showToast('Poligon dihapus')
-  }
+  showToast('🛡️ Fitur Hapus Poligon dinonaktifkan untuk mencegah lubang pada tutupan lahan. Gunakan Gabung Poligon atau Ubah Kelas.')
 }
 
 const selectFeatureFromList = (idx) => {
