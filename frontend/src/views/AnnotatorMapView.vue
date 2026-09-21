@@ -483,6 +483,17 @@
               <span class="text-[11px]">Edit Titik</span>
             </button>
 
+            <!-- Tool: Delete Polygon -->
+            <button
+              @click="setDigitizeMode('delete')"
+              class="p-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer text-left"
+              :class="activeTool === 'delete' ? 'bg-rose-100 text-rose-700 border border-rose-300 shadow-xs' : 'text-slate-700 hover:bg-slate-100'"
+              title="Hapus Poligon"
+            >
+              <Trash2 :size="15" />
+              <span class="text-[11px]">Hapus</span>
+            </button>
+
             <!-- Quick Undo & Redo in Toolbox -->
             <div class="grid grid-cols-2 gap-1 pt-0.5">
               <button
@@ -1111,13 +1122,23 @@
           </div>
         </div>
 
-        <div class="pt-1 border-t border-indigo-200/60">
+        <div class="flex items-center gap-2 pt-1 border-t border-indigo-200/60">
+          <button
+            @click="handleSmartDeleteSelected"
+            :disabled="features.length <= 1"
+            class="flex-1 py-1.5 px-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Hapus poligon ini"
+          >
+            <Trash2 :size="12" />
+            <span>Hapus</span>
+          </button>
           <button
             @click="flyToFeature(clickedFeatureIdx)"
-            class="w-full py-1.5 px-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+            class="py-1.5 px-3 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+            title="Pusatkan peta ke poligon ini"
           >
             <Crosshair :size="12" />
-            <span>Zoom ke Poligon Ini</span>
+            <span>Zoom</span>
           </button>
         </div>
       </div>
@@ -2124,14 +2145,22 @@ const initMap = () => {
     pushHistory()
   })
 
-  map.on('pm:edit', () => {
-    syncFeaturesFromMap()
-    pushHistory()
+  map.on('pm:edit', (e) => {
+    if (e && e.layer) {
+      applyAutoClipAndHealOnEdit(e.layer)
+    } else {
+      syncFeaturesFromMap()
+      pushHistory()
+    }
   })
 
-  map.on('pm:dragend', () => {
-    syncFeaturesFromMap()
-    pushHistory()
+  map.on('pm:dragend', (e) => {
+    if (e && e.layer) {
+      applyAutoClipAndHealOnEdit(e.layer)
+    } else {
+      syncFeaturesFromMap()
+      pushHistory()
+    }
   })
 }
 
@@ -2338,13 +2367,23 @@ const setDigitizeMode = (mode, force = false) => {
       break
 
     case 'edit':
-      showToast('✋ Mode Edit Titik: Klik dan geser titik sudut poligon')
-      map.pm.enableGlobalEditMode()
+      showToast('✋ Mode Edit Titik (Auto-Clip Aktif): Geser titik sudut, batas tetangga otomatis menyesuaikan')
+      if (featureGroup) {
+        featureGroup.eachLayer(l => {
+          try {
+            l._preEditGeom = JSON.parse(JSON.stringify(l.toGeoJSON().geometry))
+          } catch (_) {}
+        })
+      }
+      map.pm.enableGlobalEditMode({
+        snappable: true,
+        snapDistance: 20,
+        allowSelfIntersection: false
+      })
       break
 
     case 'delete':
-      showToast('🛡️ Fitur Hapus Poligon dinonaktifkan untuk mencegah lubang pada tutupan lahan. Gunakan Gabung Poligon atau Ubah Kelas.')
-      activeTool.value = null
+      showToast('🗑️ Mode Hapus: Klik poligon yang ingin dihapus')
       break
 
     case 'merge':
@@ -2458,6 +2497,177 @@ const cancelMerge = () => {
   refreshMapStyles()
 }
 
+// ─── TOPOLOGICAL AUTO-CLIP & AUTO-HEAL ON EDIT ───────────
+let isAutoClipping = false
+
+const cleanSliversFromGeometry = (geom) => {
+  if (!geom) return null
+  if (geom.type === 'MultiPolygon') {
+    const validPolys = []
+    for (const polyCoords of geom.coordinates) {
+      try {
+        const p = turf.polygon(polyCoords)
+        if (turf.area(p) >= 0.1) {
+          validPolys.push(polyCoords)
+        }
+      } catch (_) {}
+    }
+    if (validPolys.length === 0) return null
+    if (validPolys.length === 1) {
+      return { type: 'Polygon', coordinates: validPolys[0] }
+    }
+    return { type: 'MultiPolygon', coordinates: validPolys }
+  }
+  return geom
+}
+
+const updateLayerGeometry = (layer, geom) => {
+  if (!layer || !geom) return
+  const cleanedGeom = cleanSliversFromGeometry(geom)
+  if (!cleanedGeom) return
+  const isMulti = cleanedGeom.type === 'MultiPolygon'
+  const latlngs = L.GeoJSON.coordsToLatLngs(cleanedGeom.coordinates, isMulti ? 2 : 1)
+  layer.setLatLngs(latlngs)
+  if (!layer.feature) {
+    layer.feature = layer.toGeoJSON()
+  }
+  layer.feature.geometry = JSON.parse(JSON.stringify(cleanedGeom))
+  try {
+    layer.feature.properties.area_sqm = turf.area(turf.feature(cleanedGeom))
+  } catch (_) {}
+  layer.redraw?.()
+}
+
+const applyAutoClipAndHealOnEdit = (editedLayer) => {
+  if (isAutoClipping || !editedLayer || !featureGroup) return
+  isAutoClipping = true
+
+  try {
+    let newFeat = editedLayer.toGeoJSON()
+    if (!newFeat || !newFeat.geometry) return
+
+    try {
+      newFeat = turf.cleanCoords(newFeat)
+    } catch (_) {}
+
+    const editedUiId = editedLayer._uiId || editedLayer.feature?._uiId
+    const oldGeom = editedLayer._preEditGeom || features.value.find(f => (f._uiId || f.id) === editedUiId)?.geometry
+
+    let oldPoly = null
+    if (oldGeom) {
+      try {
+        oldPoly = turf.cleanCoords(turf.feature(oldGeom))
+      } catch (_) {}
+    }
+    const newPoly = turf.cleanCoords(turf.feature(newFeat.geometry))
+
+    let anyModified = false
+    const layersToRemove = []
+
+    // 1. AUTO-CLIP OVERLAPS:
+    // When edited polygon expands over neighbor, clip that neighbor: neighbor = neighbor - newPoly
+    featureGroup.eachLayer((neighborLayer) => {
+      if (neighborLayer === editedLayer) return
+      const neighborUiId = neighborLayer._uiId || neighborLayer.feature?._uiId
+      if (neighborUiId && neighborUiId === editedUiId) return
+
+      const nFeat = neighborLayer.toGeoJSON()
+      if (!nFeat || !nFeat.geometry) return
+      let nPoly = null
+      try {
+        nPoly = turf.cleanCoords(turf.feature(nFeat.geometry))
+      } catch (_) {
+        return
+      }
+
+      try {
+        if (turf.booleanIntersects(nPoly, newPoly)) {
+          const inter = turf.intersect(turf.featureCollection([nPoly, newPoly]))
+          if (inter && turf.area(inter) > 0.05) {
+            const clipped = turf.difference(turf.featureCollection([nPoly, newPoly]))
+            if (clipped && clipped.geometry && turf.area(clipped) > 0.1) {
+              updateLayerGeometry(neighborLayer, clipped.geometry)
+              anyModified = true
+            } else {
+              layersToRemove.push(neighborLayer)
+              anyModified = true
+            }
+          }
+        }
+      } catch (clipErr) {
+        console.warn('Auto-clip error on neighbor:', clipErr)
+      }
+    })
+
+    layersToRemove.forEach(l => featureGroup.removeLayer(l))
+
+    // 2. AUTO-HEAL VOID / GAP (Anti-Bolong):
+    // When edited polygon shrinks/moves away, vacated area is absorbed by adjacent neighbor
+    if (oldPoly) {
+      try {
+        const vacated = turf.difference(turf.featureCollection([oldPoly, newPoly]))
+        if (vacated && vacated.geometry && turf.area(vacated) > 0.1) {
+          let bestNeighbor = null
+          let maxShared = -1
+
+          featureGroup.eachLayer((neighborLayer) => {
+            if (neighborLayer === editedLayer || layersToRemove.includes(neighborLayer)) return
+            const nFeat = neighborLayer.toGeoJSON()
+            if (!nFeat || !nFeat.geometry) return
+            let nPoly = null
+            try {
+              nPoly = turf.cleanCoords(turf.feature(nFeat.geometry))
+            } catch (_) {
+              return
+            }
+
+            try {
+              if (turf.booleanIntersects(vacated, nPoly) || turf.booleanTouches(vacated, nPoly)) {
+                const buffered = turf.buffer(vacated, 0.000005, { units: 'kilometers' })
+                if (buffered && turf.booleanIntersects(buffered, nPoly)) {
+                  const inter = turf.intersect(turf.featureCollection([buffered, nPoly]))
+                  const score = inter ? turf.area(inter) : 0
+                  if (score > maxShared) {
+                    maxShared = score
+                    bestNeighbor = neighborLayer
+                  }
+                }
+              }
+            } catch (_) {}
+          })
+
+          if (bestNeighbor) {
+            const bFeat = bestNeighbor.toGeoJSON()
+            const bPoly = turf.cleanCoords(turf.feature(bFeat.geometry))
+            const healed = turf.union(turf.featureCollection([bPoly, vacated]))
+            if (healed && healed.geometry) {
+              updateLayerGeometry(bestNeighbor, healed.geometry)
+              anyModified = true
+            }
+          }
+        }
+      } catch (healErr) {
+        console.warn('Auto-heal void error:', healErr)
+      }
+    }
+
+    // Set new baseline geometry
+    editedLayer._preEditGeom = JSON.parse(JSON.stringify(newFeat.geometry))
+
+    // Sync features and push undo snapshot
+    syncFeaturesFromMap()
+    pushHistory()
+
+    if (anyModified) {
+      showToast('🛡️ Auto-Clip: Batas poligon tetangga otomatis disesuaikan (anti-overlap & anti-bolong)!')
+    }
+  } catch (err) {
+    console.error('applyAutoClipAndHealOnEdit error:', err)
+  } finally {
+    isAutoClipping = false
+  }
+}
+
 // ─── INTERACTIVE POPUP & LAYER EVENTS ─────────────────────
 const bindLayerEvents = (layer) => {
   layer.off('click')
@@ -2490,12 +2700,23 @@ const bindLayerEvents = (layer) => {
       return
     }
 
-    // 2. Mode digitizing / pemotongan lain: biarkan Geoman menangani tanpa popup
+    // 2. Mode Hapus (Smart Delete / Serap Tetangga):
+    if (activeTool.value === 'delete') {
+      L.DomEvent.stopPropagation(e)
+      const idx = findFeatureIndexForLayer(layer)
+      const feat = idx >= 0 ? features.value[idx] : (layer.feature || layer.toGeoJSON())
+      if (feat) {
+        executeSmartDelete(feat, idx)
+      }
+      return
+    }
+
+    // 3. Mode digitizing / pemotongan lain: biarkan Geoman menangani tanpa popup
     if (activeTool.value !== null) {
       return
     }
 
-    // 3. Mode Pilih Poligon (Pointer / default select mode: activeTool === null):
+    // 4. Mode Pilih Poligon (Pointer / default select mode: activeTool === null):
     L.DomEvent.stopPropagation(e)
     const idx = findFeatureIndexForLayer(layer)
     if (idx < 0) return
@@ -2507,6 +2728,29 @@ const bindLayerEvents = (layer) => {
 
     // Open Interactive Popup on Polygon
     openClassPickerPopup(layer, feat, idx, e.latlng)
+  })
+
+  // Layer-level edit and marker drag hooks for Auto-Clip
+  layer.off('pm:markerdragstart')
+  layer.on('pm:markerdragstart', () => {
+    try {
+      layer._preEditGeom = JSON.parse(JSON.stringify(layer.toGeoJSON().geometry))
+    } catch (_) {}
+  })
+
+  layer.off('pm:edit')
+  layer.on('pm:edit', () => {
+    applyAutoClipAndHealOnEdit(layer)
+  })
+
+  layer.off('pm:vertexadded')
+  layer.on('pm:vertexadded', () => {
+    applyAutoClipAndHealOnEdit(layer)
+  })
+
+  layer.off('pm:vertexremoved')
+  layer.on('pm:vertexremoved', () => {
+    applyAutoClipAndHealOnEdit(layer)
   })
 }
 
@@ -2601,8 +2845,142 @@ const reassignClassToClickedPolygon = async (cls) => {
   }
 }
 
-const deleteClickedPolygon = () => {
-  showToast('🛡️ Fitur Hapus Poligon dinonaktifkan untuk mencegah lubang pada tutupan lahan. Gunakan Gabung Poligon atau Ubah Kelas.')
+const handleSmartDeleteSelected = () => {
+  if (clickedFeatureIdx.value === null) return
+  const feat = features.value[clickedFeatureIdx.value]
+  if (feat) {
+    executeSmartDelete(feat, clickedFeatureIdx.value)
+  }
+}
+
+const executeSmartDelete = async (targetFeat, targetIdx) => {
+  if (!selectedTaskId.value) return
+  if (features.value.length <= 1) {
+    alert('⚠️ Poligon ini adalah satu-satunya poligon di dalam grid tile.\n\nTidak dapat dihapus karena akan membuat seluruh grid kosong bolong!\nJika ingin mengganti tutupan lahan, silakan gunakan menu Ubah Kelas atau Potong Poligon.')
+    return
+  }
+
+  // Find neighbor candidates using Turf.js
+  const otherFeats = features.value.filter((f, i) => i !== targetIdx)
+  const targetPoly = targetFeat.type === 'Feature' ? targetFeat : turf.feature(targetFeat.geometry || targetFeat)
+
+  let bestNeighbor = null
+  let maxSharedScore = -1
+
+  for (const other of otherFeats) {
+    try {
+      const otherPoly = other.type === 'Feature' ? other : turf.feature(other.geometry || other)
+      
+      let sharedScore = 0
+      const isTouching = turf.booleanTouches(targetPoly, otherPoly)
+      const isOverlap = turf.booleanOverlap(targetPoly, otherPoly)
+      
+      if (isTouching || isOverlap) {
+        try {
+          const inter = turf.intersect(turf.featureCollection([targetPoly, otherPoly]))
+          if (inter) {
+            sharedScore = (inter.geometry && inter.geometry.type.includes('Line'))
+              ? turf.length(inter)
+              : turf.area(inter)
+          } else {
+            sharedScore = 1.0
+          }
+        } catch (_) {
+          sharedScore = 1.0
+        }
+      } else {
+        // Test with tiny buffer (~0.5m) to catch vertices touching with snapping tolerance
+        const buffered = turf.buffer(targetPoly, 0.000005, { units: 'kilometers' })
+        if (turf.booleanIntersects(buffered, otherPoly)) {
+          sharedScore = 0.1
+        }
+      }
+
+      if (sharedScore > maxSharedScore) {
+        maxSharedScore = sharedScore
+        bestNeighbor = other
+      }
+    } catch (e) {
+      console.warn('Neighbor check warning:', e)
+    }
+  }
+
+  // Fallback: if no direct touching neighbor detected due to precision, pick closest neighbor
+  if (!bestNeighbor && otherFeats.length > 0) {
+    let minDist = Infinity
+    for (const other of otherFeats) {
+      try {
+        const otherPoly = other.type === 'Feature' ? other : turf.feature(other.geometry || other)
+        const d = turf.distance(turf.centroid(targetPoly), turf.centroid(otherPoly))
+        if (d < minDist) {
+          minDist = d
+          bestNeighbor = other
+        }
+      } catch (_) {}
+    }
+  }
+
+  const neighborClassName = bestNeighbor?.properties?.class_name || 'Poligon Tetangga'
+  const targetClassName = targetFeat.properties?.class_name || 'Poligon'
+
+  const confirmed = confirm(
+    `Hapus poligon [${targetClassName}]?\n\n` +
+    `Areanya akan otomatis disatukan ke tetangga [${neighborClassName}] agar tidak berlubang.\n\n` +
+    `Lanjutkan?`
+  )
+  if (!confirmed) return
+
+  showToast(`Menghapus poligon [${targetClassName}]...`)
+
+  try {
+    const targetId = targetFeat.id || targetFeat.properties?.id
+    const neighborId = bestNeighbor?.id || bestNeighbor?.properties?.id
+    let backendSuccess = false
+
+    if (targetId && typeof targetId === 'number') {
+      try {
+        const res = await api.smartDeletePolygon(selectedTaskId.value, targetId, neighborId || null)
+        showToast(`✨ ${res.data?.message || 'Poligon berhasil dihapus!'}`)
+        backendSuccess = true
+        await loadTaskData(selectedTaskId.value, true)
+        pushHistory()
+      } catch (backendErr) {
+        console.warn('Backend smart delete failed, falling back to client-side turf:', backendErr)
+      }
+    }
+
+    if (!backendSuccess && bestNeighbor) {
+      // Client-side Turf union fallback
+      const otherPoly = bestNeighbor.type === 'Feature' ? bestNeighbor : turf.feature(bestNeighbor.geometry || bestNeighbor)
+      const unioned = turf.union(turf.featureCollection([otherPoly, targetPoly]))
+      if (!unioned) {
+        throw new Error('Gagal menyatukan geometri poligon.')
+      }
+
+      unioned.properties = { ...bestNeighbor.properties }
+      unioned._uiId = bestNeighbor._uiId || getFeatureUiId(bestNeighbor)
+
+      // Replace bestNeighbor with unioned, and remove targetFeat
+      const targetUiId = targetFeat._uiId || targetFeat.id || targetFeat.properties?.id
+      const neighborUiId = bestNeighbor._uiId || bestNeighbor.id || bestNeighbor.properties?.id
+
+      const newFeaturesList = features.value.filter(f => {
+        const uId = f._uiId || f.id || f.properties?.id
+        return uId !== targetUiId && uId !== neighborUiId
+      })
+      newFeaturesList.push(unioned)
+
+      await annotationsStore.saveGridAnnotations(selectedTaskId.value, newFeaturesList)
+      showToast(`✨ Poligon berhasil dihapus!`)
+      await loadTaskData(selectedTaskId.value, true)
+      pushHistory()
+    }
+  } catch (err) {
+    console.error('Delete error:', err)
+    alert(err.response?.data?.detail || err.message || 'Gagal menghapus poligon.')
+  } finally {
+    clickedFeatureIdx.value = null
+  }
 }
 
 const selectFeatureFromList = (idx) => {

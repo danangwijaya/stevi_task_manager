@@ -1164,3 +1164,126 @@ def merge_polygons_grid_alias(
     return merge_polygons(unified_req, db, current_user)
 
 
+class SmartDeleteRequest(BaseModel):
+    annotation_id: int
+    absorb_into_id: Optional[int] = None
+
+
+@router.post("/grid/{task_grid_id}/smart-delete")
+def smart_delete_polygon(
+    task_grid_id: int,
+    req: SmartDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Deletes a polygon by absorbing / merging it into an adjacent neighboring polygon,
+    ensuring no void/hole/gap is left behind in the land cover training dataset.
+    """
+    target = db.query(Annotation).filter(
+        Annotation.id == req.annotation_id,
+        Annotation.task_grid_id == task_grid_id
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Poligon target tidak ditemukan.")
+
+    other_annotations = db.query(Annotation).filter(
+        Annotation.task_grid_id == task_grid_id,
+        Annotation.id != target.id
+    ).all()
+
+    if not other_annotations:
+        raise HTTPException(
+            status_code=400,
+            detail="Ini adalah satu-satunya poligon di dalam grid. Poligon tunggal tidak dapat dihapus karena akan mengosongkan seluruh grid tile."
+        )
+
+    try:
+        t_poly = shape(json.loads(target.geom_geojson))
+        if not t_poly.is_valid:
+            t_poly = t_poly.buffer(0)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Geometri poligon target tidak valid: {str(e)}")
+
+    neighbor_candidates = []
+    for o in other_annotations:
+        try:
+            o_poly = shape(json.loads(o.geom_geojson))
+            if not o_poly.is_valid:
+                o_poly = o_poly.buffer(0)
+
+            # Check adjacency (touching or buffered intersection to handle micro gaps)
+            shared_boundary_len = 0.0
+            is_touching = t_poly.touches(o_poly) or t_poly.intersects(o_poly)
+            if is_touching:
+                inter = t_poly.intersection(o_poly)
+                shared_boundary_len = inter.length if inter.length > 0 else inter.area
+            else:
+                # Slight buffer for micro-precision gaps from snapping
+                buffered_t = t_poly.buffer(1e-6)
+                if buffered_t.intersects(o_poly):
+                    inter = buffered_t.intersection(o_poly)
+                    shared_boundary_len = inter.area
+
+            neighbor_candidates.append({
+                "annotation": o,
+                "geom": o_poly,
+                "shared_len": shared_boundary_len,
+                "distance": t_poly.distance(o_poly)
+            })
+        except Exception:
+            continue
+
+    if not neighbor_candidates:
+        raise HTTPException(status_code=400, detail="Tidak ditemukan poligon tetangga yang valid.")
+
+    chosen_neighbor = None
+    if req.absorb_into_id:
+        match = [c for c in neighbor_candidates if c["annotation"].id == req.absorb_into_id]
+        if match:
+            chosen_neighbor = match[0]
+
+    if not chosen_neighbor:
+        # Sort by longest shared boundary, then minimum distance
+        neighbor_candidates.sort(key=lambda x: (x["shared_len"], -x["distance"]), reverse=True)
+        chosen_neighbor = neighbor_candidates[0]
+
+    target_neighbor_ann = chosen_neighbor["annotation"]
+    neighbor_poly = chosen_neighbor["geom"]
+
+    # Union the two geometries
+    merged_geom = unary_union([neighbor_poly, t_poly])
+    merged_polys = _extract_polygons(merged_geom)
+
+    if not merged_polys:
+        raise HTTPException(status_code=500, detail="Gagal menggabungkan geometri poligon.")
+
+    # Delete the target polygon
+    db.delete(target)
+
+    # Update neighbor annotation with unioned geometry
+    main_poly = merged_polys[0]
+    area_sqm = main_poly.area * (111320.0 ** 2)
+    target_neighbor_ann.geom_geojson = json.dumps(mapping(main_poly))
+    target_neighbor_ann.area_sqm = area_sqm
+
+    # If unary_union split into multiple distinct parts (e.g. multi-polygon), add remaining
+    for extra_poly in merged_polys[1:]:
+        extra_area = extra_poly.area * (111320.0 ** 2)
+        db.add(Annotation(
+            task_grid_id=task_grid_id,
+            user_id=current_user.id,
+            class_id=target_neighbor_ann.class_id,
+            class_name=target_neighbor_ann.class_name,
+            geom_geojson=json.dumps(mapping(extra_poly)),
+            area_sqm=extra_area
+        ))
+
+    db.commit()
+    return {
+        "message": f"Poligon berhasil dihapus dan disatukan ke '{target_neighbor_ann.class_name}'!",
+        "absorbed_into_class": target_neighbor_ann.class_name,
+        "absorbed_into_id": target_neighbor_ann.id
+    }
+
+

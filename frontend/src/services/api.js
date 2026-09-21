@@ -120,6 +120,11 @@ export default {
       annotation_ids: annotationIds,
       target_class_id: targetClassId
     }),
+  smartDeletePolygon: (taskGridId, annotationId, absorbIntoId = null) =>
+    api.post(`/annotations/grid/${taskGridId}/smart-delete`, {
+      annotation_id: annotationId,
+      absorb_into_id: absorbIntoId
+    }),
   updateAnnotationClass: (annId, classId) =>
     api.put(`/annotations/${annId}/class`, { class_id: classId }),
 
