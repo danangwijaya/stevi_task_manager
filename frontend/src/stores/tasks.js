@@ -13,7 +13,8 @@ export const useTasksStore = defineStore('tasks', {
     selectedYear: 2025,
     selectedArea: null,
     selectedStatus: null,
-    filterMyTasks: false
+    filterMyTasks: false,
+    currentTaskReviewPins: []
   }),
 
   getters: {
@@ -162,6 +163,53 @@ export const useTasksStore = defineStore('tasks', {
         return response.data
       } catch (err) {
         console.error('Failed to reset project progress:', err)
+        throw err
+      }
+    },
+
+    async fetchReviewPins(taskId) {
+      try {
+        const response = await api.getTaskReviewPins(taskId)
+        this.currentTaskReviewPins = response.data || []
+        return this.currentTaskReviewPins
+      } catch (err) {
+        console.error('Failed to fetch review pins:', err)
+        return []
+      }
+    },
+
+    async createReviewPin(taskId, pinData) {
+      try {
+        const response = await api.createTaskReviewPin(taskId, pinData)
+        this.currentTaskReviewPins.push(response.data)
+        return response.data
+      } catch (err) {
+        console.error('Failed to create review pin:', err)
+        throw err
+      }
+    },
+
+    async updateReviewPin(taskId, pinId, updateData) {
+      try {
+        const response = await api.updateTaskReviewPin(taskId, pinId, updateData)
+        const idx = this.currentTaskReviewPins.findIndex(p => p.id === pinId)
+        if (idx !== -1) {
+          this.currentTaskReviewPins[idx] = response.data
+        }
+        return response.data
+      } catch (err) {
+        console.error('Failed to update review pin:', err)
+        throw err
+      }
+    },
+
+    async deleteReviewPin(taskId, pinId) {
+      try {
+        await api.deleteTaskReviewPin(taskId, pinId)
+        this.currentTaskReviewPins = this.currentTaskReviewPins.filter(p => p.id !== pinId)
+        return true
+      } catch (err) {
+        console.error('Failed to delete review pin:', err)
         throw err
       }
     }

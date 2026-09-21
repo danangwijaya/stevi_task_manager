@@ -87,6 +87,12 @@ export default {
     api.post(`/tasks/${taskId}/status`, { status, reviewer_notes: reviewerNotes }),
   getStatsSummary: () => api.get('/tasks/stats/summary'),
 
+  // Task Review Pins / Notes
+  getTaskReviewPins: (taskId) => api.get(`/tasks/${taskId}/review-pins`),
+  createTaskReviewPin: (taskId, data) => api.post(`/tasks/${taskId}/review-pins`, data),
+  updateTaskReviewPin: (taskId, pinId, data) => api.patch(`/tasks/${taskId}/review-pins/${pinId}`, data),
+  deleteTaskReviewPin: (taskId, pinId) => api.delete(`/tasks/${taskId}/review-pins/${pinId}`),
+
   // Annotations & Classes
   getClasses: () => api.get('/annotations/classes'),
   getAnnotationsOverview: (params) => api.get('/annotations/overview', { params }),

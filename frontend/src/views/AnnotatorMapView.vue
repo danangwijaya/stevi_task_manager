@@ -76,16 +76,82 @@
         </button>
       </div>
 
-      <!-- Revision Notes (if any) -->
+      <!-- General Task Revision Notes (if any) -->
       <div
         v-if="tasksStore.currentTask?.reviewer_notes && tasksStore.currentTask?.status === 'REVISION_NEEDED'"
         class="m-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-800 space-y-1 shadow-2xs"
       >
         <div class="font-bold flex items-center gap-1.5 text-rose-700">
           <AlertTriangle :size="14" />
-          <span>Catatan Revisi Reviewer:</span>
+          <span>Catatan Revisi Umum:</span>
         </div>
         <div class="text-[11px] text-rose-900/90 leading-tight italic">"{{ tasksStore.currentTask.reviewer_notes }}"</div>
+      </div>
+
+      <!-- Interactive Review Pins / Catatan Supervisi di Peta -->
+      <div
+        v-if="tasksStore.currentTaskReviewPins.length > 0"
+        class="m-3 p-3 bg-amber-50/90 border border-amber-200 rounded-2xl text-[11px] text-amber-900 space-y-2 shadow-2xs"
+      >
+        <div class="flex items-center justify-between font-bold text-amber-950">
+          <span class="flex items-center gap-1.5">
+            <MapPin :size="14" class="text-rose-600" />
+            <span>Catatan Supervisi ({{ tasksStore.currentTaskReviewPins.length }})</span>
+          </span>
+          <span
+            class="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold shadow-2xs"
+            :class="allPinsResolved ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-rose-100 text-rose-800 border border-rose-300 animate-pulse'"
+          >
+            {{ resolvedPinsCount }}/{{ tasksStore.currentTaskReviewPins.length }} Selesai
+          </span>
+        </div>
+
+        <div class="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+          <div
+            v-for="pin in tasksStore.currentTaskReviewPins"
+            :key="pin.id"
+            class="p-2.5 rounded-xl border text-xs flex flex-col gap-1.5 transition-all shadow-2xs"
+            :class="pin.status === 'RESOLVED' ? 'bg-emerald-50/70 border-emerald-200' : 'bg-white border-rose-200'"
+          >
+            <div class="flex items-center justify-between gap-1">
+              <span
+                class="font-bold flex items-center gap-1 text-[11px]"
+                :class="pin.status === 'RESOLVED' ? 'text-emerald-800' : 'text-rose-800'"
+              >
+                <CheckCircle2 v-if="pin.status === 'RESOLVED'" :size="12" class="text-emerald-600" />
+                <AlertTriangle v-else :size="12" class="text-rose-600" />
+                <span>{{ pin.status === 'RESOLVED' ? 'Selesai' : 'Perlu Diperbaiki' }}</span>
+              </span>
+              <button
+                @click="focusOnReviewPin(pin)"
+                class="px-2 py-0.5 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded text-[10px] font-bold text-slate-600 flex items-center gap-1 transition-colors cursor-pointer"
+                title="Arahkan peta ke titik ini"
+              >
+                <Focus :size="11" />
+                <span>Peta</span>
+              </button>
+            </div>
+
+            <p class="text-[11px] text-slate-800 italic leading-snug">"{{ pin.note }}"</p>
+
+            <div class="flex items-center justify-between pt-1 border-t border-slate-100">
+              <span class="text-[10px] text-slate-500 font-mono">
+                Oleh: {{ pin.reviewer_name || 'Supervisi' }}
+              </span>
+              <button
+                @click="togglePinResolved(pin)"
+                class="px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1"
+                :class="pin.status === 'RESOLVED'
+                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'"
+              >
+                <Check v-if="pin.status !== 'RESOLVED'" :size="11" />
+                <RotateCcw v-else :size="11" />
+                <span>{{ pin.status === 'RESOLVED' ? 'Batal Selesai' : 'Tandai Selesai' }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Workflow Guide -->
@@ -1478,7 +1544,10 @@ import {
   Contrast,
   Sliders,
   Sparkles,
-  RefreshCcw
+  RefreshCcw,
+  MapPin,
+  Focus,
+  RotateCcw
 } from 'lucide-vue-next'
 import * as turf from '@turf/turf'
 import { useAuthStore } from '../stores/auth'
@@ -2107,12 +2176,24 @@ let gridBoundingLayer = null
 let neighboringGridsLayer = null
 let neighborPolygonsLayer = null
 let featureGroup = null
+let reviewPinsLayerGroup = null
 const features = ref([])
 const outsideDimOpacity = ref(0.12) // Default lembut agar citra grid sebelah terlihat jernih
 const showNeighborPolygons = ref(false) // Default OFF agar kanvas bersih, mapper bisa aktifkan saat perlu edge-matching
 const neighborPolygonsOpacity = ref(0.4)
 const neighborFeaturesCount = ref(0)
 const isLoadingNeighbors = ref(false)
+
+// Review Pins (Catatan Supervisi / QC)
+const resolvedPinsCount = computed(() => {
+  const pins = tasksStore.currentTaskReviewPins || []
+  return pins.filter(p => p.status === 'RESOLVED').length
+})
+
+const allPinsResolved = computed(() => {
+  const pins = tasksStore.currentTaskReviewPins || []
+  return pins.length > 0 && pins.every(p => p.status === 'RESOLVED')
+})
 
 const updateOutsideMask = () => {
   if (focusMaskLayer) {
@@ -2546,6 +2627,8 @@ const initMap = () => {
 
   // Feature Group for actively drawn/editable polygons
   featureGroup = L.featureGroup().addTo(map)
+  // Review Pins Layer Group
+  reviewPinsLayerGroup = L.layerGroup().addTo(map)
 
   map.pm.setGlobalOptions({
     snappable: true,
@@ -3828,6 +3911,100 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
     history.value = [JSON.parse(JSON.stringify(features.value))]
     historyIndex.value = 0
   }
+
+  // 8. Load Review Pins / Notes from Supervisi (QC)
+  await tasksStore.fetchReviewPins(taskId)
+  renderReviewPinsOnMap()
+}
+
+// ─────────────────────────────────────────────
+// REVIEW PINS (Catatan Supervisi / QC Marker di Peta)
+// ─────────────────────────────────────────────
+
+const renderReviewPinsOnMap = () => {
+  if (!reviewPinsLayerGroup || !map) return
+  reviewPinsLayerGroup.clearLayers()
+
+  const pins = tasksStore.currentTaskReviewPins || []
+  pins.forEach(pin => {
+    const isResolved = pin.status === 'RESOLVED'
+
+    const markerHtml = isResolved
+      ? `<div class="relative flex items-center justify-center w-7 h-7 rounded-full bg-emerald-600 text-white shadow-md border-2 border-white cursor-pointer hover:scale-110 transition-transform" title="Selesai Diperbaiki">
+           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+         </div>`
+      : `<div class="relative flex items-center justify-center w-8 h-8 rounded-full bg-rose-600 text-white shadow-xl border-2 border-white cursor-pointer animate-pulse hover:scale-110 transition-transform" title="Catatan Revisi dari Supervisi">
+           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+           <span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border border-white"></span>
+         </div>`
+
+    const customIcon = L.divIcon({
+      html: markerHtml,
+      className: 'annotator-review-pin-marker',
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+      popupAnchor: [0, -18]
+    })
+
+    const marker = L.marker([pin.lat, pin.lon], { icon: customIcon })
+
+    const statusBadge = isResolved
+      ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-300">✓ Sudah Selesai</span>`
+      : `<span class="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-rose-300 animate-pulse">● Perlu Diperbaiki</span>`
+
+    const actionBtn = isResolved
+      ? `<button onclick="window._mapperTogglePin(${pin.id})" class="w-full py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-300 transition-colors cursor-pointer flex items-center justify-center gap-1.5">
+           <span>↺ Batal Selesai (Buka Kembali)</span>
+         </button>`
+      : `<button onclick="window._mapperTogglePin(${pin.id})" class="w-full py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5">
+           <span>✓ Tandai Selesai (Done)</span>
+         </button>`
+
+    const popupContent = `
+      <div class="p-2 space-y-2 min-w-[240px] max-w-[300px] font-sans text-slate-800">
+        <div class="flex items-center justify-between gap-2 border-b border-slate-200 pb-1.5">
+          <span class="text-xs font-bold text-slate-800 flex items-center gap-1">📍 Catatan Supervisi</span>
+          ${statusBadge}
+        </div>
+        <div class="text-xs text-slate-900 bg-amber-50/70 p-2.5 rounded-xl border border-amber-200 font-medium leading-relaxed">
+          "${pin.note}"
+        </div>
+        <div class="text-[10px] text-slate-500 flex items-center justify-between">
+          <span>Reviewer: <b>${pin.reviewer_name || 'Supervisi'}</b></span>
+          <span class="font-mono">${new Date(pin.created_at).toLocaleDateString('id-ID')}</span>
+        </div>
+        <div class="pt-1 border-t border-slate-100 mt-2">
+          ${actionBtn}
+        </div>
+      </div>
+    `
+
+    marker.bindPopup(popupContent, { maxWidth: 320, className: 'custom-mapper-pin-popup' })
+    reviewPinsLayerGroup.addLayer(marker)
+  })
+}
+
+// Global hook for toggle pin from leaflet popup
+if (typeof window !== 'undefined') {
+  window._mapperTogglePin = (pinId) => {
+    const pin = (tasksStore.currentTaskReviewPins || []).find(p => p.id === pinId)
+    if (pin) togglePinResolved(pin)
+  }
+}
+
+const togglePinResolved = async (pin) => {
+  const newStatus = pin.status === 'RESOLVED' ? 'PENDING' : 'RESOLVED'
+  try {
+    await tasksStore.updateReviewPin(selectedTaskId.value, pin.id, { status: newStatus })
+    renderReviewPinsOnMap()
+  } catch (err) {
+    console.error('Failed to update review pin:', err)
+  }
+}
+
+const focusOnReviewPin = (pin) => {
+  if (!map) return
+  map.setView([pin.lat, pin.lon], Math.max(map.getZoom(), 15), { animate: true })
 }
 
 const bestCopyCandidate = computed(() => {

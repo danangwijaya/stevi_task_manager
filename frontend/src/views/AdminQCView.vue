@@ -606,6 +606,20 @@
                 <ShieldCheck v-else :size="12" class="text-purple-600" />
                 <span>Cek Topologi</span>
               </button>
+
+              <!-- Add Review Pin Button (Single mode) -->
+              <button
+                v-if="viewScope === 'single' && selectedTask"
+                @click="toggleAddPinMode"
+                class="px-3 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs border"
+                :class="isAddPinMode
+                  ? 'bg-amber-500 text-white border-amber-600 shadow-md ring-2 ring-amber-400/40 animate-pulse'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'"
+                title="Klik peta untuk menaruh pin / tanda catatan revisi untuk mapper"
+              >
+                <MapPin :size="12" />
+                <span>{{ isAddPinMode ? 'Mode Pin Aktif (Klik Peta)' : 'Tambah Pin Revisi' }}</span>
+              </button>
             </div>
           </div>
 
@@ -673,7 +687,7 @@
               <div
                 v-for="(poly, idx) in taskFeatures"
                 :key="idx"
-                class="p-2 bg-white border border-slate-200 rounded-xl flex items-center justify-between text-xs transition-all hover:border-indigo-300"
+                class="p-2 bg-white border border-slate-200 rounded-xl flex items-center justify-between text-xs transition-all hover:border-indigo-300 group"
               >
                 <div class="flex items-center gap-2 truncate">
                   <div
@@ -681,10 +695,95 @@
                     :style="{ backgroundColor: getClassColor(poly.properties?.class_id) }"
                   ></div>
                   <span class="font-bold text-slate-800 truncate text-[11px]">{{ poly.properties?.class_name || 'Belum Terklasifikasi' }}</span>
+                  <!-- Review Pin Badge on Polygon -->
+                  <span
+                    v-if="getPolygonPins(poly.id).length > 0"
+                    class="flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-bold shrink-0"
+                    :class="getPolygonPins(poly.id).every(p => p.status === 'RESOLVED')
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-rose-100 text-rose-800 animate-pulse'"
+                    :title="`${getPolygonPins(poly.id).length} catatan revisi pada poligon ini`"
+                  >
+                    <MapPin :size="10" />
+                    <span>{{ getPolygonPins(poly.id).length }}</span>
+                  </span>
                 </div>
-                <span class="text-[10px] text-slate-500 font-mono bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200 shrink-0">
-                  ~{{ Math.round((poly.properties?.area_sqm || 10000) / 10000) }} Ha
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <span class="text-[10px] text-slate-500 font-mono bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
+                    ~{{ Math.round((poly.properties?.area_sqm || 10000) / 10000) }} Ha
+                  </span>
+                  <button
+                    @click.stop="openPinModalForPolygon(poly)"
+                    class="p-1 text-slate-400 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-amber-200"
+                    title="Beri Catatan Revisi untuk Poligon Ini"
+                  >
+                    <MessageSquarePlus :size="13" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Review Pins List for Active Grid -->
+            <div class="mt-3 pt-3 border-t border-slate-200 space-y-2">
+              <div class="flex items-center justify-between text-xs font-bold text-slate-700">
+                <span class="flex items-center gap-1.5">
+                  <MapPin :size="13" class="text-rose-600" />
+                  <span>Catatan Revisi Supervisi ({{ tasksStore.currentTaskReviewPins.length }})</span>
                 </span>
+                <span
+                  v-if="tasksStore.currentTaskReviewPins.length > 0"
+                  class="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold"
+                  :class="allPinsResolved ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'"
+                >
+                  {{ resolvedPinsCount }}/{{ tasksStore.currentTaskReviewPins.length }} Selesai
+                </span>
+              </div>
+
+              <div v-if="tasksStore.currentTaskReviewPins.length === 0" class="text-slate-400 text-[11px] italic py-2 text-center">
+                Belum ada tanda catatan revisi pada grid ini.
+              </div>
+
+              <div v-else class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                <div
+                  v-for="pin in tasksStore.currentTaskReviewPins"
+                  :key="pin.id"
+                  class="p-2 rounded-xl border text-xs flex flex-col gap-1 transition-all shadow-2xs"
+                  :class="pin.status === 'RESOLVED' ? 'bg-emerald-50/60 border-emerald-200' : 'bg-rose-50/60 border-rose-200'"
+                >
+                  <div class="flex items-center justify-between">
+                    <span
+                      class="font-bold flex items-center gap-1 text-[11px]"
+                      :class="pin.status === 'RESOLVED' ? 'text-emerald-800' : 'text-rose-800'"
+                    >
+                      <CheckCircle2 v-if="pin.status === 'RESOLVED'" :size="12" class="text-emerald-600" />
+                      <AlertTriangle v-else :size="12" class="text-rose-600" />
+                      <span>{{ pin.status === 'RESOLVED' ? 'Selesai Dikerjakan' : 'Perlu Revisi' }}</span>
+                    </span>
+                    <div class="flex items-center gap-1">
+                      <button
+                        @click="focusOnPin(pin)"
+                        class="p-1 text-slate-500 hover:text-indigo-600 hover:bg-white rounded transition-colors cursor-pointer"
+                        title="Lihat Titik di Peta"
+                      >
+                        <Focus :size="12" />
+                      </button>
+                      <button
+                        @click="deleteReviewPin(pin.id)"
+                        class="p-1 text-slate-400 hover:text-rose-600 hover:bg-white rounded transition-colors cursor-pointer"
+                        title="Hapus Catatan"
+                      >
+                        <Trash2 :size="12" />
+                      </button>
+                    </div>
+                  </div>
+                  <p class="text-[11px] text-slate-800 italic leading-snug">"{{ pin.note }}"</p>
+                  <div class="flex items-center justify-between text-[10px] text-slate-500 font-mono pt-0.5">
+                    <span>Oleh: {{ pin.reviewer_name || 'Reviewer' }}</span>
+                    <span v-if="pin.resolved_by_name" class="text-emerald-700 font-sans font-bold">
+                      ✓ {{ pin.resolved_by_name }}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -798,6 +897,100 @@
 
     </div>
 
+    <!-- Modal: Beri Catatan Revisi / Pin Baru -->
+    <div
+      v-if="showPinModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in"
+    >
+      <div class="bg-white rounded-3xl p-5 max-w-md w-full shadow-2xl border border-slate-100 space-y-4 animate-in zoom-in-95">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs">
+              <MapPin :size="18" />
+            </div>
+            <div>
+              <h3 class="font-bold text-slate-900 text-sm">Beri Catatan Revisi</h3>
+              <p class="text-[11px] text-slate-500">
+                {{ pinModalData.annotation_id ? `Catatan untuk poligon ${pinModalData.class_name}` : 'Tanda koreksi di titik koordinat peta' }}
+              </p>
+            </div>
+          </div>
+          <button
+            @click="showPinModal = false"
+            class="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 cursor-pointer"
+          >
+            <X :size="16" />
+          </button>
+        </div>
+
+        <div class="space-y-3 text-xs">
+          <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-slate-600 space-y-1 font-mono text-[11px]">
+            <div class="flex justify-between">
+              <span>Koordinat Pin:</span>
+              <span class="font-bold text-slate-800">{{ pinModalData.lat }}, {{ pinModalData.lon }}</span>
+            </div>
+            <div v-if="pinModalData.annotation_id" class="flex justify-between">
+              <span>Target Poligon:</span>
+              <span class="font-bold text-indigo-700 font-sans">{{ pinModalData.class_name }} (ID #{{ pinModalData.annotation_id }})</span>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <label class="font-bold text-slate-700">Pesan / Instruksi Revisi untuk Mapper:</label>
+            <textarea
+              v-model="pinModalData.note"
+              rows="3"
+              placeholder="Contoh: Klasifikasi kelapa sawit ini tolong diperbaiki batasnya atau diubah menjadi semak belukar..."
+              class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-amber-500 focus:outline-none text-xs text-slate-800 font-medium"
+            ></textarea>
+          </div>
+
+          <!-- Template Cepat -->
+          <div class="flex flex-wrap gap-1 text-[10px]">
+            <button
+              type="button"
+              @click="pinModalData.note = 'Batas poligon masih kurang rapi, harap disesuaikan dengan kenampakan citra.'"
+              class="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded border text-slate-600 cursor-pointer"
+            >
+              Batas kurang rapi
+            </button>
+            <button
+              type="button"
+              @click="pinModalData.note = 'Kelas tutupan lahan tidak sesuai, mohon dicek ulang interpretasinya.'"
+              class="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded border text-slate-600 cursor-pointer"
+            >
+              Salah kelas
+            </button>
+            <button
+              type="button"
+              @click="pinModalData.note = 'Ada area yang terlewat dan belum terdigitasi di titik ini.'"
+              class="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded border text-slate-600 cursor-pointer"
+            >
+              Area belum terdigitasi
+            </button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+          <button
+            @click="showPinModal = false"
+            class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+          >
+            Batal
+          </button>
+          <button
+            @click="saveNewReviewPin"
+            :disabled="submittingPin || !pinModalData.note.trim()"
+            class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <RotateCw v-if="submittingPin" :size="13" class="animate-spin" />
+            <MapPin v-else :size="13" />
+            <span>Simpan Pin Revisi</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -836,7 +1029,13 @@ import {
   Sparkles,
   UserCheck,
   Calendar,
-  ChevronDown
+  ChevronDown,
+  MapPin,
+  MessageSquarePlus,
+  Trash2,
+  Check,
+  CheckCheck,
+  MessageCircle
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useTasksStore } from '../stores/tasks'
@@ -863,6 +1062,13 @@ const loadingAction = ref(false)
 const userList = ref([])
 const selectedAssignUserId = ref(null)
 const statusFilter = ref('ALL') // 'ALL' | 'SUBMITTED' | 'REVISION_NEEDED' | 'APPROVED' | 'IN_PROGRESS'
+
+// Review Pins (Supervisi / QC notes per polygon & map point)
+const isAddPinMode = ref(false)
+const showPinModal = ref(false)
+const pinModalData = ref({ lat: null, lon: null, note: '', annotation_id: null, class_name: '' })
+const submittingPin = ref(false)
+let qcReviewPinsLayer = null
 const searchQuery = ref('')
 
 // Overview data from API
@@ -1141,6 +1347,22 @@ const formatNumber = (val) => {
   return Number(val).toLocaleString('id-ID')
 }
 
+// Review Pins computed statistics
+const resolvedPinsCount = computed(() => {
+  const pins = tasksStore.currentTaskReviewPins || []
+  return pins.filter(p => p.status === 'RESOLVED').length
+})
+
+const allPinsResolved = computed(() => {
+  const pins = tasksStore.currentTaskReviewPins || []
+  return pins.length > 0 && pins.every(p => p.status === 'RESOLVED')
+})
+
+const getPolygonPins = (annotationId) => {
+  if (!annotationId) return []
+  return (tasksStore.currentTaskReviewPins || []).filter(p => p.annotation_id === annotationId)
+}
+
 onMounted(async () => {
   await annotationsStore.fetchClasses()
   const projects = await tasksStore.fetchProjects()
@@ -1302,8 +1524,11 @@ const selectTask = async (task) => {
   const features = await annotationsStore.fetchGridAnnotations(task.id)
   taskFeatures.value = features
 
+  await tasksStore.fetchReviewPins(task.id)
+
   await nextTick()
   initOrUpdateQCMap(task, features)
+  renderQCReviewPins()
 }
 
 const initOrUpdateQCMap = (task, features) => {
@@ -1562,10 +1787,179 @@ const ensureMapInitialized = () => {
     qcContextFeatureGroup = L.featureGroup().addTo(qcMap)
     // Primary layer group (foreground)
     qcFeatureGroup = L.featureGroup().addTo(qcMap)
+    // Review Pins layer group
+    qcReviewPinsLayer = L.layerGroup().addTo(qcMap)
 
     const tileYr = selectedYear.value !== 'ALL' ? Number(selectedYear.value) : 2025
     updateQCTileLayer(tileYr)
   }
+}
+
+// ─────────────────────────────────────────────
+// REVIEW PINS METHODS (Supervisi / QC notes per polygon & map point)
+// ─────────────────────────────────────────────
+
+const renderQCReviewPins = () => {
+  if (!qcReviewPinsLayer || !qcMap) return
+  qcReviewPinsLayer.clearLayers()
+
+  if (viewScope.value !== 'single' || !selectedTask.value) return
+
+  const pins = tasksStore.currentTaskReviewPins || []
+  pins.forEach(pin => {
+    const isResolved = pin.status === 'RESOLVED'
+
+    const markerHtml = isResolved
+      ? `<div class="relative flex items-center justify-center w-7 h-7 rounded-full bg-emerald-600 text-white shadow-md border-2 border-white cursor-pointer hover:scale-110 transition-transform" title="Selesai diperbaiki">
+           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+         </div>`
+      : `<div class="relative flex items-center justify-center w-8 h-8 rounded-full bg-rose-600 text-white shadow-lg border-2 border-white cursor-pointer animate-pulse hover:scale-110 transition-transform" title="Perlu Revisi">
+           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+           <span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border border-white"></span>
+         </div>`
+
+    const customIcon = L.divIcon({
+      html: markerHtml,
+      className: 'qc-review-pin-marker',
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+      popupAnchor: [0, -18]
+    })
+
+    const marker = L.marker([pin.lat, pin.lon], { icon: customIcon })
+
+    const statusBadge = isResolved
+      ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-300">✓ Sudah Selesai</span>`
+      : `<span class="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-rose-300 animate-pulse">● Perlu Revisi</span>`
+
+    const resolverInfo = isResolved && pin.resolved_by_name
+      ? `<div class="text-[11px] text-emerald-700 bg-emerald-50 p-1.5 rounded-lg border border-emerald-200 mt-1">
+           <b>Diselesaikan oleh:</b> ${pin.resolved_by_name}
+           ${pin.resolved_at ? `<div class="text-[10px] text-slate-500 font-mono">${new Date(pin.resolved_at).toLocaleString('id-ID')}</div>` : ''}
+         </div>`
+      : ''
+
+    const popupContent = `
+      <div class="p-2 space-y-1.5 min-w-[220px] max-w-[280px] font-sans text-slate-800">
+        <div class="flex items-center justify-between gap-2 border-b border-slate-200 pb-1">
+          <span class="text-xs font-bold text-slate-700 flex items-center gap-1">📍 Catatan Revisi</span>
+          ${statusBadge}
+        </div>
+        <div class="text-xs text-slate-900 bg-slate-50 p-2 rounded-lg border border-slate-200 font-medium leading-relaxed">
+          "${pin.note}"
+        </div>
+        <div class="text-[10px] text-slate-500 flex items-center justify-between">
+          <span>Oleh: <b>${pin.reviewer_name || 'Reviewer'}</b></span>
+          <span class="font-mono">${new Date(pin.created_at).toLocaleDateString('id-ID')}</span>
+        </div>
+        ${resolverInfo}
+        <div class="pt-1 flex items-center justify-end gap-1 border-t border-slate-100 mt-2">
+          <button onclick="window._qcDeletePin(${pin.id})" class="text-rose-600 hover:text-rose-800 text-[10px] font-bold px-2 py-1 rounded bg-rose-50 hover:bg-rose-100 border border-rose-200 cursor-pointer">
+            Hapus Catatan
+          </button>
+        </div>
+      </div>
+    `
+
+    marker.bindPopup(popupContent, { maxWidth: 300, className: 'custom-qc-pin-popup' })
+    qcReviewPinsLayer.addLayer(marker)
+  })
+}
+
+// Global hook for deleting pin from leaflet popup
+if (typeof window !== 'undefined') {
+  window._qcDeletePin = (pinId) => deleteReviewPin(pinId)
+}
+
+const toggleAddPinMode = () => {
+  if (!qcMap) return
+  isAddPinMode.value = !isAddPinMode.value
+  const mapElem = document.getElementById('qc-map-container')
+  if (isAddPinMode.value) {
+    if (mapElem) mapElem.style.cursor = 'crosshair'
+    qcMap.on('click', handleQCMapClickForPin)
+  } else {
+    if (mapElem) mapElem.style.cursor = ''
+    qcMap.off('click', handleQCMapClickForPin)
+  }
+}
+
+const handleQCMapClickForPin = (e) => {
+  if (!isAddPinMode.value) return
+  pinModalData.value = {
+    lat: Number(e.latlng.lat.toFixed(6)),
+    lon: Number(e.latlng.lng.toFixed(6)),
+    note: '',
+    annotation_id: null,
+    class_name: ''
+  }
+  showPinModal.value = true
+  toggleAddPinMode()
+}
+
+const openPinModalForPolygon = (poly) => {
+  let lat = selectedTask.value?.min_lat
+  let lon = selectedTask.value?.min_lon
+
+  try {
+    const coords = poly.geometry?.coordinates
+    if (coords && coords[0]) {
+      let sumLat = 0, sumLon = 0, count = 0
+      const ring = coords[0]
+      ring.forEach(pt => {
+        sumLon += pt[0]
+        sumLat += pt[1]
+        count++
+      })
+      if (count > 0) {
+        lat = Number((sumLat / count).toFixed(6))
+        lon = Number((sumLon / count).toFixed(6))
+      }
+    }
+  } catch (_) {}
+
+  pinModalData.value = {
+    lat: lat,
+    lon: lon,
+    note: '',
+    annotation_id: poly.id,
+    class_name: poly.properties?.class_name || ''
+  }
+  showPinModal.value = true
+}
+
+const saveNewReviewPin = async () => {
+  if (!pinModalData.value.note.trim() || !selectedTask.value) return
+  submittingPin.value = true
+  try {
+    await tasksStore.createReviewPin(selectedTask.value.id, {
+      lat: pinModalData.value.lat,
+      lon: pinModalData.value.lon,
+      note: pinModalData.value.note.trim(),
+      annotation_id: pinModalData.value.annotation_id
+    })
+    showPinModal.value = false
+    renderQCReviewPins()
+  } catch (err) {
+    console.error('Failed to create review pin:', err)
+  } finally {
+    submittingPin.value = false
+  }
+}
+
+const deleteReviewPin = async (pinId) => {
+  if (!confirm('Hapus tanda catatan revisi ini?')) return
+  try {
+    await tasksStore.deleteReviewPin(selectedTask.value.id, pinId)
+    renderQCReviewPins()
+  } catch (err) {
+    console.error('Failed to delete review pin:', err)
+  }
+}
+
+const focusOnPin = (pin) => {
+  if (!qcMap) return
+  qcMap.setView([pin.lat, pin.lon], Math.max(qcMap.getZoom(), 15), { animate: true })
 }
 
 const fitMapBounds = () => {

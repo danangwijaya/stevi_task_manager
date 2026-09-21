@@ -88,6 +88,7 @@ class TaskGrid(Base):
     study_area = relationship("StudyArea", back_populates="tasks")
     assignee = relationship("User", back_populates="assigned_tasks", foreign_keys=[assigned_user_id])
     annotations = relationship("Annotation", back_populates="task_grid", cascade="all, delete-orphan")
+    review_pins = relationship("TaskReviewPin", back_populates="task_grid", cascade="all, delete-orphan")
 
 class Annotation(Base):
     __tablename__ = "annotations"
@@ -105,6 +106,29 @@ class Annotation(Base):
     # Relationships
     task_grid = relationship("TaskGrid", back_populates="annotations")
     author = relationship("User", back_populates="annotations")
+    review_pins = relationship("TaskReviewPin", back_populates="annotation")
+
+class TaskReviewPin(Base):
+    __tablename__ = "task_review_pins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_grid_id = Column(Integer, ForeignKey("task_grids.id"), nullable=False, index=True)
+    annotation_id = Column(Integer, ForeignKey("annotations.id"), nullable=True, index=True)
+    lat = Column(Float, nullable=False)
+    lon = Column(Float, nullable=False)
+    note = Column(Text, nullable=False)
+    status = Column(String(20), default="PENDING", nullable=False) # PENDING, RESOLVED
+    reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    resolved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    task_grid = relationship("TaskGrid", back_populates="review_pins")
+    annotation = relationship("Annotation", back_populates="review_pins")
+    reviewer = relationship("User", foreign_keys=[reviewer_id])
+    resolver = relationship("User", foreign_keys=[resolved_by_id])
 
 class LandCoverClass(Base):
     __tablename__ = "land_cover_classes"

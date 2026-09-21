@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.db.session import get_db
-from app.db.models import TaskGrid, User, StudyArea, Annotation, TaskStatus
+from app.db.models import TaskGrid, User, StudyArea, Annotation, TaskStatus, TaskReviewPin
 from app.api.deps import get_current_user, get_current_active_admin, get_current_active_reviewer
 from app.services.grid_generator import generate_spatial_grids
 
@@ -576,6 +576,35 @@ class TaskStatusUpdate(BaseModel):
 class TaskAssignRequest(BaseModel):
     user_id: Optional[int] = None
 
+class TaskReviewPinCreate(BaseModel):
+    lat: float
+    lon: float
+    note: str
+    annotation_id: Optional[int] = None
+
+class TaskReviewPinUpdate(BaseModel):
+    note: Optional[str] = None
+    status: Optional[str] = None  # PENDING, RESOLVED
+
+class TaskReviewPinResponse(BaseModel):
+    id: int
+    task_grid_id: int
+    annotation_id: Optional[int] = None
+    lat: float
+    lon: float
+    note: str
+    status: str
+    reviewer_id: int
+    reviewer_name: Optional[str] = None
+    resolved_by_id: Optional[int] = None
+    resolved_by_name: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class CreateTaskRequest(BaseModel):
     study_area_id: int
     grid_code: str
@@ -1047,3 +1076,163 @@ def get_project_stats(
         "ready_for_dl_export": approved,
         "student_contributions": student_stats
     }
+
+
+# ─────────────────────────────────────────────
+# REVIEW PINS / NOTES PER POLYGON & MAP
+# ─────────────────────────────────────────────
+
+@router.get("/{task_id}/review-pins", response_model=List[TaskReviewPinResponse])
+def get_task_review_pins(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """List all review pins/notes for a task grid"""
+    task = db.query(TaskGrid).filter(TaskGrid.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    pins = db.query(TaskReviewPin).filter(TaskReviewPin.task_grid_id == task_id).order_by(TaskReviewPin.created_at.asc()).all()
+    results = []
+    for p in pins:
+        results.append(TaskReviewPinResponse(
+            id=p.id,
+            task_grid_id=p.task_grid_id,
+            annotation_id=p.annotation_id,
+            lat=p.lat,
+            lon=p.lon,
+            note=p.note,
+            status=p.status,
+            reviewer_id=p.reviewer_id,
+            reviewer_name=p.reviewer.full_name if p.reviewer else None,
+            resolved_by_id=p.resolved_by_id,
+            resolved_by_name=p.resolver.full_name if p.resolver else None,
+            resolved_at=p.resolved_at,
+            created_at=p.created_at,
+            updated_at=p.updated_at
+        ))
+    return results
+
+@router.post("/{task_id}/review-pins", response_model=TaskReviewPinResponse)
+def create_task_review_pin(
+    task_id: int,
+    pin_in: TaskReviewPinCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Reviewer or Admin adds a review pin/note to a grid (optionally attached to an annotation)"""
+    role = (current_user.role or "").strip().lower()
+    if role not in ["admin", "dosen"]:
+        raise HTTPException(status_code=403, detail="Hanya Reviewer/Dosen dan Admin yang dapat memberikan catatan review")
+
+    task = db.query(TaskGrid).filter(TaskGrid.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if pin_in.annotation_id:
+        ann = db.query(Annotation).filter(Annotation.id == pin_in.annotation_id, Annotation.task_grid_id == task_id).first()
+        if not ann:
+            raise HTTPException(status_code=400, detail="Anotasi poligon tidak ditemukan pada grid ini")
+
+    new_pin = TaskReviewPin(
+        task_grid_id=task_id,
+        annotation_id=pin_in.annotation_id,
+        lat=pin_in.lat,
+        lon=pin_in.lon,
+        note=pin_in.note,
+        status="PENDING",
+        reviewer_id=current_user.id
+    )
+    db.add(new_pin)
+    db.commit()
+    db.refresh(new_pin)
+
+    return TaskReviewPinResponse(
+        id=new_pin.id,
+        task_grid_id=new_pin.task_grid_id,
+        annotation_id=new_pin.annotation_id,
+        lat=new_pin.lat,
+        lon=new_pin.lon,
+        note=new_pin.note,
+        status=new_pin.status,
+        reviewer_id=new_pin.reviewer_id,
+        reviewer_name=current_user.full_name,
+        resolved_by_id=None,
+        resolved_by_name=None,
+        resolved_at=None,
+        created_at=new_pin.created_at,
+        updated_at=new_pin.updated_at
+    )
+
+@router.patch("/{task_id}/review-pins/{pin_id}", response_model=TaskReviewPinResponse)
+def update_task_review_pin(
+    task_id: int,
+    pin_id: int,
+    pin_update: TaskReviewPinUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Update review pin status (e.g. Mapper marks as RESOLVED or PENDING) or edit note"""
+    pin = db.query(TaskReviewPin).filter(TaskReviewPin.id == pin_id, TaskReviewPin.task_grid_id == task_id).first()
+    if not pin:
+        raise HTTPException(status_code=404, detail="Review pin not found")
+
+    if pin_update.status is not None:
+        new_st = pin_update.status.upper()
+        if new_st not in ["PENDING", "RESOLVED"]:
+            raise HTTPException(status_code=400, detail="Status harus PENDING atau RESOLVED")
+        pin.status = new_st
+        if new_st == "RESOLVED":
+            pin.resolved_by_id = current_user.id
+            pin.resolved_at = datetime.utcnow()
+        else:
+            pin.resolved_by_id = None
+            pin.resolved_at = None
+
+    if pin_update.note is not None:
+        role = (current_user.role or "").strip().lower()
+        if role not in ["admin", "dosen"] and pin.reviewer_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Hanya Reviewer yang dapat mengubah teks catatan")
+        pin.note = pin_update.note
+
+    db.commit()
+    db.refresh(pin)
+
+    return TaskReviewPinResponse(
+        id=pin.id,
+        task_grid_id=pin.task_grid_id,
+        annotation_id=pin.annotation_id,
+        lat=pin.lat,
+        lon=pin.lon,
+        note=pin.note,
+        status=pin.status,
+        reviewer_id=pin.reviewer_id,
+        reviewer_name=pin.reviewer.full_name if pin.reviewer else None,
+        resolved_by_id=pin.resolved_by_id,
+        resolved_by_name=pin.resolver.full_name if pin.resolver else None,
+        resolved_at=pin.resolved_at,
+        created_at=pin.created_at,
+        updated_at=pin.updated_at
+    )
+
+@router.delete("/{task_id}/review-pins/{pin_id}")
+def delete_task_review_pin(
+    task_id: int,
+    pin_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Delete a review pin (Reviewer or Admin)"""
+    role = (current_user.role or "").strip().lower()
+    if role not in ["admin", "dosen"]:
+        raise HTTPException(status_code=403, detail="Hanya Reviewer/Dosen dan Admin yang dapat menghapus catatan")
+
+    pin = db.query(TaskReviewPin).filter(TaskReviewPin.id == pin_id, TaskReviewPin.task_grid_id == task_id).first()
+    if not pin:
+        raise HTTPException(status_code=404, detail="Review pin not found")
+
+    db.delete(pin)
+    db.commit()
+    return {"success": True, "message": "Catatan review berhasil dihapus"}
+
