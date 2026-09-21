@@ -193,12 +193,41 @@
             </button>
           </div>
 
-          <!-- Year Filter Dropdown List -->
+          <!-- Project / Wilayah Selector -->
+          <div class="space-y-1.5">
+            <label for="qc-project-filter" class="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider px-0.5">
+              <span class="flex items-center gap-1.5">
+                <Globe :size="12" class="text-indigo-600" />
+                <span>Proyek / Wilayah:</span>
+              </span>
+              <span class="font-mono text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 text-[10px] truncate max-w-[160px]">
+                {{ activeProjectName }}
+              </span>
+            </label>
+            <div class="relative">
+              <select
+                id="qc-project-filter"
+                v-model="selectedProjectId"
+                @change="onProjectChange"
+                class="w-full appearance-none bg-white border border-slate-300 hover:border-indigo-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-400/20 rounded-xl px-3 py-2 pr-8 text-xs font-bold text-slate-800 transition-all cursor-pointer shadow-2xs focus:outline-none"
+              >
+                <option :value="null">🌐 Semua Wilayah Proyek</option>
+                <option v-for="proj in tasksStore.projects" :key="proj.id" :value="proj.id">
+                  {{ proj.name }} ({{ (proj.available_years || []).join(', ') }})
+                </option>
+              </select>
+              <div class="absolute inset-y-0 right-0 flex items-center pr-2.5 pointer-events-none text-slate-400">
+                <ChevronDown :size="14" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Year Filter Dropdown List (Dynamic based on selected project) -->
           <div class="space-y-1.5">
             <label for="qc-year-filter" class="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider px-0.5">
               <span class="flex items-center gap-1.5">
                 <Calendar :size="12" class="text-rose-600" />
-                <span>Filter Tahun / Waktu:</span>
+                <span>Filter Tahun Citra:</span>
               </span>
               <span class="font-mono text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 text-[10px]">
                 {{ selectedYear === 'ALL' ? 'Semua Tahun' : `Tahun ${selectedYear}` }}
@@ -212,7 +241,7 @@
                 class="w-full appearance-none bg-white border border-slate-300 hover:border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-400/20 rounded-xl px-3 py-2 pr-8 text-xs font-bold text-slate-800 transition-all cursor-pointer shadow-2xs focus:outline-none"
               >
                 <option v-for="yr in availableQcYears" :key="yr" :value="yr">
-                  {{ yr === 'ALL' ? '🌐 Semua Tahun (Mosaik Global)' : `📅 Tahun ${yr} ${yr === 2025 ? '(Terbaru / Aktif)' : ''}` }}
+                  {{ yr === 'ALL' ? '🌐 Semua Tahun (Mosaik Global)' : `📅 Tahun ${yr} ${yr === latestAvailableYear ? '(Terbaru / Aktif)' : ''}` }}
                 </option>
               </select>
               <div class="absolute inset-y-0 right-0 flex items-center pr-2.5 pointer-events-none text-slate-400">
@@ -893,18 +922,90 @@ const getTileUrl = (layerType, year) => {
   }
 }
 
-// ── Year Filter State ─────────────────────────────────────────
+// ── Project & Year Filter State ──────────────────────────────
+const selectedProjectId = ref(null)
 const selectedYear = ref(2025)
 
+const activeProject = computed(() => {
+  if (!selectedProjectId.value) return null
+  return tasksStore.projects.find(p => p.id === selectedProjectId.value) || null
+})
+
+const activeProjectName = computed(() => {
+  return activeProject.value ? activeProject.value.name : 'Semua Wilayah'
+})
+
+const latestAvailableYear = computed(() => {
+  const yrs = availableQcYears.value.filter(y => y !== 'ALL')
+  return yrs.length > 0 ? yrs[0] : null
+})
+
 const availableQcYears = computed(() => {
-  const years = new Set([2025, 2024, 2023, 2022, 2021, 2018])
-  tasksStore.tasks.forEach(t => { if (t.year) years.add(t.year) })
-  if (overviewData.value.by_grid) {
-    overviewData.value.by_grid.forEach(g => { if (g.year) years.add(g.year) })
+  const years = new Set()
+
+  if (activeProject.value) {
+    // 1. Ambil tahun dari konfigurasi project yang dibuat
+    if (Array.isArray(activeProject.value.available_years)) {
+      activeProject.value.available_years.forEach(y => { if (y) years.add(Number(y)) })
+    }
+    // 2. Ambil tahun dari tasks yang terdaftar pada project ini
+    tasksStore.tasks.forEach(t => {
+      if (t.study_area_id === activeProject.value.id && t.year) {
+        years.add(Number(t.year))
+      }
+    })
+    if (overviewData.value.by_grid) {
+      overviewData.value.by_grid.forEach(g => {
+        if (g.study_area_id === activeProject.value.id && g.year) {
+          years.add(Number(g.year))
+        }
+      })
+    }
+  } else {
+    // Jika Semua Wilayah dipilih, kumpulkan dari seluruh project yang ada
+    if (tasksStore.projects && tasksStore.projects.length > 0) {
+      tasksStore.projects.forEach(p => {
+        if (Array.isArray(p.available_years)) {
+          p.available_years.forEach(y => { if (y) years.add(Number(y)) })
+        }
+      })
+    }
+    tasksStore.tasks.forEach(t => { if (t.year) years.add(Number(t.year)) })
+    if (overviewData.value.by_grid) {
+      overviewData.value.by_grid.forEach(g => { if (g.year) years.add(Number(g.year)) })
+    }
   }
+
+  // Fallback jika belum ada data sama sekali
+  if (years.size === 0) {
+    years.add(2025)
+  }
+
   const sorted = Array.from(years).sort((a, b) => b - a)
   return [...sorted, 'ALL']
 })
+
+const onProjectChange = async () => {
+  tasksStore.selectedArea = selectedProjectId.value
+  const yrs = availableQcYears.value.filter(y => y !== 'ALL')
+  if (yrs.length > 0) {
+    selectedYear.value = yrs[0]
+  } else {
+    selectedYear.value = 'ALL'
+  }
+  await refreshAllData()
+
+  // Map auto-focus: jika proyek punya center_lat / center_lon
+  await nextTick()
+  if (activeProject.value && qcMap) {
+    if (activeProject.value.center_lat && activeProject.value.center_lon) {
+      qcMap.setView(
+        [activeProject.value.center_lat, activeProject.value.center_lon],
+        activeProject.value.default_zoom || 10
+      )
+    }
+  }
+}
 
 const setQcYear = async (yr) => {
   selectedYear.value = yr
@@ -947,6 +1048,9 @@ const allDigitizedGrids = computed(() => {
     list = overviewData.value.by_grid
   } else {
     list = tasksStore.tasks.filter(t => (t.annotation_count || 0) > 0 || ['SUBMITTED', 'REVISION_NEEDED', 'APPROVED'].includes(t.status))
+  }
+  if (selectedProjectId.value) {
+    list = list.filter(g => g.study_area_id === selectedProjectId.value)
   }
   if (selectedYear.value !== 'ALL') {
     list = list.filter(g => g.year === selectedYear.value)
@@ -992,6 +1096,20 @@ const formatNumber = (val) => {
 
 onMounted(async () => {
   await annotationsStore.fetchClasses()
+  const projects = await tasksStore.fetchProjects()
+
+  // Sinkronkan default ke proyek Sumatera Barat atau proyek pertama
+  if (projects && projects.length > 0) {
+    const defaultProj = projects.find(p => p.name?.toLowerCase().includes('sumatera barat')) || projects[0]
+    selectedProjectId.value = defaultProj.id
+    tasksStore.selectedArea = defaultProj.id
+
+    const yrs = Array.isArray(defaultProj.available_years) ? defaultProj.available_years.filter(Boolean) : []
+    if (yrs.length > 0) {
+      selectedYear.value = yrs[0]
+    }
+  }
+
   if (authStore.isReviewer || authStore.isAdmin) {
     try {
       userList.value = await authStore.fetchAllUsers()
@@ -1013,6 +1131,7 @@ const refreshAllData = async () => {
   const yrParam = selectedYear.value === 'ALL' ? null : selectedYear.value
   try {
     tasksStore.selectedYear = yrParam
+    tasksStore.selectedArea = selectedProjectId.value
     await Promise.all([
       tasksStore.fetchTasks(),
       loadOverviewData(yrParam),
@@ -1049,7 +1168,10 @@ const refreshAllData = async () => {
 
 const loadOverviewData = async (year = null) => {
   try {
-    const data = await annotationsStore.fetchAnnotationsOverview(year ? { year } : {})
+    const params = {}
+    if (year) params.year = year
+    if (selectedProjectId.value) params.study_area_id = selectedProjectId.value
+    const data = await annotationsStore.fetchAnnotationsOverview(params)
     if (data && data.summary) {
       overviewData.value = data
     }
@@ -1060,7 +1182,10 @@ const loadOverviewData = async (year = null) => {
 
 const loadMosaicFeatures = async (year = null) => {
   try {
-    const feats = await annotationsStore.fetchAllAnnotationsFeatures(year ? { year } : {})
+    const params = {}
+    if (year) params.year = year
+    if (selectedProjectId.value) params.study_area_id = selectedProjectId.value
+    const feats = await annotationsStore.fetchAllAnnotationsFeatures(params)
     allMosaicFeatures.value = feats || []
   } catch (e) {
     console.error('Error loading mosaic features:', e)
