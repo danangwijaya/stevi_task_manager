@@ -2092,7 +2092,8 @@ const restoreFeaturesToMap = (snapshotFeatures) => {
       map.pm.enableGlobalEditMode({
         snappable: true,
         snapDistance: 10,
-        allowSelfIntersection: false
+        allowSelfIntersection: false,
+        tooltips: false
       })
     } catch (_) {}
   }
@@ -2635,7 +2636,8 @@ const initMap = () => {
     snapDistance: 8,
     snapSegment: true,
     snapMiddleMarkers: true,
-    allowSelfIntersection: false
+    allowSelfIntersection: false,
+    tooltips: false
   })
 
   // Freehand / Stream mode mouse bindings
@@ -2960,7 +2962,8 @@ const setDigitizeMode = (mode, force = false) => {
       map.pm.enableDraw('Line', {
         snappable: true,
         snapDistance: 6,
-        snapSegment: true
+        snapSegment: true,
+        tooltips: false
       })
       break
 
@@ -2969,7 +2972,8 @@ const setDigitizeMode = (mode, force = false) => {
       map.pm.enableDraw('Polygon', {
         snappable: true,
         snapDistance: 6,
-        snapSegment: true
+        snapSegment: true,
+        tooltips: false
       })
       break
 
@@ -2978,7 +2982,8 @@ const setDigitizeMode = (mode, force = false) => {
       map.pm.enableDraw('Polygon', {
         snappable: true,
         snapDistance: 8,
-        snapSegment: true
+        snapSegment: true,
+        tooltips: false
       })
       break
 
@@ -2994,7 +2999,8 @@ const setDigitizeMode = (mode, force = false) => {
       map.pm.enableGlobalEditMode({
         snappable: true,
         snapDistance: 10,
-        allowSelfIntersection: false
+        allowSelfIntersection: false,
+        tooltips: false
       })
       break
 
@@ -4276,5 +4282,11 @@ const getStatusBadgeClass = (status) => {
   border-radius: 0 0 5px 5px !important;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.15) !important;
   letter-spacing: 0.025em !important;
+}
+
+/* Sembunyikan bubble teks petunjuk bawaan Geoman saat menggambar (Click first marker to finish, dll) */
+.leaflet-pm-tooltip,
+.pm-tooltip {
+  display: none !important;
 }
 </style>
