@@ -95,6 +95,24 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
+    async fetchCurrentUser() {
+      if (!this.token) return null
+      try {
+        const response = await api.getMe()
+        if (response.data) {
+          this.user = response.data
+          localStorage.setItem('geoai_user', JSON.stringify(this.user))
+        }
+        return this.user
+      } catch (err) {
+        console.warn('Failed to refresh current user:', err)
+        if (err.response?.status === 401) {
+          this.logout()
+        }
+        return null
+      }
+    },
+
     async fetchAllUsers() {
       try {
         const response = await api.getUsers()

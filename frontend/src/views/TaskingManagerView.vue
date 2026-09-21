@@ -241,6 +241,34 @@
               <span>Ambil & Kerjakan Grid Ini</span>
             </button>
 
+            <!-- Admin / Reviewer Direct Assignment Box -->
+            <div
+              v-if="authStore.isReviewer"
+              class="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl space-y-2 shadow-2xs"
+            >
+              <div class="flex items-center justify-between text-[11px] font-bold text-indigo-950">
+                <span class="flex items-center gap-1.5"><UserCheck :size="13" class="text-indigo-600" /> Tugaskan ke Akun (Admin):</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <select
+                  v-model="selectedAssignUserId"
+                  class="flex-1 bg-white border border-indigo-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                >
+                  <option :value="null">-- Lepas Penugasan (Tersedia) --</option>
+                  <option v-for="u in userList" :key="u.id" :value="u.id">
+                    {{ u.full_name || u.username }} ({{ u.role }})
+                  </option>
+                </select>
+                <button
+                  @click="assignSelectedTaskToUser"
+                  :disabled="actionLoading"
+                  class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer shrink-0"
+                >
+                  Tugaskan
+                </button>
+              </div>
+            </div>
+
             <!-- If grid is locked (not UNASSIGNED) and not mine → show locked info -->
             <div
               v-if="selectedTask.status !== 'UNASSIGNED' && selectedTask.assigned_user_id && selectedTask.assigned_user_id !== authStore.user?.id && !authStore.isAdmin"
@@ -258,6 +286,18 @@
             >
               <Shapes :size="14" />
               <span>Buka di Studio Digitasi</span>
+            </button>
+
+            <!-- Reset Task Annotations (Admin or Assigned User) -->
+            <button
+              v-if="(authStore.isAdmin || selectedTask.assigned_user_id === authStore.user?.id) && (selectedTask.annotation_count > 0 || selectedTask.status !== 'UNASSIGNED')"
+              @click="resetSelectedTaskAnnotations"
+              :disabled="actionLoading"
+              class="w-full bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 text-xs font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+              title="Hapus seluruh poligon yang sudah digambar di grid ini agar bisa digitasi ulang dari awal"
+            >
+              <Trash2 :size="14" class="text-amber-600" />
+              <span>Reset Poligon Grid Ini</span>
             </button>
 
             <!-- If task is submitted and user is Admin, quick link to QC -->
@@ -372,7 +412,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import L from 'leaflet'
 import {
@@ -396,7 +436,8 @@ import {
   Clock,
   ShieldCheck,
   RotateCcw,
-  RotateCw
+  RotateCw,
+  Trash2
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useTasksStore } from '../stores/tasks'
@@ -411,6 +452,12 @@ const activeAreaId = ref(Number(route.query.area || route.query.project) || task
 const selectedYear = ref(2026)
 const selectedTask = ref(null)
 const actionLoading = ref(false)
+const userList = ref([])
+const selectedAssignUserId = ref(null)
+
+watch(selectedTask, (newTask) => {
+  selectedAssignUserId.value = newTask?.assigned_user_id || null
+})
 
 const activeProject = computed(() => {
   return tasksStore.projects.find(p => p.id === activeAreaId.value)
@@ -512,6 +559,11 @@ onMounted(async () => {
   syncYearForActiveProject()
 
   await tasksStore.fetchStats()
+  if (authStore.isReviewer) {
+    try {
+      userList.value = await authStore.fetchAllUsers()
+    } catch (_) {}
+  }
   await nextTick()
   initMap()
   await loadTasksForArea()
@@ -713,12 +765,49 @@ const claimSelectedTask = async () => {
   if (!selectedTask.value) return
   actionLoading.value = true
   try {
-    const response = await api.claimTask(selectedTask.value.id)
-    alert(response.data.message)
+    const taskId = selectedTask.value.id
+    await api.claimTask(taskId)
+    // Directly navigate into Studio Digitasi so user immediately begins work on their claimed grid!
+    router.push({ path: '/map', query: { taskId } })
+  } catch (err) {
+    alert(err.response?.data?.detail || 'Gagal mengklaim grid.')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+const assignSelectedTaskToUser = async () => {
+  if (!selectedTask.value) return
+  actionLoading.value = true
+  try {
+    const res = await api.assignTask(selectedTask.value.id, selectedAssignUserId.value)
+    alert(res.data.message || 'Penugasan grid berhasil diperbarui!')
     await loadTasksForArea()
     selectedTask.value = tasksStore.tasks.find(t => t.id === selectedTask.value.id) || null
   } catch (err) {
-    alert(err.response?.data?.detail || 'Gagal mengklaim grid.')
+    alert(err.response?.data?.detail || 'Gagal mengubah penugasan grid.')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+const resetSelectedTaskAnnotations = async () => {
+  if (!selectedTask.value) return
+  const confirmed = confirm(
+    `Apakah Anda yakin ingin mereset SELURUH POLIGON pada grid ${selectedTask.value.grid_code}?\n\n` +
+    `⚠️ PERINGATAN: Semua poligon yang telah digambar pada grid ini akan dihapus bersih agar dapat dimulai dari awal.\n` +
+    `Status grid tetap ditugaskan dan grid lain TIDAK terpengaruh.`
+  )
+  if (!confirmed) return
+
+  actionLoading.value = true
+  try {
+    const res = await api.resetTaskAnnotations(selectedTask.value.id)
+    alert(res.data.message)
+    await loadTasksForArea()
+    selectedTask.value = tasksStore.tasks.find(t => t.id === selectedTask.value.id) || null
+  } catch (err) {
+    alert(err.response?.data?.detail || 'Gagal mereset poligon grid.')
   } finally {
     actionLoading.value = false
   }

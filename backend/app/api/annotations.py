@@ -343,9 +343,17 @@ def save_grid_annotations(
     task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task grid not found")
-        
-    if current_user.role != "admin" and task.assigned_user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to edit annotations for this task")
+
+    if task.assigned_user_id is not None and current_user.role != "admin" and task.assigned_user_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Grid ini telah ditugaskan ke {task.assignee.full_name if task.assignee else 'pengguna lain'}. Anda tidak dapat mengubah data pada grid ini."
+        )
+
+    # Auto-claim unassigned grid if annotator begins digitizing it
+    if task.assigned_user_id is None:
+        task.assigned_user_id = current_user.id
+        task.status = "IN_PROGRESS"
 
     # Clear previous annotations for this grid to sync cleanly
     db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).delete()

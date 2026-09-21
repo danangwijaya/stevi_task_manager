@@ -193,6 +193,27 @@
             </button>
           </div>
 
+          <!-- Year Filter Pills (Default: Latest year 2025, selectable to other years) -->
+          <div class="space-y-1">
+            <div class="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider px-0.5">
+              <span>Filter Tahun Citra:</span>
+              <span class="font-mono text-rose-600 bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200">
+                {{ selectedYear === 'ALL' ? 'Semua Tahun' : selectedYear }}
+              </span>
+            </div>
+            <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-center text-[10px] font-bold overflow-x-auto">
+              <button
+                v-for="yr in availableQcYears"
+                :key="yr"
+                @click="setQcYear(yr)"
+                class="flex-1 py-1 px-2 rounded-lg transition-all cursor-pointer whitespace-nowrap"
+                :class="selectedYear === yr ? 'bg-white text-rose-700 shadow-xs border border-slate-200' : 'text-slate-600 hover:text-slate-900'"
+              >
+                {{ yr === 'ALL' ? 'Semua' : yr }}
+              </button>
+            </div>
+          </div>
+
           <!-- Status Filter Pills -->
           <div class="flex flex-wrap gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200 text-center text-[10px] font-bold">
             <button
@@ -635,6 +656,32 @@
           <!-- Review Actions & Decision Form (7 cols) -->
           <div class="lg:col-span-7 bg-white border border-slate-200 p-4 rounded-2xl flex flex-col justify-between gap-3 shadow-2xs">
             
+            <!-- Admin / Reviewer Assign Grid to Account -->
+            <div v-if="authStore.isReviewer || authStore.isAdmin" class="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-1.5 shadow-2xs">
+              <div class="flex items-center justify-between text-[11px] font-bold text-indigo-950">
+                <span class="flex items-center gap-1.5"><UserCheck :size="13" class="text-indigo-600" /> Penugasan Grid Ini:</span>
+                <span class="text-indigo-700 font-semibold truncate max-w-[200px]">{{ selectedTask.assigned_user_name || 'Belum Ditugaskan' }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <select
+                  v-model="selectedAssignUserId"
+                  class="flex-1 bg-white border border-indigo-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                >
+                  <option :value="null">-- Lepas Penugasan (Tersedia) --</option>
+                  <option v-for="u in userList" :key="u.id" :value="u.id">
+                    {{ u.full_name || u.username }} ({{ u.role }})
+                  </option>
+                </select>
+                <button
+                  @click="assignCurrentTaskToUser"
+                  :disabled="loadingAction"
+                  class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+                >
+                  Tugaskan
+                </button>
+              </div>
+            </div>
+
             <div v-if="authStore.isReviewer" class="space-y-2">
               <div class="flex items-center justify-between">
                 <span class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
@@ -750,7 +797,8 @@ import {
   Focus,
   Maximize2,
   Edit3,
-  Sparkles
+  Sparkles,
+  UserCheck
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useTasksStore } from '../stores/tasks'
@@ -770,9 +818,12 @@ const activeSegment = ref('grids')
 const selectedTask = ref(null)
 const taskFeatures = ref([])
 const reviewerNotes = ref('')
-const loadingAction = ref(false)
+// Loading & state indicators
 const loadingTasks = ref(false)
 const loadingOverview = ref(false)
+const loadingAction = ref(false)
+const userList = ref([])
+const selectedAssignUserId = ref(null)
 const statusFilter = ref('ALL') // 'ALL' | 'SUBMITTED' | 'REVISION_NEEDED' | 'APPROVED' | 'IN_PROGRESS'
 const searchQuery = ref('')
 
@@ -833,12 +884,36 @@ const getTileUrl = (layerType, year) => {
   }
 }
 
+// ── Year Filter State ─────────────────────────────────────────
+const selectedYear = ref(2025)
+
+const availableQcYears = computed(() => {
+  const years = new Set([2025, 2024, 2023, 2022, 2021, 2018])
+  tasksStore.tasks.forEach(t => { if (t.year) years.add(t.year) })
+  if (overviewData.value.by_grid) {
+    overviewData.value.by_grid.forEach(g => { if (g.year) years.add(g.year) })
+  }
+  const sorted = Array.from(years).sort((a, b) => b - a)
+  return [...sorted, 'ALL']
+})
+
+const setQcYear = async (yr) => {
+  selectedYear.value = yr
+  await refreshAllData()
+}
+
 // All digitized grids (merged from overviewData.by_grid and tasksStore)
 const allDigitizedGrids = computed(() => {
+  let list = []
   if (overviewData.value.by_grid && overviewData.value.by_grid.length > 0) {
-    return overviewData.value.by_grid
+    list = overviewData.value.by_grid
+  } else {
+    list = tasksStore.tasks.filter(t => (t.annotation_count || 0) > 0 || ['SUBMITTED', 'REVISION_NEEDED', 'APPROVED'].includes(t.status))
   }
-  return tasksStore.tasks.filter(t => (t.annotation_count || 0) > 0 || ['SUBMITTED', 'REVISION_NEEDED', 'APPROVED'].includes(t.status))
+  if (selectedYear.value !== 'ALL') {
+    list = list.filter(g => g.year === selectedYear.value)
+  }
+  return list
 })
 
 // Filtered grid list for display in Segment 1
@@ -879,6 +954,11 @@ const formatNumber = (val) => {
 
 onMounted(async () => {
   await annotationsStore.fetchClasses()
+  if (authStore.isReviewer || authStore.isAdmin) {
+    try {
+      userList.value = await authStore.fetchAllUsers()
+    } catch (_) {}
+  }
   await refreshAllData()
 })
 
@@ -892,16 +972,36 @@ onUnmounted(() => {
 const refreshAllData = async () => {
   loadingTasks.value = true
   loadingOverview.value = true
+  const yrParam = selectedYear.value === 'ALL' ? null : selectedYear.value
   try {
+    tasksStore.selectedYear = yrParam
     await Promise.all([
       tasksStore.fetchTasks(),
-      loadOverviewData(),
-      loadMosaicFeatures()
+      loadOverviewData(yrParam),
+      loadMosaicFeatures(yrParam)
     ])
 
-    // Auto-select first grid if none selected
-    if (!selectedTask.value && displayGridList.value.length > 0) {
-      await selectTaskByGridItem(displayGridList.value[0])
+    // Update QC tile layer to selected year if map ready
+    const tileYr = yrParam || selectedTask.value?.year || 2025
+    if (qcMap) {
+      updateQCTileLayer(tileYr)
+    }
+
+    // Auto-select first grid if none selected or current selection not in year
+    if (displayGridList.value.length > 0) {
+      const curId = selectedTask.value?.id
+      const stillInList = displayGridList.value.find(g => (g.task_id || g.id) === curId)
+      if (!stillInList) {
+        await selectTaskByGridItem(displayGridList.value[0])
+      }
+    } else {
+      selectedTask.value = null
+      taskFeatures.value = []
+      if (qcFeatureGroup) qcFeatureGroup.clearLayers()
+      if (qcGridBoundingLayer) {
+        qcMap.removeLayer(qcGridBoundingLayer)
+        qcGridBoundingLayer = null
+      }
     }
   } finally {
     loadingTasks.value = false
@@ -909,9 +1009,9 @@ const refreshAllData = async () => {
   }
 }
 
-const loadOverviewData = async () => {
+const loadOverviewData = async (year = null) => {
   try {
-    const data = await annotationsStore.fetchAnnotationsOverview()
+    const data = await annotationsStore.fetchAnnotationsOverview(year ? { year } : {})
     if (data && data.summary) {
       overviewData.value = data
     }
@@ -920,9 +1020,9 @@ const loadOverviewData = async () => {
   }
 }
 
-const loadMosaicFeatures = async () => {
+const loadMosaicFeatures = async (year = null) => {
   try {
-    const feats = await annotationsStore.fetchAllAnnotationsFeatures()
+    const feats = await annotationsStore.fetchAllAnnotationsFeatures(year ? { year } : {})
     allMosaicFeatures.value = feats || []
   } catch (e) {
     console.error('Error loading mosaic features:', e)
@@ -964,6 +1064,7 @@ const findAndSelectGridByCode = async (gridCode) => {
 
 const selectTask = async (task) => {
   selectedTask.value = task
+  selectedAssignUserId.value = task.assigned_user_id || null
   reviewerNotes.value = task.reviewer_notes || ''
   qcTopologyResult.value = null
   hoveredFeature.value = null
@@ -1097,7 +1198,8 @@ const renderMosaicOnMap = () => {
   if (qcContextFeatureGroup) qcContextFeatureGroup.clearLayers()
   qcFeatureGroup.clearLayers()
 
-  updateQCTileLayer(2025)
+  const mosaicYear = selectedYear.value !== 'ALL' ? Number(selectedYear.value) : 2025
+  updateQCTileLayer(mosaicYear)
 
   if (allMosaicFeatures.value.length === 0) return
 
@@ -1343,6 +1445,26 @@ const rejectWithNotes = async () => {
       alert('Status tugas diubah menjadi REVISION_NEEDED dan catatan telah dikirim ke kontributor!')
       await refreshAllData()
     }
+  } finally {
+    loadingAction.value = false
+  }
+}
+const assignCurrentTaskToUser = async () => {
+  if (!selectedTask.value) return
+  loadingAction.value = true
+  try {
+    const res = await api.assignTask(selectedTask.value.id, selectedAssignUserId.value)
+    alert(res.data.message || 'Penugasan grid berhasil diperbarui!')
+    selectedTask.value.assigned_user_id = selectedAssignUserId.value
+    if (res.data.assigned_user_name !== undefined) {
+      selectedTask.value.assigned_user_name = res.data.assigned_user_name
+    }
+    if (res.data.status) {
+      selectedTask.value.status = res.data.status
+    }
+    await refreshAllData()
+  } catch (err) {
+    alert(err.response?.data?.detail || 'Gagal mengubah penugasan grid.')
   } finally {
     loadingAction.value = false
   }

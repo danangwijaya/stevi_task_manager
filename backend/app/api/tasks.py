@@ -866,6 +866,47 @@ def unclaim_task(
         "task_id": task.id
     }
 
+@router.post("/{task_id}/reset-annotations")
+def reset_task_annotations(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Reset all polygon annotations on a specific task grid.
+    Permitted for Administrator or the user currently assigned to the task.
+    Deletes all annotations on this grid and sets status to IN_PROGRESS.
+    Does NOT affect any other grids.
+    """
+    task = db.query(TaskGrid).filter(TaskGrid.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    is_admin = current_user.role == "admin"
+    is_assignee = task.assigned_user_id == current_user.id
+
+    if not is_admin and not is_assignee:
+        raise HTTPException(
+            status_code=403,
+            detail="Hanya Administrator atau pengguna yang ditugaskan yang dapat mereset poligon grid ini."
+        )
+
+    deleted_count = db.query(Annotation).filter(Annotation.task_grid_id == task_id).delete()
+    if task.assigned_user_id:
+        task.status = "IN_PROGRESS"
+    else:
+        task.status = "UNASSIGNED"
+    task.reviewer_notes = None
+    task.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(task)
+
+    return {
+        "message": f"Berhasil mereset {deleted_count} poligon pada grid {task.grid_code}. Anda dapat memulai digitasi dari awal.",
+        "task_id": task.id,
+        "deleted_count": deleted_count
+    }
+
 @router.post("/{task_id}/assign")
 def assign_task(
     task_id: int,
@@ -877,11 +918,13 @@ def assign_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
         
+    assignee_name = None
     if assign_req.user_id:
         target_user = db.query(User).filter(User.id == assign_req.user_id).first()
         if not target_user:
             raise HTTPException(status_code=404, detail="User not found")
         task.assigned_user_id = target_user.id
+        assignee_name = target_user.full_name or target_user.username
         if task.status == TaskStatus.UNASSIGNED.value:
             task.status = TaskStatus.ASSIGNED.value
     else:
@@ -890,7 +933,13 @@ def assign_task(
         
     db.commit()
     db.refresh(task)
-    return {"message": "Task assignment updated successfully", "task_id": task.id, "assigned_to": task.assigned_user_id}
+    return {
+        "message": f"Grid {task.grid_code} berhasil ditugaskan ke {assignee_name}" if assignee_name else f"Penugasan grid {task.grid_code} berhasil dilepas.",
+        "task_id": task.id,
+        "assigned_to": task.assigned_user_id,
+        "assigned_user_name": assignee_name,
+        "status": task.status
+    }
 
 @router.post("/{task_id}/status")
 def update_task_status(

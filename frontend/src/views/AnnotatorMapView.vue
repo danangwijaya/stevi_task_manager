@@ -21,7 +21,8 @@
           @change="onTaskChange"
           class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 font-bold focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 font-mono shadow-xs cursor-pointer"
         >
-          <option v-for="t in tasksStore.tasks" :key="t.id" :value="t.id">
+          <option :value="null">-- {{ selectableTasks.length > 0 ? 'Pilih Grid' : 'Belum Ada Grid Diambil' }} --</option>
+          <option v-for="t in selectableTasks" :key="t.id" :value="t.id">
             {{ t.grid_code }} - {{ t.study_area_name?.split(' ')[0] }} ({{ formatStatus(t.status) }})
           </option>
         </select>
@@ -239,6 +240,17 @@
             <RotateCw v-if="topologyLoading" :size="13" class="animate-spin text-purple-500" />
             <ShieldCheck v-else :size="13" class="text-purple-500" />
             <span class="hidden sm:inline">Cek Topologi</span>
+          </button>
+
+          <!-- Reset Grid Polygons Button -->
+          <button
+            v-if="selectedTaskId && (authStore.isAdmin || tasksStore.currentTask?.assigned_user_id === authStore.user?.id)"
+            @click="resetCurrentGridAnnotations"
+            class="bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold px-3 py-1.5 rounded-xl border border-amber-300 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+            title="Hapus seluruh poligon pada grid ini dan mulai digitasi dari awal"
+          >
+            <Trash2 :size="13" class="text-amber-600" />
+            <span class="hidden sm:inline">Reset Grid</span>
           </button>
 
           <button
@@ -1039,6 +1051,76 @@
               <span class="text-slate-300">•</span>
               <span class="text-[10px] text-slate-500" title="Koordinat Kursor (WGS84)">{{ cursorCoords.lat }}°, {{ cursorCoords.lng }}°</span>
             </template>
+            <span class="text-slate-300 hidden xl:inline">•</span>
+            <span class="text-[10px] text-slate-400 font-normal hidden xl:inline">Shift + Drag: Pilih Poligon</span>
+          </div>
+        </div>
+
+        <!-- Floating Multi-Selection Action Toolbar -->
+        <div
+          v-if="selectedPolyUiIds.size > 0"
+          class="absolute bottom-16 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl border border-slate-700/80 backdrop-blur-md flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 duration-200"
+        >
+          <div class="flex items-center gap-2 pr-2 border-r border-slate-700">
+            <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+            <span class="text-xs font-bold font-mono text-indigo-200">{{ selectedPolyUiIds.size }} Poligon Terpilih</span>
+          </div>
+
+          <!-- Action 1: Hapus Massal -->
+          <button
+            @click="batchDeleteSelectedPolygons"
+            class="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+            title="Hapus semua poligon terpilih"
+          >
+            <Trash2 :size="13" />
+            <span>Hapus ({{ selectedPolyUiIds.size }})</span>
+          </button>
+
+          <!-- Action 2: Gabung Massal -->
+          <button
+            @click="batchMergeSelectedPolygons"
+            :disabled="selectedPolyUiIds.size < 2"
+            class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+            title="Gabungkan semua poligon terpilih menjadi 1 poligon utuh"
+          >
+            <Combine :size="13" />
+            <span>Gabung ({{ selectedPolyUiIds.size }})</span>
+          </button>
+
+          <!-- Action 3: Batal -->
+          <button
+            @click="clearPolygonSelection"
+            class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+            title="Batal seleksi"
+          >
+            <X :size="14" />
+          </button>
+        </div>
+
+        <!-- Empty Grid State Banner -->
+        <div
+          v-if="!selectedTaskId"
+          class="absolute inset-0 z-30 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4"
+        >
+          <div class="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200 text-center space-y-4">
+            <div class="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-100">
+              <Grid :size="28" />
+            </div>
+            <div class="space-y-1">
+              <h3 class="text-base font-extrabold text-slate-900">Pilih Grid untuk Mulai Digitasi</h3>
+              <p class="text-xs text-slate-500 leading-relaxed">
+                {{ selectableTasks.length > 0 ? 'Pilih salah satu grid Anda pada dropdown di sidebar kiri.' : 'Anda belum mengambil grid tugas digitasi. Buka Grid Map untuk memilih dan mengklaim grid yang tersedia.' }}
+              </p>
+            </div>
+            <div class="pt-2 flex items-center justify-center gap-3">
+              <router-link
+                to="/tasks"
+                class="bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md shadow-rose-500/20 transition-all flex items-center gap-2"
+              >
+                <Rocket :size="14" />
+                <span>Buka Grid Map & Klaim Grid</span>
+              </router-link>
+            </div>
           </div>
         </div>
       </div>
@@ -1183,33 +1265,92 @@
         </button>
       </div>
 
-      <!-- Tab Content 2: List of Drawn Polygons -->
-      <div v-show="rightTab === 'polygons'" class="flex-1 p-3 space-y-2 overflow-y-auto">
+      <!-- Tab Content 2: List of Drawn Polygons with Multi-Selection -->
+      <div v-show="rightTab === 'polygons'" class="flex-1 p-3 space-y-2.5 overflow-y-auto flex flex-col">
         <div v-if="features.length === 0" class="text-center py-12 text-slate-400 text-xs">
           Belum ada poligon yang digambar.<br>Gunakan tool Potong / Gambar di kiri atas peta!
         </div>
 
-        <div
-          v-for="(feat, idx) in features"
-          :key="idx"
-          @click="selectFeatureFromList(idx)"
-          class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1 hover:border-slate-300 transition-all text-xs cursor-pointer"
-          :class="clickedFeatureIdx === idx ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/40' : ''"
-        >
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <div
-                class="w-3 h-3 rounded-sm border border-slate-300"
-                :style="{ backgroundColor: feat.properties?.color || '#9CA3AF' }"
-              ></div>
-              <span class="font-bold text-slate-800">{{ feat.properties?.class_name || 'Belum Terklasifikasi' }}</span>
-            </div>
-            <span class="text-[10px] text-slate-400 font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">#{{ idx + 1 }}</span>
+        <div v-else class="space-y-2">
+          <!-- Selection Header Controls -->
+          <div class="flex items-center justify-between pb-2 border-b border-slate-200 text-xs">
+            <label class="flex items-center gap-2 cursor-pointer font-bold text-slate-700 select-none">
+              <input
+                type="checkbox"
+                :checked="isAllSelected"
+                @change="toggleSelectAll"
+                class="w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+              />
+              <span>Pilih Semua ({{ features.length }})</span>
+            </label>
+            <span
+              v-if="selectedPolyUiIds.size > 0"
+              class="text-[11px] font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200"
+            >
+              {{ selectedPolyUiIds.size }} terpilih
+            </span>
           </div>
 
-          <div class="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
-            <span class="font-mono">Luas: ~{{ Math.round((feat.properties?.area_sqm || 10000) / 10000) }} Ha</span>
-            <span v-if="feat.properties?.class_id === 0" class="text-amber-600 font-bold">⚠️ Belum di-assign</span>
+          <!-- Quick Action Buttons for Selection -->
+          <div v-if="selectedPolyUiIds.size > 0" class="flex items-center gap-1.5 p-1.5 bg-indigo-50/80 border border-indigo-200 rounded-xl">
+            <button
+              @click="batchDeleteSelectedPolygons"
+              class="flex-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer shadow-xs"
+              title="Hapus semua poligon terpilih"
+            >
+              <Trash2 :size="12" />
+              <span>Hapus ({{ selectedPolyUiIds.size }})</span>
+            </button>
+            <button
+              @click="batchMergeSelectedPolygons"
+              :disabled="selectedPolyUiIds.size < 2"
+              class="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-[11px] font-bold py-1.5 px-2 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer shadow-xs"
+              title="Gabungkan poligon terpilih menjadi 1 poligon utuh"
+            >
+              <Combine :size="12" />
+              <span>Gabung ({{ selectedPolyUiIds.size }})</span>
+            </button>
+            <button
+              @click="selectedPolyUiIds.clear()"
+              class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200/60 transition-colors cursor-pointer"
+              title="Batalkan seleksi"
+            >
+              <X :size="13" />
+            </button>
+          </div>
+
+          <!-- Polygon Cards -->
+          <div
+            v-for="(feat, idx) in features"
+            :key="feat._uiId || idx"
+            @click="selectFeatureFromList(idx)"
+            class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1 hover:border-slate-300 transition-all text-xs cursor-pointer select-none"
+            :class="[
+              clickedFeatureIdx === idx ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/40' : '',
+              selectedPolyUiIds.has(feat._uiId) ? 'bg-indigo-50/70 border-indigo-300' : ''
+            ]"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  :checked="selectedPolyUiIds.has(feat._uiId)"
+                  @click.stop="toggleSelectPolygon(feat._uiId)"
+                  class="w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer shrink-0"
+                />
+                <div
+                  class="w-3 h-3 rounded-sm border border-slate-300 shrink-0"
+                  :style="{ backgroundColor: feat.properties?.color || '#9CA3AF' }"
+                ></div>
+                <span class="font-bold text-slate-800 truncate max-w-[140px]">{{ feat.properties?.class_name || 'Belum Terklasifikasi' }}</span>
+              </div>
+              <span class="text-[10px] text-slate-400 font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">#{{ idx + 1 }}</span>
+            </div>
+
+            <div class="flex items-center justify-between text-[10px] text-slate-500 pt-0.5 pl-6">
+              <span class="font-mono">Luas: ~{{ Math.round((feat.properties?.area_sqm || 10000) / 10000) }} Ha</span>
+              <span v-if="feat.properties?.class_id === 0" class="text-amber-600 font-bold">⚠️ Belum di-assign</span>
+            </div>
           </div>
         </div>
       </div>
@@ -1435,6 +1576,141 @@ const getFeatureUiId = (feat) => {
   return uiId
 }
 
+const selectableTasks = computed(() => {
+  if (authStore.isAdmin) return tasksStore.tasks
+  return tasksStore.tasks.filter(t => t.assigned_user_id === authStore.user?.id)
+})
+
+const selectedPolyUiIds = ref(new Set())
+
+const isAllSelected = computed(() => {
+  if (features.value.length === 0) return false
+  return features.value.every(f => selectedPolyUiIds.value.has(f._uiId))
+})
+
+const toggleSelectAll = () => {
+  if (isAllSelected.value) {
+    selectedPolyUiIds.value.clear()
+  } else {
+    features.value.forEach(f => {
+      const uId = f._uiId || getFeatureUiId(f)
+      selectedPolyUiIds.value.add(uId)
+    })
+  }
+}
+
+const toggleSelectPolygon = (uiId) => {
+  if (selectedPolyUiIds.value.has(uiId)) {
+    selectedPolyUiIds.value.delete(uiId)
+  } else {
+    selectedPolyUiIds.value.add(uiId)
+  }
+}
+
+const clearPolygonSelection = () => {
+  selectedPolyUiIds.value.clear()
+}
+
+const resetCurrentGridAnnotations = async () => {
+  if (!selectedTaskId.value) return
+  const gridCode = tasksStore.currentTask?.grid_code || `Grid #${selectedTaskId.value}`
+  const confirmed = confirm(
+    `Apakah Anda yakin ingin mereset seluruh poligon pada grid [${gridCode}]?\n\n` +
+    `⚠️ Tindakan ini akan menghapus SEMUA poligon yang sudah digambar di grid ini agar Anda dapat memulai digitasi dari awal.\n` +
+    `Status grid tetap ditugaskan kepada Anda dan grid lain TIDAK terpengaruh.`
+  )
+  if (!confirmed) return
+
+  try {
+    const res = await api.resetTaskAnnotations(selectedTaskId.value)
+    showToast(res.data?.message || 'Grid berhasil direset bersih!')
+    selectedPolyUiIds.value.clear()
+    await loadTaskData(selectedTaskId.value, false)
+  } catch (err) {
+    alert(err.response?.data?.detail || 'Gagal mereset poligon grid')
+  }
+}
+
+const batchDeleteSelectedPolygons = async () => {
+  if (selectedPolyUiIds.value.size === 0 || !selectedTaskId.value) return
+  const count = selectedPolyUiIds.value.size
+  const confirmed = confirm(`Hapus ${count} poligon terpilih?`)
+  if (!confirmed) return
+
+  const remaining = features.value.filter(f => !selectedPolyUiIds.value.has(f._uiId))
+  selectedPolyUiIds.value.clear()
+  restoreFeaturesToMap(remaining)
+  pushHistory()
+
+  try {
+    await annotationsStore.saveGridAnnotations(selectedTaskId.value, remaining)
+    showToast(`🗑️ ${count} poligon berhasil dihapus`)
+  } catch (err) {
+    alert(err.response?.data?.detail || 'Gagal menyimpan perubahan hapus poligon')
+  }
+}
+
+const batchMergeSelectedPolygons = async () => {
+  if (selectedPolyUiIds.value.size < 2 || !selectedTaskId.value) return
+  const toMerge = features.value.filter(f => selectedPolyUiIds.value.has(f._uiId))
+  if (toMerge.length < 2) return
+
+  const targetClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
+  const targetClassId = targetClass?.id || 1
+  const targetClassName = targetClass?.name || 'Hutan Lahan Kering'
+
+  try {
+    const validPolys = toMerge.map(f => {
+      try {
+        return turf.cleanCoords(turf.feature(f.geometry))
+      } catch (_) {
+        return turf.feature(f.geometry)
+      }
+    })
+
+    let mergedPoly = validPolys[0]
+    for (let i = 1; i < validPolys.length; i++) {
+      mergedPoly = turf.union(turf.featureCollection([mergedPoly, validPolys[i]]))
+    }
+
+    if (!mergedPoly || !mergedPoly.geometry) {
+      alert('Poligon terpilih tidak dapat digabungkan. Pastikan poligon saling bersentuhan atau bertampalan.')
+      return
+    }
+
+    const mergedGeom = cleanSliversFromGeometry(mergedPoly.geometry)
+    if (!mergedGeom) {
+      alert('Hasil penggabungan tidak valid.')
+      return
+    }
+
+    const remaining = features.value.filter(f => !selectedPolyUiIds.value.has(f._uiId))
+    const newUiId = 'f_merged_' + Date.now() + '_' + (++_featureUiCounter)
+    const newFeat = {
+      type: 'Feature',
+      _uiId: newUiId,
+      geometry: mergedGeom,
+      properties: {
+        class_id: targetClassId,
+        class_name: targetClassName,
+        color: targetClass?.color || '#006400',
+        area_sqm: turf.area(turf.feature(mergedGeom))
+      }
+    }
+
+    remaining.push(newFeat)
+    selectedPolyUiIds.value.clear()
+    restoreFeaturesToMap(remaining)
+    pushHistory()
+
+    await annotationsStore.saveGridAnnotations(selectedTaskId.value, remaining)
+    showToast(`🧩 ${toMerge.length} poligon berhasil digabung menjadi [${targetClassName}]!`)
+  } catch (err) {
+    console.error('Batch merge error:', err)
+    alert('Gagal menggabungkan poligon terpilih.')
+  }
+}
+
 const findFeatureIndexForLayer = (layer) => {
   if (!features.value || features.value.length === 0) return -1
 
@@ -1539,7 +1815,29 @@ const redo = async () => {
 const restoreFeaturesToMap = (snapshotFeatures) => {
   if (!featureGroup || !map) return
   clickedFeatureIdx.value = null
+  selectedPolyUiIds.value.clear()
   map.closePopup()
+
+  // Clean Geoman drawing / editing states if active
+  try {
+    if (map.pm && map.pm.globalDrawModeEnabled()) {
+      map.pm.disableDraw()
+    }
+  } catch (_) {}
+
+  const wasEditEnabled = map.pm && map.pm.globalEditEnabled()
+  if (wasEditEnabled) {
+    try {
+      map.pm.disableGlobalEditMode()
+    } catch (_) {}
+  }
+
+  // Remove any dangling temporary Geoman layers on map
+  map.eachLayer(l => {
+    if (l._pmTempLayer || l._pmDrawLayer || (l.options && l.options.isTempMarker)) {
+      try { map.removeLayer(l) } catch (_) {}
+    }
+  })
 
   featureGroup.clearLayers()
   features.value = snapshotFeatures
@@ -1560,6 +1858,7 @@ const restoreFeaturesToMap = (snapshotFeatures) => {
     geojsonLayer.eachLayer((l) => {
       l.feature = feat
       l._uiId = feat._uiId
+      l._preEditGeom = JSON.parse(JSON.stringify(feat.geometry))
       const cls = classesMap[feat.properties?.class_id]
       if (cls) l.feature.properties.color = cls.color
       else l.feature.properties.color = feat.properties?.color || '#9CA3AF'
@@ -1567,6 +1866,16 @@ const restoreFeaturesToMap = (snapshotFeatures) => {
       featureGroup.addLayer(l)
     })
   })
+
+  if (wasEditEnabled) {
+    try {
+      map.pm.enableGlobalEditMode({
+        snappable: true,
+        snapDistance: 10,
+        allowSelfIntersection: false
+      })
+    } catch (_) {}
+  }
 }
 
 // Global Keyboard Shortcuts & Micro-Interactions
@@ -2004,7 +2313,12 @@ onMounted(async () => {
   if (queryTaskId) {
     selectedTaskId.value = queryTaskId
   } else if (tasksStore.tasks.length > 0) {
-    selectedTaskId.value = tasksStore.tasks[0].id
+    if (authStore.isAdmin) {
+      selectedTaskId.value = tasksStore.tasks[0].id
+    } else {
+      const myTask = tasksStore.tasks.find(t => t.assigned_user_id === authStore.user?.id)
+      selectedTaskId.value = myTask ? myTask.id : null
+    }
   }
 
   await nextTick()
@@ -2084,7 +2398,7 @@ const initMap = () => {
 
   map.pm.setGlobalOptions({
     snappable: true,
-    snapDistance: 22,
+    snapDistance: 8,
     snapSegment: true,
     snapMiddleMarkers: true,
     allowSelfIntersection: false
@@ -2145,15 +2459,7 @@ const initMap = () => {
     pushHistory()
   })
 
-  map.on('pm:edit', (e) => {
-    if (e && e.layer) {
-      applyAutoClipAndHealOnEdit(e.layer)
-    } else {
-      syncFeaturesFromMap()
-      pushHistory()
-    }
-  })
-
+  // Single-fire auto-clip on drag end (not continuous per-pixel edit)
   map.on('pm:dragend', (e) => {
     if (e && e.layer) {
       applyAutoClipAndHealOnEdit(e.layer)
@@ -2164,12 +2470,36 @@ const initMap = () => {
   })
 }
 
-// ── FREEHAND / STREAM CURVE DIGITIZING ───────────────────
+// ── FREEHAND & MARQUEE BOX SELECTION ─────────────────────
 let isDrawingFreehand = false
 let freehandPoints = []
 let freehandPolyline = null
 
+let isShiftSelecting = false
+let shiftSelectStartLatLng = null
+let shiftSelectRect = null
+
 const onMapMouseDown = (e) => {
+  // 1. Shift + Drag marquee box selection
+  if (e.originalEvent && e.originalEvent.shiftKey && e.originalEvent.button === 0) {
+    isShiftSelecting = true
+    shiftSelectStartLatLng = e.latlng
+    if (map) map.dragging.disable()
+    if (shiftSelectRect && map) {
+      map.removeLayer(shiftSelectRect)
+    }
+    shiftSelectRect = L.rectangle([e.latlng, e.latlng], {
+      color: '#4f46e5',
+      weight: 2,
+      dashArray: '4, 4',
+      fillColor: '#818cf8',
+      fillOpacity: 0.25,
+      interactive: false
+    }).addTo(map)
+    return
+  }
+
+  // 2. Freehand digitizing mode
   if (!['freehand_poly', 'freehand_cut'].includes(activeTool.value)) return
   if (e.originalEvent && e.originalEvent.button !== 0) return
 
@@ -2193,6 +2523,12 @@ const onMapMouseDown = (e) => {
 }
 
 const onMapMouseMoveFreehand = (e) => {
+  if (isShiftSelecting && shiftSelectStartLatLng && shiftSelectRect) {
+    const bounds = L.latLngBounds(shiftSelectStartLatLng, e.latlng)
+    shiftSelectRect.setBounds(bounds)
+    return
+  }
+
   if (!isDrawingFreehand || (!['freehand_poly', 'freehand_cut'].includes(activeTool.value)) || !freehandPolyline || !map) return
 
   const lastPoint = freehandPoints[freehandPoints.length - 1]
@@ -2206,7 +2542,49 @@ const onMapMouseMoveFreehand = (e) => {
   }
 }
 
-const onMapMouseUp = async () => {
+const onMapMouseUp = async (e) => {
+  if (isShiftSelecting) {
+    isShiftSelecting = false
+    if (map) map.dragging.enable()
+    if (shiftSelectRect && map) {
+      const bounds = shiftSelectRect.getBounds()
+      map.removeLayer(shiftSelectRect)
+      shiftSelectRect = null
+
+      const sw = bounds.getSouthWest()
+      const ne = bounds.getNorthEast()
+      const dLat = Math.abs(ne.lat - sw.lat)
+      const dLng = Math.abs(ne.lng - sw.lng)
+
+      if (dLat > 0.00005 && dLng > 0.00005) {
+        const boxPoly = turf.bboxPolygon([
+          Math.min(sw.lng, ne.lng),
+          Math.min(sw.lat, ne.lat),
+          Math.max(sw.lng, ne.lng),
+          Math.max(sw.lat, ne.lat)
+        ])
+
+        let newlySelectedCount = 0
+        features.value.forEach(feat => {
+          try {
+            const fPoly = turf.feature(feat.geometry)
+            if (turf.booleanIntersects(fPoly, boxPoly)) {
+              const uId = feat._uiId || getFeatureUiId(feat)
+              selectedPolyUiIds.value.add(uId)
+              newlySelectedCount++
+            }
+          } catch (_) {}
+        })
+
+        if (newlySelectedCount > 0) {
+          showToast(`📌 ${selectedPolyUiIds.value.size} poligon terseleksi`)
+          rightTab.value = 'polygons'
+        }
+      }
+    }
+    return
+  }
+
   if (!isDrawingFreehand || (!['freehand_poly', 'freehand_cut'].includes(activeTool.value))) return
   isDrawingFreehand = false
   if (map) map.dragging.enable()
@@ -2343,7 +2721,7 @@ const setDigitizeMode = (mode, force = false) => {
       showToast('✂️ Mode Potong Garis: Tarik garis melintasi poligon dari batas ke batas')
       map.pm.enableDraw('Line', {
         snappable: true,
-        snapDistance: 22,
+        snapDistance: 6,
         snapSegment: true
       })
       break
@@ -2352,7 +2730,7 @@ const setDigitizeMode = (mode, force = false) => {
       showToast('🔪 Mode Potong Area: Gambar poligon untuk membagi area tanpa menghapus')
       map.pm.enableDraw('Polygon', {
         snappable: true,
-        snapDistance: 22,
+        snapDistance: 6,
         snapSegment: true
       })
       break
@@ -2361,7 +2739,7 @@ const setDigitizeMode = (mode, force = false) => {
       showToast('✏️ Mode Gambar Poligon Baru (Klik titik demi titik, Backspace untuk batalkan titik)')
       map.pm.enableDraw('Polygon', {
         snappable: true,
-        snapDistance: 22,
+        snapDistance: 8,
         snapSegment: true
       })
       break
@@ -2377,7 +2755,7 @@ const setDigitizeMode = (mode, force = false) => {
       }
       map.pm.enableGlobalEditMode({
         snappable: true,
-        snapDistance: 20,
+        snapDistance: 10,
         allowSelfIntersection: false
       })
       break
@@ -2502,12 +2880,24 @@ let isAutoClipping = false
 
 const cleanSliversFromGeometry = (geom) => {
   if (!geom) return null
+  const MIN_AREA_SQM = 3.0 // 3 m2 threshold (discard micro sliver artifacts)
+
+  if (geom.type === 'Polygon') {
+    try {
+      const p = turf.polygon(geom.coordinates)
+      if (turf.area(p) < MIN_AREA_SQM) return null
+      return geom
+    } catch (_) {
+      return null
+    }
+  }
+
   if (geom.type === 'MultiPolygon') {
     const validPolys = []
     for (const polyCoords of geom.coordinates) {
       try {
         const p = turf.polygon(polyCoords)
-        if (turf.area(p) >= 0.1) {
+        if (turf.area(p) >= MIN_AREA_SQM) {
           validPolys.push(polyCoords)
         }
       } catch (_) {}
@@ -2585,7 +2975,7 @@ const applyAutoClipAndHealOnEdit = (editedLayer) => {
           const inter = turf.intersect(turf.featureCollection([nPoly, newPoly]))
           if (inter && turf.area(inter) > 0.05) {
             const clipped = turf.difference(turf.featureCollection([nPoly, newPoly]))
-            if (clipped && clipped.geometry && turf.area(clipped) > 0.1) {
+            if (clipped && clipped.geometry && turf.area(clipped) > 3.0) {
               updateLayerGeometry(neighborLayer, clipped.geometry)
               anyModified = true
             } else {
@@ -2606,7 +2996,7 @@ const applyAutoClipAndHealOnEdit = (editedLayer) => {
     if (oldPoly) {
       try {
         const vacated = turf.difference(turf.featureCollection([oldPoly, newPoly]))
-        if (vacated && vacated.geometry && turf.area(vacated) > 0.1) {
+        if (vacated && vacated.geometry && turf.area(vacated) > 3.0) {
           let bestNeighbor = null
           let maxShared = -1
 
@@ -2738,8 +3128,8 @@ const bindLayerEvents = (layer) => {
     } catch (_) {}
   })
 
-  layer.off('pm:edit')
-  layer.on('pm:edit', () => {
+  layer.off('pm:markerdragend')
+  layer.on('pm:markerdragend', () => {
     applyAutoClipAndHealOnEdit(layer)
   })
 

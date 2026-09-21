@@ -82,6 +82,7 @@ export default {
   assignTask: (taskId, userId) => api.post(`/tasks/${taskId}/assign`, { user_id: userId }),
   claimTask: (taskId) => api.post(`/tasks/${taskId}/claim`),
   unclaimTask: (taskId) => api.post(`/tasks/${taskId}/unclaim`),
+  resetTaskAnnotations: (taskId) => api.post(`/tasks/${taskId}/reset-annotations`),
   updateTaskStatus: (taskId, status, reviewerNotes = null) => 
     api.post(`/tasks/${taskId}/status`, { status, reviewer_notes: reviewerNotes }),
   getStatsSummary: () => api.get('/tasks/stats/summary'),
