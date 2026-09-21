@@ -1653,17 +1653,149 @@ const resetCurrentGridAnnotations = async () => {
 const batchDeleteSelectedPolygons = async () => {
   if (selectedPolyUiIds.value.size === 0 || !selectedTaskId.value) return
   const count = selectedPolyUiIds.value.size
-  const confirmed = confirm(`Hapus ${count} poligon terpilih?`)
-  if (!confirmed) return
-
+  const toDelete = features.value.filter(f => selectedPolyUiIds.value.has(f._uiId))
   const remaining = features.value.filter(f => !selectedPolyUiIds.value.has(f._uiId))
-  selectedPolyUiIds.value.clear()
+
+  if (remaining.length === 0) {
+    const emptyConfirmed = confirm(
+      `Semua poligon di grid ini terpilih (${count} poligon).\n\n` +
+      `⚠️ Menghapus semua poligon akan mengosongkan grid tile ini.\n\n` +
+      `Lanjutkan?`
+    )
+    if (!emptyConfirmed) return
+  } else {
+    const confirmed = confirm(
+      `Hapus ${count} poligon terpilih?\n\n` +
+      `💡 Areanya akan otomatis disatukan ke poligon tetangga agar tidak berlubang (bolong).\n\n` +
+      `Lanjutkan?`
+    )
+    if (!confirmed) return
+  }
+
+  showToast(`Menghapus ${count} poligon terpilih...`)
+
+  // Smart absorption into touching neighbors so no holes are left behind
+  if (remaining.length > 0 && toDelete.length > 0) {
+    let unabsorbed = [...toDelete]
+    let maxPasses = unabsorbed.length + 3
+
+    while (unabsorbed.length > 0 && maxPasses-- > 0) {
+      let progress = false
+      const nextUnabsorbed = []
+
+      for (const targetFeat of unabsorbed) {
+        let targetPoly = null
+        try {
+          targetPoly = turf.cleanCoords(turf.feature(targetFeat.geometry))
+        } catch (_) {
+          targetPoly = turf.feature(targetFeat.geometry)
+        }
+
+        let bestNeighborIdx = -1
+        let maxSharedScore = -1
+
+        for (let rIdx = 0; rIdx < remaining.length; rIdx++) {
+          let remPoly = null
+          try {
+            remPoly = turf.feature(remaining[rIdx].geometry)
+          } catch (_) {
+            continue
+          }
+
+          let sharedScore = 0
+          try {
+            const isTouching = turf.booleanTouches(targetPoly, remPoly)
+            const isOverlap = turf.booleanOverlap(targetPoly, remPoly)
+
+            if (isTouching || isOverlap) {
+              try {
+                const inter = turf.intersect(turf.featureCollection([targetPoly, remPoly]))
+                if (inter) {
+                  sharedScore = (inter.geometry && inter.geometry.type.includes('Line'))
+                    ? turf.length(inter)
+                    : turf.area(inter)
+                } else {
+                  sharedScore = 1.0
+                }
+              } catch (_) {
+                sharedScore = 1.0
+              }
+            } else {
+              // Buffer check (~0.5m) to catch vertices touching with snapping tolerance
+              const buffered = turf.buffer(targetPoly, 0.000008, { units: 'kilometers' })
+              if (turf.booleanIntersects(buffered, remPoly)) {
+                sharedScore = 0.1
+              }
+            }
+          } catch (_) {}
+
+          if (sharedScore > maxSharedScore && sharedScore > 0) {
+            maxSharedScore = sharedScore
+            bestNeighborIdx = rIdx
+          }
+        }
+
+        if (bestNeighborIdx !== -1) {
+          try {
+            const hostFeat = remaining[bestNeighborIdx]
+            const hostPoly = turf.feature(hostFeat.geometry)
+            const unioned = turf.union(turf.featureCollection([hostPoly, targetPoly]))
+            if (unioned && unioned.geometry) {
+              const cleaned = cleanSliversFromGeometry(unioned.geometry)
+              if (cleaned) {
+                hostFeat.geometry = cleaned
+                hostFeat.properties.area_sqm = turf.area(turf.feature(cleaned))
+                progress = true
+                continue
+              }
+            }
+          } catch (e) {
+            console.warn('Absorption union error:', e)
+          }
+        }
+        nextUnabsorbed.push(targetFeat)
+      }
+
+      if (!progress && nextUnabsorbed.length > 0 && remaining.length > 0) {
+        // Fallback: absorb first unabsorbed polygon into closest neighbor
+        const targetFeat = nextUnabsorbed.shift()
+        const targetPoly = turf.feature(targetFeat.geometry)
+        let minDist = Infinity
+        let bestR = 0
+        for (let rIdx = 0; rIdx < remaining.length; rIdx++) {
+          try {
+            const d = turf.distance(turf.centroid(targetPoly), turf.centroid(turf.feature(remaining[rIdx].geometry)))
+            if (d < minDist) {
+              minDist = d
+              bestR = rIdx
+            }
+          } catch (_) {}
+        }
+        try {
+          const hostFeat = remaining[bestR]
+          const hostPoly = turf.feature(hostFeat.geometry)
+          const unioned = turf.union(turf.featureCollection([hostPoly, targetPoly]))
+          if (unioned && unioned.geometry) {
+            const cleaned = cleanSliversFromGeometry(unioned.geometry)
+            if (cleaned) {
+              hostFeat.geometry = cleaned
+              hostFeat.properties.area_sqm = turf.area(turf.feature(cleaned))
+            }
+          }
+        } catch (_) {}
+      }
+
+      unabsorbed = nextUnabsorbed
+    }
+  }
+
+  selectedPolyUiIds.value = new Set()
   restoreFeaturesToMap(remaining)
   pushHistory()
 
   try {
     await annotationsStore.saveGridAnnotations(selectedTaskId.value, remaining)
-    showToast(`🗑️ ${count} poligon berhasil dihapus`)
+    showToast(`🗑️ ${count} poligon berhasil dihapus & diserap ke tetangga!`)
   } catch (err) {
     alert(err.response?.data?.detail || 'Gagal menyimpan perubahan hapus poligon')
   }
