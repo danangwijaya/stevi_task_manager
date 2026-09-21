@@ -378,9 +378,11 @@ def save_grid_annotations(
         db.add(ann)
         new_annotations.append(ann)
         
-    # Auto mark task as IN_PROGRESS if it was ASSIGNED
-    if task.status in ["ASSIGNED", "REVISION_NEEDED"]:
+    # Auto mark task as IN_PROGRESS if it was ASSIGNED or UNASSIGNED
+    if task.status in ["ASSIGNED", "REVISION_NEEDED", "UNASSIGNED"]:
         task.status = "IN_PROGRESS"
+        if task.assigned_user_id is None:
+            task.assigned_user_id = current_user.id
         
     db.commit()
     return {"message": f"Successfully saved {len(new_annotations)} annotation polygons", "count": len(new_annotations)}
@@ -491,9 +493,11 @@ def init_base_polygon(
     )
     db.add(base_ann)
 
-    # Auto-set task to IN_PROGRESS if still ASSIGNED
+    # Auto-set task to IN_PROGRESS if still ASSIGNED or UNASSIGNED
     if task.status in ["ASSIGNED", "UNASSIGNED"]:
         task.status = "IN_PROGRESS"
+        if task.assigned_user_id is None:
+            task.assigned_user_id = current_user.id
 
     db.commit()
     db.refresh(base_ann)

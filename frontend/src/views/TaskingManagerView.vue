@@ -230,9 +230,9 @@
 
           <!-- Action Buttons -->
           <div class="space-y-2 pt-0.5">
-            <!-- If task is UNASSIGNED → allow claim -->
+            <!-- If task is UNASSIGNED or has no active assignee → allow claim -->
             <button
-              v-if="selectedTask.status === 'UNASSIGNED'"
+              v-if="selectedTask.status === 'UNASSIGNED' || !selectedTask.assigned_user_id"
               @click="claimSelectedTask"
               :disabled="actionLoading"
               class="w-full bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-md shadow-rose-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
@@ -270,15 +270,16 @@
               <span>Periksa & Review di Menu QC</span>
             </button>
 
-            <!-- Release/Unclaim button — ADMIN ONLY -->
+            <!-- Release/Unclaim button — Admin OR Current Assignee -->
             <button
-              v-if="authStore.isAdmin && selectedTask.assigned_user_id"
+              v-if="(authStore.isAdmin || selectedTask.assigned_user_id === authStore.user?.id) && (selectedTask.assigned_user_id || selectedTask.status !== 'UNASSIGNED')"
               @click="unclaimSelectedTask"
               :disabled="actionLoading"
               class="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+              title="Kembalikan grid ini ke antrean umum (data poligon anotasi tetap tersimpan aman)"
             >
               <LockOpen :size="14" />
-              <span>Lepas Grid ke Antrean Umum (Admin)</span>
+              <span>Lepas Grid ke Antrean Umum</span>
             </button>
           </div>
         </div>
@@ -725,6 +726,12 @@ const claimSelectedTask = async () => {
 
 const unclaimSelectedTask = async () => {
   if (!selectedTask.value) return
+  const confirmed = confirm(
+    `Apakah Anda yakin ingin melepas grid ${selectedTask.value.grid_code} ke antrean umum?\n\n` +
+    `🛡️ Data poligon yang sudah didigitasi TETAP TERSIMPAN AMAN di database dan tidak akan dihapus.`
+  )
+  if (!confirmed) return
+
   actionLoading.value = true
   try {
     const response = await api.unclaimTask(selectedTask.value.id)

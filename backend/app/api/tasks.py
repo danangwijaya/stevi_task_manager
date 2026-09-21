@@ -795,9 +795,9 @@ def claim_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Non-admin users can ONLY claim UNASSIGNED grids
+    # Non-admin users can ONLY claim UNASSIGNED grids or grids without an active assignee
     if current_user.role != "admin":
-        if task.status != "UNASSIGNED":
+        if task.assigned_user_id is not None and task.assigned_user_id != current_user.id:
             status_labels = {
                 "IN_PROGRESS": "sedang dikerjakan",
                 "SUBMITTED": "menunggu review QC",
@@ -810,6 +810,11 @@ def claim_task(
             raise HTTPException(
                 status_code=400,
                 detail=f"Grid ini tidak tersedia — status saat ini: {label}{assignee_info}. Hanya grid berstatus 'Tersedia' yang bisa diambil."
+            )
+        if task.status in ["SUBMITTED", "APPROVED"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Grid ini berstatus '{task.status}' dan sedang dalam proses review QC / sudah selesai."
             )
 
     task.assigned_user_id = current_user.id
@@ -832,17 +837,22 @@ def unclaim_task(
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """
-    Release task back to pool. ADMIN ONLY.
-    Contributors cannot release grids themselves — only admins can.
+    Release task back to pool.
+    - Admin can unclaim ANY task (even if assigned_user_id is null/orphaned).
+    - Annotators can unclaim tasks assigned to THEMSELVES.
+    All existing annotation data remains safely preserved in database.
     """
     task = db.query(TaskGrid).filter(TaskGrid.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if current_user.role != "admin":
+    is_admin = current_user.role == "admin"
+    is_assignee = task.assigned_user_id == current_user.id
+
+    if not is_admin and not is_assignee:
         raise HTTPException(
             status_code=403,
-            detail="Hanya Administrator yang dapat melepas grid ke antrean umum. Hubungi admin jika ingin melepas grid ini."
+            detail="Hanya Administrator atau pengguna yang ditugaskan yang dapat melepas grid ini ke antrean umum."
         )
 
     task.assigned_user_id = None
@@ -851,7 +861,10 @@ def unclaim_task(
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
-    return {"message": f"Grid {task.grid_code} dikembalikan ke antrean umum oleh admin", "task_id": task.id}
+    return {
+        "message": f"Grid {task.grid_code} berhasil dikembalikan ke antrean umum. Data poligon anotasi tetap tersimpan aman.",
+        "task_id": task.id
+    }
 
 @router.post("/{task_id}/assign")
 def assign_task(
