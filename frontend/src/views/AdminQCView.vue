@@ -193,24 +193,31 @@
             </button>
           </div>
 
-          <!-- Year Filter Pills (Default: Latest year 2025, selectable to other years) -->
-          <div class="space-y-1">
-            <div class="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider px-0.5">
-              <span>Filter Tahun Citra:</span>
-              <span class="font-mono text-rose-600 bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200">
-                {{ selectedYear === 'ALL' ? 'Semua Tahun' : selectedYear }}
+          <!-- Year Filter Dropdown List -->
+          <div class="space-y-1.5">
+            <label for="qc-year-filter" class="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider px-0.5">
+              <span class="flex items-center gap-1.5">
+                <Calendar :size="12" class="text-rose-600" />
+                <span>Filter Tahun / Waktu:</span>
               </span>
-            </div>
-            <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-center text-[10px] font-bold overflow-x-auto">
-              <button
-                v-for="yr in availableQcYears"
-                :key="yr"
-                @click="setQcYear(yr)"
-                class="flex-1 py-1 px-2 rounded-lg transition-all cursor-pointer whitespace-nowrap"
-                :class="selectedYear === yr ? 'bg-white text-rose-700 shadow-xs border border-slate-200' : 'text-slate-600 hover:text-slate-900'"
+              <span class="font-mono text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 text-[10px]">
+                {{ selectedYear === 'ALL' ? 'Semua Tahun' : `Tahun ${selectedYear}` }}
+              </span>
+            </label>
+            <div class="relative">
+              <select
+                id="qc-year-filter"
+                :value="selectedYear"
+                @change="setQcYear($event.target.value === 'ALL' ? 'ALL' : Number($event.target.value))"
+                class="w-full appearance-none bg-white border border-slate-300 hover:border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-400/20 rounded-xl px-3 py-2 pr-8 text-xs font-bold text-slate-800 transition-all cursor-pointer shadow-2xs focus:outline-none"
               >
-                {{ yr === 'ALL' ? 'Semua' : yr }}
-              </button>
+                <option v-for="yr in availableQcYears" :key="yr" :value="yr">
+                  {{ yr === 'ALL' ? '🌐 Semua Tahun (Mosaik Global)' : `📅 Tahun ${yr} ${yr === 2025 ? '(Terbaru / Aktif)' : ''}` }}
+                </option>
+              </select>
+              <div class="absolute inset-y-0 right-0 flex items-center pr-2.5 pointer-events-none text-slate-400">
+                <ChevronDown :size="14" />
+              </div>
             </div>
           </div>
 
@@ -798,7 +805,9 @@ import {
   Maximize2,
   Edit3,
   Sparkles,
-  UserCheck
+  UserCheck,
+  Calendar,
+  ChevronDown
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useTasksStore } from '../stores/tasks'
@@ -900,6 +909,35 @@ const availableQcYears = computed(() => {
 const setQcYear = async (yr) => {
   selectedYear.value = yr
   await refreshAllData()
+
+  // Pindahkan peta ke cakupan poligon atau grid tahun yang dipilih
+  await nextTick()
+  if (qcMap) {
+    if (viewScope.value === 'single' && selectedTask.value) {
+      fitMapBounds()
+    } else if (viewScope.value === 'mosaic') {
+      renderMosaicOnMap()
+    } else {
+      const targetGrids = allDigitizedGrids.value.length > 0
+        ? allDigitizedGrids.value
+        : tasksStore.tasks.filter(t => yr === 'ALL' || t.year === Number(yr))
+
+      if (targetGrids.length > 0) {
+        let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity
+        targetGrids.forEach(g => {
+          if (g.min_lat != null && g.min_lon != null) {
+            minLat = Math.min(minLat, g.min_lat)
+            minLon = Math.min(minLon, g.min_lon)
+            maxLat = Math.max(maxLat, g.max_lat)
+            maxLon = Math.max(maxLon, g.max_lon)
+          }
+        })
+        if (minLat !== Infinity && isFinite(minLat)) {
+          qcMap.fitBounds([[minLat, minLon], [maxLat, maxLon]], { padding: [40, 40], maxZoom: 15 })
+        }
+      }
+    }
+  }
 }
 
 // All digitized grids (merged from overviewData.by_grid and tasksStore)

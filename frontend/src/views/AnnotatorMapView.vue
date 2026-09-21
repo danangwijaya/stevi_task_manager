@@ -1311,7 +1311,7 @@
               <span>Gabung ({{ selectedPolyUiIds.size }})</span>
             </button>
             <button
-              @click="selectedPolyUiIds.clear()"
+              @click="clearPolygonSelection"
               class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200/60 transition-colors cursor-pointer"
               title="Batalkan seleksi"
             >
@@ -1323,11 +1323,14 @@
           <div
             v-for="(feat, idx) in features"
             :key="feat._uiId || idx"
-            @click="selectFeatureFromList(idx)"
-            class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1 hover:border-slate-300 transition-all text-xs cursor-pointer select-none"
+            @mouseenter="highlightFeatureOnMap(idx, true)"
+            @mouseleave="highlightFeatureOnMap(idx, false)"
+            @click="toggleSelectPolygon(feat._uiId); flyToFeature(idx)"
+            class="p-2.5 bg-slate-50 border rounded-xl space-y-1 transition-all text-xs cursor-pointer select-none"
             :class="[
-              clickedFeatureIdx === idx ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/40' : '',
-              selectedPolyUiIds.has(feat._uiId) ? 'bg-indigo-50/70 border-indigo-300' : ''
+              selectedPolyUiIds.has(feat._uiId)
+                ? 'bg-cyan-50/90 border-cyan-400 shadow-xs ring-2 ring-cyan-400/40 text-cyan-950'
+                : (clickedFeatureIdx === idx ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/40' : 'border-slate-200 hover:border-slate-300 hover:bg-white')
             ]"
           >
             <div class="flex items-center justify-between">
@@ -1336,7 +1339,7 @@
                   type="checkbox"
                   :checked="selectedPolyUiIds.has(feat._uiId)"
                   @click.stop="toggleSelectPolygon(feat._uiId)"
-                  class="w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer shrink-0"
+                  class="w-4 h-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer shrink-0"
                 />
                 <div
                   class="w-3 h-3 rounded-sm border border-slate-300 shrink-0"
@@ -1344,7 +1347,10 @@
                 ></div>
                 <span class="font-bold text-slate-800 truncate max-w-[140px]">{{ feat.properties?.class_name || 'Belum Terklasifikasi' }}</span>
               </div>
-              <span class="text-[10px] text-slate-400 font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">#{{ idx + 1 }}</span>
+              <div class="flex items-center gap-1.5">
+                <span v-if="selectedPolyUiIds.has(feat._uiId)" class="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" title="Terpilih di peta"></span>
+                <span class="text-[10px] text-slate-400 font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">#{{ idx + 1 }}</span>
+              </div>
             </div>
 
             <div class="flex items-center justify-between text-[10px] text-slate-500 pt-0.5 pl-6">
@@ -1582,6 +1588,7 @@ const selectableTasks = computed(() => {
 })
 
 const selectedPolyUiIds = ref(new Set())
+const hoverFeatureIdx = ref(null)
 
 const isAllSelected = computed(() => {
   if (features.value.length === 0) return false
@@ -1590,25 +1597,37 @@ const isAllSelected = computed(() => {
 
 const toggleSelectAll = () => {
   if (isAllSelected.value) {
-    selectedPolyUiIds.value.clear()
+    selectedPolyUiIds.value = new Set()
   } else {
+    const next = new Set()
     features.value.forEach(f => {
       const uId = f._uiId || getFeatureUiId(f)
-      selectedPolyUiIds.value.add(uId)
+      next.add(uId)
     })
+    selectedPolyUiIds.value = next
   }
+  refreshMapStyles()
 }
 
 const toggleSelectPolygon = (uiId) => {
-  if (selectedPolyUiIds.value.has(uiId)) {
-    selectedPolyUiIds.value.delete(uiId)
+  const next = new Set(selectedPolyUiIds.value)
+  if (next.has(uiId)) {
+    next.delete(uiId)
   } else {
-    selectedPolyUiIds.value.add(uiId)
+    next.add(uiId)
   }
+  selectedPolyUiIds.value = next
+  refreshMapStyles()
 }
 
 const clearPolygonSelection = () => {
-  selectedPolyUiIds.value.clear()
+  selectedPolyUiIds.value = new Set()
+  refreshMapStyles()
+}
+
+const highlightFeatureOnMap = (idx, isHover) => {
+  hoverFeatureIdx.value = isHover ? idx : null
+  refreshMapStyles()
 }
 
 const resetCurrentGridAnnotations = async () => {
@@ -2564,17 +2583,21 @@ const onMapMouseUp = async (e) => {
           Math.max(sw.lat, ne.lat)
         ])
 
+        const next = new Set(selectedPolyUiIds.value)
         let newlySelectedCount = 0
         features.value.forEach(feat => {
           try {
             const fPoly = turf.feature(feat.geometry)
             if (turf.booleanIntersects(fPoly, boxPoly)) {
               const uId = feat._uiId || getFeatureUiId(feat)
-              selectedPolyUiIds.value.add(uId)
+              next.add(uId)
               newlySelectedCount++
             }
           } catch (_) {}
         })
+
+        selectedPolyUiIds.value = next
+        refreshMapStyles()
 
         if (newlySelectedCount > 0) {
           showToast(`📌 ${selectedPolyUiIds.value.size} poligon terseleksi`)
@@ -3112,6 +3135,15 @@ const bindLayerEvents = (layer) => {
     if (idx < 0) return
 
     const feat = features.value[idx] || layer.feature
+    const uId = layer._uiId || (feat && (feat._uiId || getFeatureUiId(feat)))
+
+    // If Shift key is held while clicking a polygon on the map -> toggle it in multi-selection!
+    if (e.originalEvent && e.originalEvent.shiftKey && uId) {
+      toggleSelectPolygon(uId)
+      rightTab.value = 'polygons'
+      return
+    }
+
     clickedFeatureIdx.value = idx
     rightTab.value = 'classes'
     refreshMapStyles()
@@ -3398,33 +3430,59 @@ const refreshMapStyles = () => {
   let idx = 0
   featureGroup.eachLayer((layer) => {
     const feat = features.value[idx] || layer.feature
+    const uId = layer._uiId || feat?._uiId || (feat && getFeatureUiId(feat))
+    if (!layer._uiId && uId) layer._uiId = uId
+
     const isClicked = clickedFeatureIdx.value === idx
     const isMergedSelected = isFeatureSelectedForMerge(feat, layer)
+    const isMultiSelected = uId && selectedPolyUiIds.value.has(uId)
+    const isHovered = hoverFeatureIdx.value === idx
     const color = layer.feature?.properties?.color || feat?.properties?.color || '#9CA3AF'
 
     let weight = 2
     let strokeColor = color
+    let fillColor = color
     let fillOpacity = polygonOpacity.value
     let strokeOpacity = polygonOpacity.value === 0 ? 0.35 : 1
+    let dashArray = null
 
-    if (isClicked) {
+    if (isMultiSelected) {
+      // 🌟 Unmistakable Cyan Multi-Selection Highlight on Map
+      weight = 4.5
+      strokeColor = '#06b6d4' // Cyan-500
+      fillColor = '#22d3ee' // Cyan-400
+      fillOpacity = Math.max(polygonOpacity.value, 0.65)
+      strokeOpacity = 1
+      dashArray = '6, 4'
+      try { layer.bringToFront() } catch (_) {}
+    } else if (isHovered) {
+      // 🌟 Hover Highlight from Sidebar List
+      weight = 4
+      strokeColor = '#facc15' // Amber/Yellow
+      fillOpacity = Math.max(polygonOpacity.value, 0.6)
+      strokeOpacity = 1
+      try { layer.bringToFront() } catch (_) {}
+    } else if (isClicked) {
       weight = 3.5
       strokeColor = '#4f46e5' // Indigo highlight
-      fillOpacity = Math.max(polygonOpacity.value, 0.4)
+      fillOpacity = Math.max(polygonOpacity.value, 0.45)
       strokeOpacity = 1
+      try { layer.bringToFront() } catch (_) {}
     } else if (isMergedSelected) {
       weight = 3.5
       strokeColor = '#10b981' // Emerald highlight for merge
       fillOpacity = Math.max(polygonOpacity.value, 0.45)
       strokeOpacity = 1
+      try { layer.bringToFront() } catch (_) {}
     }
 
     layer.setStyle({
       color: strokeColor,
-      fillColor: color,
+      fillColor: fillColor,
       fillOpacity: fillOpacity,
       opacity: strokeOpacity,
-      weight: weight
+      weight: weight,
+      dashArray: dashArray
     })
     idx++
   })
