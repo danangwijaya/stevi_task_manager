@@ -686,8 +686,15 @@
             <div v-else class="space-y-1.5 max-h-52 overflow-y-auto pr-1">
               <div
                 v-for="(poly, idx) in taskFeatures"
-                :key="idx"
-                class="p-2 bg-white border border-slate-200 rounded-xl flex items-center justify-between text-xs transition-all hover:border-indigo-300 group"
+                :key="poly.id || idx"
+                :id="'qc-poly-' + poly.id"
+                @click="selectPolygon(poly)"
+                @mouseenter="highlightPolygonOnMap(poly.id, true)"
+                @mouseleave="highlightPolygonOnMap(poly.id, false)"
+                class="p-2 rounded-xl flex items-center justify-between text-xs transition-all cursor-pointer border group"
+                :class="selectedPolygonId === poly.id
+                  ? 'bg-cyan-50/90 border-cyan-400 shadow-xs ring-2 ring-cyan-400/40'
+                  : 'bg-white border-slate-200 hover:border-cyan-300 hover:bg-slate-50/80'"
               >
                 <div class="flex items-center gap-2 truncate">
                   <div
@@ -1093,6 +1100,8 @@ let qcGridBoundingLayer = null
 const qcLayer = ref('local_s2_rgb')
 const qcOpacity = ref(0.65)
 const hoveredFeature = ref(null)
+const selectedPolygonId = ref(null)
+let polygonLayersMap = new Map()
 const qcTopologyResult = ref(null)
 const checkingTopology = ref(false)
 
@@ -1516,6 +1525,7 @@ const selectTask = async (task) => {
   reviewerNotes.value = task.reviewer_notes || ''
   qcTopologyResult.value = null
   hoveredFeature.value = null
+  selectedPolygonId.value = null
 
   if (viewScope.value === 'mosaic') {
     viewScope.value = 'single'
@@ -1572,6 +1582,7 @@ const initOrUpdateQCMap = (task, features) => {
 
   // Render Polygons for active grid
   qcFeatureGroup.clearLayers()
+  polygonLayersMap.clear()
   const classesMap = {}
   annotationsStore.classes.forEach(c => { classesMap[c.id] = c })
 
@@ -1579,17 +1590,20 @@ const initOrUpdateQCMap = (task, features) => {
     const cls = classesMap[feat.properties?.class_id]
     const color = cls?.color || '#9CA3AF'
     const areaHa = Math.round((feat.properties?.area_sqm || 10000) / 10000)
+    const isSelected = selectedPolygonId.value === feat.id
 
     const layer = L.geoJSON(feat, {
       style: () => ({
-        color: '#ffffff',
-        weight: 2,
+        color: isSelected ? '#06b6d4' : '#ffffff',
+        weight: isSelected ? 4.5 : 2,
         fillColor: color,
-        fillOpacity: qcOpacity.value
+        fillOpacity: isSelected ? Math.min(qcOpacity.value + 0.25, 0.95) : qcOpacity.value
       })
     })
 
     layer.eachLayer(l => {
+      polygonLayersMap.set(feat.id, l)
+
       l.on('mouseover', () => {
         hoveredFeature.value = {
           class_name: cls?.name || feat.properties?.class_name || 'Belum Terklasifikasi',
@@ -1598,11 +1612,20 @@ const initOrUpdateQCMap = (task, features) => {
           grid_code: task.grid_code,
           author_name: task.assigned_user_name
         }
-        l.setStyle({ weight: 3.5, color: '#facc15', fillOpacity: 0.88 })
+        if (selectedPolygonId.value !== feat.id) {
+          l.setStyle({ weight: 3.5, color: '#facc15', fillOpacity: 0.88 })
+        }
       })
 
       l.on('mouseout', () => {
-        l.setStyle({ weight: 2, color: '#ffffff', fillOpacity: qcOpacity.value })
+        if (selectedPolygonId.value !== feat.id) {
+          l.setStyle({ weight: 2, color: '#ffffff', fillOpacity: qcOpacity.value })
+        }
+      })
+
+      l.on('click', (e) => {
+        L.DomEvent.stopPropagation(e)
+        selectPolygon(feat)
       })
 
       l.bindTooltip(`<b>${cls?.name || feat.properties?.class_name}</b><br>~${areaHa} Ha`, {
@@ -1619,6 +1642,60 @@ const initOrUpdateQCMap = (task, features) => {
 
   if (gridBounds && qcMap) {
     qcMap.fitBounds(gridBounds, { padding: [30, 30] })
+  }
+}
+
+// ─────────────────────────────────────────────
+// BIDIRECTIONAL POLYGON SELECTION & HIGHLIGHTING
+// ─────────────────────────────────────────────
+
+const selectPolygon = (poly) => {
+  if (!poly) return
+  selectedPolygonId.value = poly.id
+
+  // Highlight selected polygon on the map with glowing cyan border
+  polygonLayersMap.forEach((lyr, id) => {
+    const isTarget = id === poly.id
+    const featObj = taskFeatures.value.find(f => f.id === id)
+    const cls = annotationsStore.classes.find(c => c.id === featObj?.properties?.class_id)
+    const color = cls?.color || '#9CA3AF'
+
+    lyr.setStyle({
+      weight: isTarget ? 4.5 : 2,
+      color: isTarget ? '#06b6d4' : '#ffffff',
+      fillColor: color,
+      fillOpacity: isTarget ? Math.min(qcOpacity.value + 0.25, 0.95) : qcOpacity.value
+    })
+
+    if (isTarget) {
+      lyr.bringToFront()
+      if (lyr.getBounds && qcMap) {
+        qcMap.fitBounds(lyr.getBounds(), { padding: [60, 60], maxZoom: 16 })
+      }
+    }
+  })
+
+  // Scroll corresponding card into view in sidebar smoothly
+  nextTick(() => {
+    const el = document.getElementById('qc-poly-' + poly.id)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  })
+}
+
+const highlightPolygonOnMap = (polyId, isHover) => {
+  if (selectedPolygonId.value === polyId) return
+  const layer = polygonLayersMap.get(polyId)
+  if (!layer) return
+
+  if (isHover) {
+    layer.setStyle({ weight: 3.5, color: '#facc15', fillOpacity: Math.min(qcOpacity.value + 0.2, 0.9) })
+    layer.bringToFront()
+  } else {
+    const featObj = taskFeatures.value.find(f => f.id === polyId)
+    const cls = annotationsStore.classes.find(c => c.id === featObj?.properties?.class_id)
+    layer.setStyle({ weight: 2, color: '#ffffff', fillOpacity: qcOpacity.value, fillColor: cls?.color || '#9CA3AF' })
   }
 }
 
