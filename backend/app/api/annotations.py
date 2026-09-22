@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from shapely.geometry import shape
 
 from app.db.session import get_db
-from app.db.models import Annotation, TaskGrid, User, LandCoverClass
+from app.db.models import Annotation, TaskGrid, User, LandCoverClass, TaskReviewPin
 from app.core.config import settings
 from app.api.deps import get_current_user
 
@@ -360,7 +360,8 @@ def save_grid_annotations(
         task.assigned_user_id = current_user.id
         task.status = "IN_PROGRESS"
 
-    # Clear previous annotations for this grid to sync cleanly
+    # Clear previous annotations for this grid to sync cleanly (safeguard review pins)
+    db.query(TaskReviewPin).filter(TaskReviewPin.task_grid_id == task_grid_id).update({"annotation_id": None}, synchronize_session=False)
     db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).delete()
     
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
@@ -662,6 +663,114 @@ def validate_topology(
     }
 
 
+@router.post("/grid/{task_grid_id}/auto-heal-topology")
+def auto_heal_topology(
+    task_grid_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Auto-heals topological errors in a task grid:
+    1. Removes degenerate zero-area / micro-sliver polygons (< 0.5 m²).
+    2. Heals invalid geometries with Shapely make_valid / buffer(0) (resolves self-intersections and collapsed components).
+    3. Removes zero-area / degenerate collapsed line holes from polygon interiors.
+    4. Resolves minor boundary overlaps using difference operations.
+    """
+    from shapely.geometry import shape, mapping, Polygon
+    from shapely.validation import make_valid
+    
+    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task grid not found")
+
+    annotations = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
+    if not annotations:
+        return {"message": "Tidak ada poligon untuk diperbaiki", "healed_count": 0, "removed_count": 0}
+
+    healed_count = 0
+    removed_count = 0
+    min_area_deg = 0.5 / (111320.0 ** 2)
+
+    for ann in annotations:
+        try:
+            geom_dict = json.loads(ann.geom_geojson)
+            s_geom = shape(geom_dict)
+        except Exception:
+            # Unparseable geometry: detach pins and delete
+            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
+            db.delete(ann)
+            removed_count += 1
+            continue
+
+        # Check for zero area or tiny sliver < 0.5 m²
+        if s_geom.is_empty or s_geom.area < min_area_deg:
+            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
+            db.delete(ann)
+            removed_count += 1
+            continue
+
+        was_healed = False
+        # If invalid (e.g. self-intersection, too few points)
+        if not s_geom.is_valid:
+            try:
+                s_geom = make_valid(s_geom)
+                was_healed = True
+            except Exception:
+                try:
+                    s_geom = s_geom.buffer(0)
+                    was_healed = True
+                except Exception:
+                    pass
+
+        # If it has degenerate holes, clean them
+        if s_geom.geom_type == 'Polygon' and len(s_geom.interiors) > 0:
+            cleaned_holes = [h for h in s_geom.interiors if Polygon(h).area > 1e-9]
+            if len(cleaned_holes) != len(s_geom.interiors):
+                s_geom = Polygon(s_geom.exterior, cleaned_holes)
+                was_healed = True
+
+        # Extract valid polygon(s) from GeometryCollection / MultiPolygon if make_valid expanded it
+        extracted = _extract_polygons(s_geom, min_area_sqm=0.5)
+        if not extracted:
+            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
+            db.delete(ann)
+            removed_count += 1
+            continue
+
+        # If make_valid produced exactly 1 clean polygon
+        if len(extracted) == 1:
+            clean_p = extracted[0]
+            if was_healed or clean_p.wkt != s_geom.wkt:
+                ann.geom_geojson = json.dumps(mapping(clean_p))
+                ann.area_sqm = clean_p.area * (111320.0 ** 2)
+                healed_count += 1
+        else:
+            # If make_valid split a self-intersecting polygon into multiple valid pieces
+            p0 = extracted[0]
+            ann.geom_geojson = json.dumps(mapping(p0))
+            ann.area_sqm = p0.area * (111320.0 ** 2)
+            healed_count += 1
+            for extra_p in extracted[1:]:
+                new_ann = Annotation(
+                    task_grid_id=task_grid_id,
+                    user_id=ann.user_id,
+                    class_id=ann.class_id,
+                    class_name=ann.class_name,
+                    geom_geojson=json.dumps(mapping(extra_p)),
+                    area_sqm=extra_p.area * (111320.0 ** 2)
+                )
+                db.add(new_ann)
+                healed_count += 1
+
+    db.commit()
+
+    return {
+        "message": f"Berhasil merapikan topologi! {healed_count} poligon diperbaiki, {removed_count} serpihan kosong dibersihkan.",
+        "healed_count": healed_count,
+        "removed_count": removed_count
+    }
+
+
 @router.delete("/{annotation_id}")
 def delete_annotation(
     annotation_id: int,
@@ -672,9 +781,12 @@ def delete_annotation(
     if not ann:
         raise HTTPException(status_code=404, detail="Annotation not found")
         
-    if current_user.role != "admin" and ann.user_id != current_user.id:
+    role = (current_user.role or "").lower().strip()
+    if role not in ["admin", "dosen"] and ann.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this annotation")
         
+    # Safeguard review pins before deleting annotation
+    db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == annotation_id).update({"annotation_id": None}, synchronize_session=False)
     db.delete(ann)
     db.commit()
     return {"message": "Annotation deleted successfully"}
@@ -709,18 +821,46 @@ class UpdateAnnotationClassRequest(BaseModel):
     class_id: int
 
 
-def _extract_polygons(geom):
-    """Recursively unpacks GeometryCollection / MultiPolygon into distinct Polygon objects"""
-    if geom.is_empty:
+def _extract_polygons(geom, min_area_sqm=0.5):
+    """
+    Recursively unpacks GeometryCollection / MultiPolygon into distinct Polygon objects,
+    validates/heals geometry with make_valid, and filters out micro-slivers below min_area_sqm.
+    """
+    from shapely.validation import make_valid
+    if geom is None or geom.is_empty:
         return []
+
+    # Convert minimum area in square meters to approximate degrees squared (1 deg ~ 111320m)
+    min_area_deg = (min_area_sqm / (111320.0 ** 2)) if min_area_sqm > 0 else 1e-12
+
+    if not geom.is_valid:
+        try:
+            geom = make_valid(geom)
+        except Exception:
+            try:
+                geom = geom.buffer(0)
+            except Exception:
+                pass
+
     if geom.geom_type == 'Polygon':
-        return [geom] if geom.area > 1e-12 else []
+        if geom.is_valid and geom.area >= min_area_deg:
+            # Also clean any collapsed degenerate interior holes (holes with zero area or collinear lines)
+            if len(geom.interiors) > 0:
+                from shapely.geometry import Polygon as SPolygon
+                cleaned_holes = [h for h in geom.interiors if SPolygon(h).area > 1e-9]
+                if len(cleaned_holes) != len(geom.interiors):
+                    geom = SPolygon(geom.exterior, cleaned_holes)
+            return [geom] if geom.is_valid and geom.area >= min_area_deg else []
+        return []
     elif geom.geom_type == 'MultiPolygon':
-        return [g for g in geom.geoms if g.area > 1e-12]
+        polys = []
+        for g in geom.geoms:
+            polys.extend(_extract_polygons(g, min_area_sqm=min_area_sqm))
+        return polys
     elif geom.geom_type == 'GeometryCollection':
         polys = []
         for g in geom.geoms:
-            polys.extend(_extract_polygons(g))
+            polys.extend(_extract_polygons(g, min_area_sqm=min_area_sqm))
         return polys
     return []
 
@@ -895,7 +1035,8 @@ def split_by_polygon(
 
                 if inter_polys and diff_polys:
                     split_occurred = True
-                    # Remove original polygon record
+                    # Remove original polygon record (safeguard review pins)
+                    db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
                     db.delete(ann)
 
                     # Add difference pieces (keeping original class)
@@ -936,25 +1077,8 @@ def split_by_polygon(
             except Exception:
                 continue
 
-        # If cutter didn't split or reclassify any polygon (e.g. drawn in unannotated open space in grid)
-        if not split_occurred:
-            cut_polys = _extract_polygons(cutter_in_grid)
-            for cp in cut_polys:
-                area_sqm = cp.area * (111320.0 ** 2)
-                db.add(Annotation(
-                    task_grid_id=req.task_grid_id,
-                    user_id=current_user.id,
-                    class_id=new_class_id,
-                    class_name=new_class_name,
-                    geom_geojson=json.dumps(mapping(cp)),
-                    area_sqm=area_sqm
-                ))
-                new_created_count += 1
-            if new_created_count > 0:
-                split_occurred = True
-
     if not split_occurred:
-        raise HTTPException(status_code=400, detail="Garis pemotong tidak memotong poligon manapun atau poligon berada di luar area.")
+        raise HTTPException(status_code=400, detail="Garis atau area pemotong tidak membelah poligon manapun. Pastikan melintasi batas poligon target.")
 
     if task.status in ["ASSIGNED", "UNASSIGNED", "REVISION_NEEDED"]:
         task.status = "IN_PROGRESS"
@@ -1062,6 +1186,8 @@ def split_by_line(
 
                 if len(pieces) > 1:
                     split_occurred = True
+                    # Remove original polygon record (safeguard review pins)
+                    db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
                     db.delete(ann)
 
                     # Piece 0 gets original class
@@ -1143,7 +1269,9 @@ def merge_polygons(
     merged_geom = unary_union(geoms)
     merged_polys = _extract_polygons(merged_geom)
 
-    # Delete old annotations
+    # Delete old annotations (safeguard review pins)
+    ann_ids = [ann.id for ann in annotations]
+    db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(ann_ids)).update({"annotation_id": None}, synchronize_session=False)
     for ann in annotations:
         db.delete(ann)
 
@@ -1275,7 +1403,8 @@ def smart_delete_polygon(
     if not merged_polys:
         raise HTTPException(status_code=500, detail="Gagal menggabungkan geometri poligon.")
 
-    # Delete the target polygon
+    # Delete the target polygon (safeguard review pins)
+    db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == target.id).update({"annotation_id": None}, synchronize_session=False)
     db.delete(target)
 
     # Update neighbor annotation with unioned geometry

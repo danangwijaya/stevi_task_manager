@@ -106,6 +106,7 @@ export default {
   deleteAnnotation: (annId) => api.delete(`/annotations/${annId}`),
   initBasePolygon: (taskGridId) => api.post(`/annotations/grid/${taskGridId}/init-base`),
   validateTopology: (taskGridId) => api.post(`/annotations/grid/${taskGridId}/validate-topology`),
+  autoHealTopology: (taskGridId) => api.post(`/annotations/grid/${taskGridId}/auto-heal-topology`),
   copyAnnotations: (targetId, sourceId) => api.post(`/annotations/grid/${targetId}/copy-from/${sourceId}`),
   splitByPolygon: (taskGridId, cuttingGeom, targetAnnId = null, newClassId = 0) =>
     api.post('/annotations/split-by-polygon', {

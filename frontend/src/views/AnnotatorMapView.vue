@@ -462,8 +462,6 @@
               <Scissors v-if="activeTool === 'split_line'" :size="15" class="text-rose-600" />
               <Layers v-else-if="activeTool === 'split_poly'" :size="15" class="text-rose-600" />
               <LassoSelect v-else-if="activeTool === 'freehand_cut'" :size="15" class="text-rose-600" />
-              <PenTool v-else-if="activeTool === 'draw_poly'" :size="15" class="text-rose-600" />
-              <Spline v-else-if="activeTool === 'freehand_poly'" :size="15" class="text-rose-600" />
               <Combine v-else-if="activeTool === 'merge'" :size="15" class="text-indigo-600" />
               <Edit3 v-else-if="activeTool === 'edit'" :size="15" class="text-amber-500" />
               <Trash2 v-else-if="activeTool === 'delete'" :size="15" class="text-rose-600" />
@@ -517,28 +515,6 @@
               <span class="text-[11px]">Potong Bebas</span>
             </button>
 
-            <!-- Tool: Draw Standard Polygon -->
-            <button
-              @click="setDigitizeMode('draw_poly')"
-              class="p-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer text-left"
-              :class="activeTool === 'draw_poly' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'"
-              title="Gambar Poligon Biasa (Klik titik demi titik, Backspace untuk batalkan titik)"
-            >
-              <PenTool :size="15" />
-              <span class="text-[11px]">Gambar Poligon</span>
-            </button>
-
-            <!-- Tool: Freehand / Stream Polygon Draw -->
-            <button
-              @click="setDigitizeMode('freehand_poly')"
-              class="p-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer text-left"
-              :class="activeTool === 'freehand_poly' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'"
-              title="Freehand Stream: Tahan & geser mouse untuk menggambar kurva meliuk (sungai/hutan) secara mengalir & mulus"
-            >
-              <Spline :size="15" />
-              <span class="text-[11px]">Freehand Stream</span>
-            </button>
-
             <!-- Tool: Merge Polygons -->
             <button
               @click="setDigitizeMode('merge')"
@@ -570,6 +546,17 @@
             >
               <Trash2 :size="15" />
               <span class="text-[11px]">Hapus</span>
+            </button>
+
+            <!-- Tool: Auto-Heal Topology -->
+            <button
+              @click="handleAutoHeal"
+              :disabled="isHealingTopology || !selectedTaskId"
+              class="p-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer text-left bg-gradient-to-r from-violet-50 to-indigo-50 hover:from-violet-100 hover:to-indigo-100 text-violet-800 border border-violet-200 shadow-2xs"
+              title="Rapikan Geometri: Memperbaiki titik rusak/terlipat, menutup lubang tak valid, dan membuang serpihan mikroskopis"
+            >
+              <Wand2 :size="15" class="text-violet-600" :class="{ 'animate-spin': isHealingTopology }" />
+              <span class="text-[11px]">{{ isHealingTopology ? 'Merapikan...' : 'Rapikan Geometri' }}</span>
             </button>
 
             <!-- Quick Undo & Redo in Toolbox -->
@@ -1547,7 +1534,8 @@ import {
   RefreshCcw,
   MapPin,
   Focus,
-  RotateCcw
+  RotateCcw,
+  Wand2
 } from 'lucide-vue-next'
 import * as turf from '@turf/turf'
 import { useAuthStore } from '../stores/auth'
@@ -2665,28 +2653,9 @@ const initMap = () => {
       return
     }
 
-    // 3. If in standard draw mode
-    const currentClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
-    
-    const uiId = 'f_draw_' + Date.now() + '_' + (++_featureUiCounter)
-    layer._uiId = uiId
-    layer.feature = {
-      type: 'Feature',
-      _uiId: uiId,
-      geometry: layerGeoJSON.geometry,
-      properties: {
-        class_id: currentClass?.id || 1,
-        class_name: currentClass?.name || 'Hutan Lahan Kering',
-        color: currentClass?.color || '#006400'
-      }
-    }
-
-    styleLayer(layer, currentClass?.color || '#006400')
-    bindLayerEvents(layer)
-    featureGroup.addLayer(layer)
-    syncFeaturesFromMap()
-    pushHistory()
-    showToast(`Poligon [${currentClass?.name}] ditambahkan`)
+    // 3. Prevent raw overlay polygon creation that causes overlap
+    map.removeLayer(layer)
+    showToast('⚠️ Silakan gunakan alat Potong Garis atau Potong Area untuk membagi poligon.')
   })
 
   map.on('pm:remove', () => {
@@ -2735,24 +2704,21 @@ const onMapMouseDown = (e) => {
     return
   }
 
-  // 2. Freehand digitizing mode
-  if (!['freehand_poly', 'freehand_cut'].includes(activeTool.value)) return
+  // 2. Freehand digitizing mode (Lasso Cut)
+  if (activeTool.value !== 'freehand_cut') return
   if (e.originalEvent && e.originalEvent.button !== 0) return
 
   isDrawingFreehand = true
   if (map) map.dragging.disable()
   freehandPoints = [e.latlng]
 
-  const currentClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
-  const strokeColor = activeTool.value === 'freehand_cut' ? '#E11D48' : (currentClass?.color || '#006400')
-
   if (freehandPolyline && map) {
     map.removeLayer(freehandPolyline)
   }
 
   freehandPolyline = L.polyline([e.latlng], {
-    color: strokeColor,
-    weight: activeTool.value === 'freehand_cut' ? 3.5 : 3,
+    color: '#E11D48',
+    weight: 3.5,
     dashArray: '4, 4',
     opacity: 0.95
   }).addTo(map)
@@ -2765,7 +2731,7 @@ const onMapMouseMoveFreehand = (e) => {
     return
   }
 
-  if (!isDrawingFreehand || (!['freehand_poly', 'freehand_cut'].includes(activeTool.value)) || !freehandPolyline || !map) return
+  if (!isDrawingFreehand || activeTool.value !== 'freehand_cut' || !freehandPolyline || !map) return
 
   const lastPoint = freehandPoints[freehandPoints.length - 1]
   const p1 = map.latLngToLayerPoint(lastPoint)
@@ -2825,7 +2791,7 @@ const onMapMouseUp = async (e) => {
     return
   }
 
-  if (!isDrawingFreehand || (!['freehand_poly', 'freehand_cut'].includes(activeTool.value))) return
+  if (!isDrawingFreehand || activeTool.value !== 'freehand_cut') return
   isDrawingFreehand = false
   if (map) map.dragging.enable()
 
@@ -2869,38 +2835,8 @@ const onMapMouseUp = async (e) => {
       console.warn('Simplification skipped:', simpErr)
     }
 
-    // ── CASE 1: FREEHAND CUT (Lasso Cookie Cutter) ──
-    if (activeTool.value === 'freehand_cut') {
-      await handleSplitByPolygon(polyGeoJSON.geometry)
-      return
-    }
-
-    // ── CASE 2: FREEHAND CREATE NEW POLYGON ──
-    const currentClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
-    const layer = L.geoJSON(polyGeoJSON, {
-      style: () => ({
-        color: currentClass?.color || '#006400',
-        fillColor: currentClass?.color || '#006400',
-        fillOpacity: polygonOpacity.value,
-        weight: 2
-      })
-    }).getLayers()[0]
-
-    if (layer) {
-      layer.feature = layer.feature || { type: 'Feature', properties: {} }
-      layer.feature.properties = {
-        class_id: currentClass?.id || 1,
-        class_name: currentClass?.name || 'Hutan Lahan Kering',
-        color: currentClass?.color || '#006400'
-      }
-
-      styleLayer(layer, currentClass?.color || '#006400')
-      bindLayerEvents(layer)
-      featureGroup.addLayer(layer)
-      syncFeaturesFromMap()
-      pushHistory()
-      showToast(`✨ Poligon Freehand [${currentClass?.name}] berhasil dibuat!`)
-    }
+    // Potong Poligon berbasis Lasso/Freehand
+    await handleSplitByPolygon(polyGeoJSON.geometry)
   } catch (err) {
     console.error('Failed to process freehand action:', err)
     showToast('⚠️ Gagal memproses freehand. Coba gambar kembali.')
@@ -2924,6 +2860,7 @@ const setDigitizeMode = (mode, force = false) => {
   }
   if (map.getContainer()) {
     map.getContainer().style.cursor = ['freehand_poly', 'freehand_cut'].includes(mode) ? 'crosshair' : ''
+    map.getContainer().style.cursor = mode === 'freehand_cut' ? 'crosshair' : ''
   }
 
   // Always close any open popup and clear selection
@@ -2953,10 +2890,6 @@ const setDigitizeMode = (mode, force = false) => {
       showToast('✂️ Mode Potong Bebas (Lasso Cut): Tahan & lingkari area untuk memotong poligon secara instan')
       break
 
-    case 'freehand_poly':
-      showToast('〰️ Mode Freehand Stream: Klik & tahan mouse, lalu gerakkan untuk menggambar kurva mulus')
-      break
-
     case 'split_line':
       showToast('✂️ Mode Potong Garis: Tarik garis melintasi poligon dari batas ke batas')
       map.pm.enableDraw('Line', {
@@ -2972,16 +2905,6 @@ const setDigitizeMode = (mode, force = false) => {
       map.pm.enableDraw('Polygon', {
         snappable: true,
         snapDistance: 6,
-        snapSegment: true,
-        tooltips: false
-      })
-      break
-
-    case 'draw_poly':
-      showToast('✏️ Mode Gambar Poligon Baru (Klik titik demi titik, Backspace untuk batalkan titik)')
-      map.pm.enableDraw('Polygon', {
-        snappable: true,
-        snapDistance: 8,
         snapSegment: true,
         tooltips: false
       })
@@ -3117,6 +3040,25 @@ const cancelMerge = () => {
   selectedForMerge.value = []
   activeTool.value = null
   refreshMapStyles()
+}
+
+const isHealingTopology = ref(false)
+
+const handleAutoHeal = async () => {
+  if (!selectedTaskId.value) return
+  if (!confirm('Rapikan geometri grid ini? Sistem akan menyembuhkan titik simpul yang rusak/terlipat, membersihkan serpihan mikroskopis (< 0.5 m²), dan merapikan batas poligon.')) return
+
+  isHealingTopology.value = true
+  try {
+    const res = await api.autoHealTopology(selectedTaskId.value)
+    showToast(res.data?.message || 'Geometri poligon berhasil dirapikan!')
+    await loadTaskData(selectedTaskId.value, true)
+  } catch (err) {
+    console.error('Auto heal error:', err)
+    alert(err.response?.data?.detail || 'Gagal merapikan geometri.')
+  } finally {
+    isHealingTopology.value = false
+  }
 }
 
 // ─── TOPOLOGICAL AUTO-CLIP & AUTO-HEAL ON EDIT ───────────

@@ -642,20 +642,100 @@
         <!-- Topology Result Banner (if checked) -->
         <div
           v-if="qcTopologyResult && !qcTopologyResult.valid"
-          class="bg-rose-50 border border-rose-200 p-3 rounded-2xl text-xs text-rose-900 space-y-1 shadow-2xs"
+          class="bg-rose-50 border border-rose-300 p-3.5 rounded-2xl text-xs text-rose-950 space-y-2.5 shadow-sm"
         >
-          <div class="flex items-center justify-between font-bold text-rose-800">
-            <span class="flex items-center gap-1.5">
-              <AlertTriangle :size="14" class="text-rose-600" />
-              <span>Masalah Topologi Terdeteksi ({{ qcTopologyResult.errors.length }} Masalah):</span>
+          <div class="flex items-center justify-between font-bold text-rose-900 border-b border-rose-200/80 pb-2">
+            <span class="flex items-center gap-2">
+              <AlertTriangle :size="16" class="text-rose-600 shrink-0" />
+              <span>Daftar Masalah Topologi ({{ qcTopologyResult.errors.length }} Masalah Ditemukan):</span>
             </span>
-            <button @click="qcTopologyResult = null" class="text-rose-400 hover:text-rose-600 cursor-pointer"><X :size="14" /></button>
+            <div class="flex items-center gap-2">
+              <button
+                @click="handleAutoHealTopology"
+                :disabled="isAutoHealing"
+                class="px-2.5 py-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 text-white rounded-lg text-[10px] font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                title="Perbaiki self-intersection, bersihkan serpihan sliver, dan rapikan geometri otomatis"
+              >
+                <Wand2 :size="12" :class="{ 'animate-spin': isAutoHealing }" />
+                <span>{{ isAutoHealing ? 'Memperbaiki...' : '⚡ Perbaiki Otomatis' }}</span>
+              </button>
+              <button @click="qcTopologyResult = null" class="text-rose-400 hover:text-rose-700 cursor-pointer p-0.5 rounded">
+                <X :size="15" />
+              </button>
+            </div>
           </div>
-          <ul class="ml-5 space-y-0.5 text-[11px] list-disc text-rose-700">
-            <li v-for="(err, idx) in qcTopologyResult.errors.slice(0, 4)" :key="idx">
-              <span class="font-mono text-rose-600 font-bold">[{{ err.type }}]</span> {{ err.message }}
-            </li>
-          </ul>
+
+          <!-- Interactive Error List -->
+          <div class="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+            <div
+              v-for="(err, idx) in qcTopologyResult.errors"
+              :key="idx"
+              @click="focusTopologyError(err)"
+              class="p-2.5 bg-white border border-rose-200 hover:border-rose-400 hover:bg-rose-50/50 rounded-xl transition-all cursor-pointer shadow-2xs group flex flex-col md:flex-row md:items-center justify-between gap-2"
+            >
+              <div class="flex items-start gap-2.5 min-w-0">
+                <span
+                  class="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded uppercase shrink-0 border"
+                  :class="err.type === 'SELF_INTERSECTION'
+                    ? 'bg-rose-100 text-rose-800 border-rose-300'
+                    : err.type === 'OVERLAP'
+                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                    : 'bg-red-100 text-red-800 border-red-300'"
+                >
+                  {{ err.type }}
+                </span>
+
+                <div class="min-w-0 space-y-0.5">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span v-if="err.annotation_id" class="font-bold text-slate-900 font-mono text-[11px]">
+                      Poligon #{{ err.annotation_id }}
+                    </span>
+                    <span v-else-if="err.annotation_ids" class="font-bold text-slate-900 font-mono text-[11px]">
+                      Poligon #{{ err.annotation_ids.join(' & #') }}
+                    </span>
+                    <span v-if="err.class_name" class="text-[10px] font-medium text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                      {{ err.class_name }}
+                    </span>
+                    <span v-else-if="err.class_names" class="text-[10px] font-medium text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                      {{ err.class_names.join(', ') }}
+                    </span>
+                  </div>
+                  <p class="text-[11px] text-rose-800 break-words leading-relaxed">
+                    {{ err.message }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-1.5 shrink-0 self-end md:self-center">
+                <button
+                  @click.stop="focusTopologyError(err)"
+                  class="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                  title="Sorot dan Zoom ke Poligon Bermasalah"
+                >
+                  <MapPin :size="11" />
+                  <span>Sorot di Peta</span>
+                </button>
+                <button
+                  v-if="err.annotation_id && taskFeatures.find(f => f.id === err.annotation_id)"
+                  @click.stop="openPinModalForPolygon(taskFeatures.find(f => f.id === err.annotation_id))"
+                  class="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Beri Catatan Revisi untuk Poligon Ini"
+                >
+                  <MessageSquarePlus :size="11" />
+                  <span>Beri Catatan</span>
+                </button>
+                <button
+                  v-if="err.annotation_id && taskFeatures.find(f => f.id === err.annotation_id)"
+                  @click.stop="handleDeleteProblematicAnnotation(err.annotation_id)"
+                  class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Hapus Poligon Cacat Ini"
+                >
+                  <Trash2 :size="11" />
+                  <span>Hapus</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div
@@ -694,6 +774,8 @@
                 class="p-2 rounded-xl flex items-center justify-between text-xs transition-all cursor-pointer border group"
                 :class="selectedPolygonId === poly.id
                   ? 'bg-cyan-50/90 border-cyan-400 shadow-xs ring-2 ring-cyan-400/40'
+                  : hasTopologyError(poly.id)
+                  ? 'bg-rose-50/50 border-rose-300 hover:border-rose-400 hover:bg-rose-50 ring-1 ring-rose-300/50'
                   : 'bg-white border-slate-200 hover:border-cyan-300 hover:bg-slate-50/80'"
               >
                 <div class="flex items-center gap-2 truncate">
@@ -702,6 +784,15 @@
                     :style="{ backgroundColor: getClassColor(poly.properties?.class_id) }"
                   ></div>
                   <span class="font-bold text-slate-800 truncate text-[11px]">{{ poly.properties?.class_name || 'Belum Terklasifikasi' }}</span>
+                  <!-- Topology Error Warning Badge -->
+                  <span
+                    v-if="hasTopologyError(poly.id)"
+                    class="flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-bold shrink-0 bg-rose-100 text-rose-800 border border-rose-300 animate-pulse"
+                    :title="getTopologyErrorsForPolygon(poly.id).map(e => e.message).join('\n')"
+                  >
+                    <AlertTriangle :size="10" />
+                    <span>Error Topologi</span>
+                  </span>
                   <!-- Review Pin Badge on Polygon -->
                   <span
                     v-if="getPolygonPins(poly.id).length > 0"
@@ -1042,7 +1133,8 @@ import {
   Trash2,
   Check,
   CheckCheck,
-  MessageCircle
+  MessageCircle,
+  Wand2
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useTasksStore } from '../stores/tasks'
@@ -1699,6 +1791,63 @@ const highlightPolygonOnMap = (polyId, isHover) => {
   }
 }
 
+// ─────────────────────────────────────────────
+// TOPOLOGY ERROR INSPECTION & HIGHLIGHT
+// ─────────────────────────────────────────────
+
+const getTopologyErrorsForPolygon = (polyId) => {
+  if (!qcTopologyResult.value?.errors || !polyId) return []
+  return qcTopologyResult.value.errors.filter(err => {
+    if (err.annotation_id && err.annotation_id === polyId) return true
+    if (Array.isArray(err.annotation_ids) && err.annotation_ids.includes(polyId)) return true
+    return false
+  })
+}
+
+const hasTopologyError = (polyId) => {
+  return getTopologyErrorsForPolygon(polyId).length > 0
+}
+
+const focusTopologyError = (err) => {
+  if (!err) return
+  const targetId = err.annotation_id || (Array.isArray(err.annotation_ids) ? err.annotation_ids[0] : null)
+  if (!targetId) {
+    showToast(err.message)
+    return
+  }
+
+  const feat = taskFeatures.value.find(f => f.id === targetId)
+  if (feat) {
+    selectPolygon(feat)
+  }
+
+  // Highlight all involved layers in flashing warning red
+  const involvedIds = err.annotation_ids || (err.annotation_id ? [err.annotation_id] : [])
+  involvedIds.forEach(id => {
+    const lyr = polygonLayersMap.get(id)
+    if (lyr) {
+      lyr.setStyle({
+        weight: 5,
+        color: '#ef4444',
+        fillColor: '#f43f5e',
+        fillOpacity: 0.85
+      })
+      lyr.bringToFront()
+      if (lyr.getBounds && qcMap) {
+        qcMap.fitBounds(lyr.getBounds(), { padding: [80, 80], maxZoom: 17 })
+      }
+    }
+  })
+
+  // Smooth scroll corresponding card in sidebar list
+  nextTick(() => {
+    const el = document.getElementById('qc-poly-' + targetId)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  })
+}
+
 const renderContextPolygons = (currentTaskId) => {
   if (!qcContextFeatureGroup) return
   qcContextFeatureGroup.clearLayers()
@@ -2125,6 +2274,39 @@ const runQCTopologyCheck = async () => {
     alert('Gagal menjalankan validasi topologi.')
   } finally {
     checkingTopology.value = false
+  }
+}
+
+const isAutoHealing = ref(false)
+
+const handleAutoHealTopology = async () => {
+  if (!selectedTask.value?.id) return
+  if (!confirm('Jalankan perbaikan topologi otomatis? Sistem akan merapikan geometri yang rusak, membuang serpihan mikroskopis (< 0.5 m²), dan menutup lubang tak valid.')) return
+
+  isAutoHealing.value = true
+  try {
+    const res = await api.autoHealTopology(selectedTask.value.id)
+    alert(res.data?.message || 'Topologi berhasil diperbaiki otomatis!')
+    await selectTask(selectedTask.value)
+    await runQCTopologyCheck()
+  } catch (err) {
+    console.error('Auto heal error:', err)
+    alert(err.response?.data?.detail || 'Gagal memperbaiki topologi otomatis.')
+  } finally {
+    isAutoHealing.value = false
+  }
+}
+
+const handleDeleteProblematicAnnotation = async (annId) => {
+  if (!confirm(`Hapus poligon #${annId}? Tindakan ini akan menghapus poligon yang cacat dari grid ini.`)) return
+  try {
+    await api.deleteAnnotation(annId)
+    alert(`Poligon #${annId} berhasil dihapus!`)
+    await selectTask(selectedTask.value)
+    await runQCTopologyCheck()
+  } catch (err) {
+    console.error('Delete annotation error:', err)
+    alert(err.response?.data?.detail || 'Gagal menghapus poligon.')
   }
 }
 
