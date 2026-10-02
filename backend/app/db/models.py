@@ -34,6 +34,7 @@ class User(Base):
     institution = Column(String(255), nullable=True)
     department = Column(String(255), nullable=True)
     nim_nip = Column(String(100), nullable=True)
+    gender = Column(String(10), nullable=True) # L / P
     address = Column(Text, nullable=True)
 
     # Relationships
@@ -80,6 +81,11 @@ class TaskGrid(Base):
     status = Column(String(30), default=TaskStatus.UNASSIGNED.value, nullable=False)
     reviewer_notes = Column(Text, nullable=True)
     
+    # Tahapan QC & Finishing
+    qc1_approved = Column(Boolean, default=False, nullable=True)
+    qc2_approved = Column(Boolean, default=False, nullable=True)
+    finishing_approved = Column(Boolean, default=False, nullable=True)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
@@ -89,6 +95,7 @@ class TaskGrid(Base):
     assignee = relationship("User", back_populates="assigned_tasks", foreign_keys=[assigned_user_id])
     annotations = relationship("Annotation", back_populates="task_grid", cascade="all, delete-orphan")
     review_pins = relationship("TaskReviewPin", back_populates="task_grid", cascade="all, delete-orphan")
+    snapshots = relationship("GridSnapshot", back_populates="task_grid", cascade="all, delete-orphan", order_by="desc(GridSnapshot.version_number)")
 
 class Annotation(Base):
     __tablename__ = "annotations"
@@ -151,3 +158,37 @@ class ExportJob(Base):
     log_message = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
+
+class GridSnapshot(Base):
+    __tablename__ = "grid_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_grid_id = Column(Integer, ForeignKey("task_grids.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    version_number = Column(Integer, nullable=False, default=1)
+    note = Column(String(255), nullable=True) # e.g. "Draf Disimpan", "Sebelum Auto-Heal QC", "Rollback ke v2"
+    features_count = Column(Integer, nullable=False, default=0)
+    geojson_data = Column(Text, nullable=False) # JSON string of FeatureCollection
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # Relationships
+    task_grid = relationship("TaskGrid", back_populates="snapshots")
+    author = relationship("User", foreign_keys=[user_id])
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    action = Column(String(50), nullable=False, index=True) # SAVE_ANNOTATIONS, RESTORE_SNAPSHOT, AUTO_HEAL, OVERLAP_RESOLVED, STATUS_CHANGE, DELETE_ANNOTATION
+    entity_type = Column(String(50), nullable=False, index=True) # task_grid, annotation, user
+    entity_id = Column(Integer, nullable=True, index=True)
+    task_grid_id = Column(Integer, ForeignKey("task_grids.id", ondelete="SET NULL"), nullable=True, index=True)
+    details = Column(Text, nullable=True) # JSON string or descriptive text
+    ip_address = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    task_grid = relationship("TaskGrid", foreign_keys=[task_grid_id])
+

@@ -69,11 +69,11 @@ def seed_database():
         # 0. Ensure schema migrations
         ensure_schema_migrations(db)
 
-        # 1. Seed Classes
-        existing_classes = db.query(LandCoverClass).count()
-        if existing_classes == 0:
-            logger.info("Seeding 12 Land Cover Classes...")
-            for c in settings.LAND_COVER_CLASSES:
+        # 1. Seed / Sync Classes
+        logger.info(f"Syncing {len(settings.LAND_COVER_CLASSES)} Land Cover Classes...")
+        for c in settings.LAND_COVER_CLASSES:
+            existing_c = db.query(LandCoverClass).filter(LandCoverClass.class_id == c["id"]).first()
+            if not existing_c:
                 db.add(LandCoverClass(
                     class_id=c["id"],
                     name=c["name"],
@@ -81,7 +81,12 @@ def seed_database():
                     description=c["description"],
                     is_active=True
                 ))
-            db.commit()
+            else:
+                existing_c.name = c["name"]
+                existing_c.color_hex = c["color"]
+                existing_c.description = c["description"]
+                existing_c.is_active = True
+        db.commit()
 
         # 2. Seed Initial Admin Account
         admin_user = db.query(User).filter(User.username == "admin").first()

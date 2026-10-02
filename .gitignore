@@ -45,7 +45,9 @@ backend/exports/
 exports/
 *.sql
 
-# 6. Operating System Files
+# 6. Operating System Files & Backups
 .DS_Store
 */.DS_Store
 Thumbs.db
+*.bak*
+SSL/

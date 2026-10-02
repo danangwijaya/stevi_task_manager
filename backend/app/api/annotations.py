@@ -3,12 +3,16 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from shapely.geometry import shape
+from shapely.geometry import shape, mapping, Polygon, MultiPolygon, box
+from shapely.ops import unary_union
+from shapely.validation import make_valid, explain_validity
+from shapely.strtree import STRtree
 
 from app.db.session import get_db
-from app.db.models import Annotation, TaskGrid, User, LandCoverClass, TaskReviewPin
+from app.db.models import Annotation, TaskGrid, User, LandCoverClass, TaskReviewPin, GridSnapshot, AuditLog
 from app.core.config import settings
 from app.api.deps import get_current_user
+from app.services.snapshot_service import create_grid_snapshot_from_db, restore_grid_snapshot, log_audit
 
 router = APIRouter()
 
@@ -360,6 +364,13 @@ def save_grid_annotations(
         task.assigned_user_id = current_user.id
         task.status = "IN_PROGRESS"
 
+    existing_count = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).count()
+    if len(data.features) == 0 and existing_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ditolak: Permintaan simpan kosong (0 fitur) sementara grid memiliki {existing_count} poligon tersimpan di server. Aksi dibatalkan untuk mencegah kehilangan data."
+        )
+
     # Clear previous annotations for this grid to sync cleanly (safeguard review pins)
     db.query(TaskReviewPin).filter(TaskReviewPin.task_grid_id == task_grid_id).update({"annotation_id": None}, synchronize_session=False)
     db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).delete()
@@ -399,7 +410,148 @@ def save_grid_annotations(
             task.assigned_user_id = current_user.id
         
     db.commit()
+
+    # Automatically record version snapshot & audit log
+    if len(new_annotations) > 0:
+        create_grid_snapshot_from_db(
+            db=db,
+            task_grid_id=task_grid_id,
+            user_id=current_user.id,
+            note="Draf Disimpan"
+        )
+        log_audit(
+            db=db,
+            user_id=current_user.id,
+            action="SAVE_ANNOTATIONS",
+            entity_type="task_grid",
+            entity_id=task_grid_id,
+            task_grid_id=task_grid_id,
+            details=json.dumps({"count": len(new_annotations)})
+        )
+
     return {"message": f"Successfully saved {len(new_annotations)} annotation polygons", "count": len(new_annotations)}
+
+@router.get("/grid/{task_grid_id}/snapshots")
+def get_grid_snapshots(
+    task_grid_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Returns list of version snapshots for a task grid."""
+    snapshots = (
+        db.query(GridSnapshot)
+        .filter(GridSnapshot.task_grid_id == task_grid_id)
+        .order_by(GridSnapshot.version_number.desc())
+        .all()
+    )
+    res = []
+    for s in snapshots:
+        author_name = s.author.full_name if s.author else (s.author.username if s.author else "Sistem")
+        res.append({
+            "id": s.id,
+            "task_grid_id": s.task_grid_id,
+            "version_number": s.version_number,
+            "note": s.note,
+            "features_count": s.features_count,
+            "user_id": s.user_id,
+            "author_name": author_name,
+            "created_at": s.created_at
+        })
+    return res
+
+@router.get("/grid/{task_grid_id}/snapshots/{snapshot_id}")
+def get_grid_snapshot_detail(
+    task_grid_id: int,
+    snapshot_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Returns full details of a snapshot including GeoJSON payload for inspection or diffing."""
+    s = db.query(GridSnapshot).filter(
+        GridSnapshot.id == snapshot_id,
+        GridSnapshot.task_grid_id == task_grid_id
+    ).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Snapshot tidak ditemukan.")
+    
+    author_name = s.author.full_name if s.author else "Sistem"
+    try:
+        geo = json.loads(s.geojson_data)
+    except Exception:
+        geo = {"type": "FeatureCollection", "features": []}
+
+    return {
+        "id": s.id,
+        "task_grid_id": s.task_grid_id,
+        "version_number": s.version_number,
+        "note": s.note,
+        "features_count": s.features_count,
+        "user_id": s.user_id,
+        "author_name": author_name,
+        "created_at": s.created_at,
+        "geojson_data": geo
+    }
+
+@router.post("/grid/{task_grid_id}/snapshots/{snapshot_id}/restore")
+def restore_snapshot_endpoint(
+    task_grid_id: int,
+    snapshot_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Restores annotations of a grid back to the specified version snapshot."""
+    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task grid not found")
+
+    if task.assigned_user_id is not None and current_user.role != "admin" and task.assigned_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Hanya penanggung jawab grid atau admin yang dapat memulihkan versi.")
+
+    try:
+        result = restore_grid_snapshot(
+            db=db,
+            task_grid_id=task_grid_id,
+            snapshot_id=snapshot_id,
+            user_id=current_user.id
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gagal memulihkan snapshot: {e}")
+
+@router.get("/audit-logs")
+def get_audit_logs(
+    task_grid_id: Optional[int] = None,
+    action: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Returns recent system audit logs."""
+    q = db.query(AuditLog).order_by(AuditLog.id.desc())
+    if task_grid_id:
+        q = q.filter(AuditLog.task_grid_id == task_grid_id)
+    if action:
+        q = q.filter(AuditLog.action == action)
+    logs = q.limit(min(limit, 200)).all()
+    
+    return [
+        {
+            "id": l.id,
+            "user_id": l.user_id,
+            "user_name": l.user.full_name if l.user else "Sistem",
+            "action": l.action,
+            "entity_type": l.entity_type,
+            "entity_id": l.entity_id,
+            "task_grid_id": l.task_grid_id,
+            "details": l.details,
+            "ip_address": l.ip_address,
+            "created_at": l.created_at
+        }
+        for l in logs
+    ]
+
 
 @router.post("/grid/{task_grid_id}/copy-from/{source_task_id}")
 def copy_annotations_from_task(
@@ -497,11 +649,12 @@ def init_base_polygon(
     except Exception:
         area_sqm = 0.0
 
+    base_cname = settings.LAND_COVER_CLASSES[0]["name"] if settings.LAND_COVER_CLASSES else "Belum Teridentifikasi"
     base_ann = Annotation(
         task_grid_id=task_grid_id,
         user_id=current_user.id,
         class_id=0,
-        class_name="Belum Terklasifikasi",
+        class_name=base_cname,
         geom_geojson=json.dumps(base_geom),
         area_sqm=area_sqm
     )
@@ -516,7 +669,7 @@ def init_base_polygon(
     db.commit()
     db.refresh(base_ann)
     return {
-        "message": "Base polygon 'Belum Terklasifikasi' berhasil dibuat menutupi seluruh area grid",
+        "message": "Base polygon 'Belum Teridentifikasi' berhasil dibuat menutupi seluruh area grid",
         "annotation_id": base_ann.id,
         "area_sqm": base_ann.area_sqm
     }
@@ -534,7 +687,7 @@ def validate_topology(
     2. Overlap detection between polygons (pairwise intersection area)
     3. Gap detection (union of all polygons vs grid bounding box)
     4. Coverage percentage
-    5. Check for remaining 'Belum Terklasifikasi' polygons
+    5. Check for remaining 'Belum Teridentifikasi' polygons
     """
     from shapely.geometry import box
     from shapely.ops import unary_union
@@ -597,22 +750,42 @@ def validate_topology(
         if ann.class_id == 0:
             unclassified_ids.append(ann.id)
 
-    # 2. Overlap detection (pairwise)
+    # 2. Overlap detection with STRtree spatial index (10x-100x faster than O(N^2))
     OVERLAP_THRESHOLD = 1e-10  # ~1 sq meter in degree² terms
-    for i in range(len(shapely_polygons)):
-        for j in range(i + 1, len(shapely_polygons)):
-            try:
-                intersection = shapely_polygons[i]["geom"].intersection(shapely_polygons[j]["geom"])
-                if intersection.area > OVERLAP_THRESHOLD:
-                    overlap_pct = (intersection.area / grid_area) * 100
-                    errors.append({
-                        "type": "OVERLAP",
-                        "annotation_ids": [shapely_polygons[i]["ann"].id, shapely_polygons[j]["ann"].id],
-                        "class_names": [shapely_polygons[i]["ann"].class_name, shapely_polygons[j]["ann"].class_name],
-                        "message": f"Tumpang tindih terdeteksi ({overlap_pct:.4f}% dari grid) antara poligon #{shapely_polygons[i]['ann'].id} ({shapely_polygons[i]['ann'].class_name}) dan #{shapely_polygons[j]['ann'].id} ({shapely_polygons[j]['ann'].class_name})"
-                    })
-            except Exception:
-                pass
+    valid_polys = [sp for sp in shapely_polygons if sp["geom"].is_valid and not sp["geom"].is_empty]
+    
+    if len(valid_polys) > 1:
+        geoms_list = [sp["geom"] for sp in valid_polys]
+        tree = STRtree(geoms_list)
+        candidate_pairs = tree.query(geoms_list, predicate="intersects")
+
+        overlap_count = 0
+        MAX_DISPLAY_ERRORS = 100
+
+        for i, j in zip(candidate_pairs[0], candidate_pairs[1]):
+            if i < j:
+                try:
+                    inter = geoms_list[i].intersection(geoms_list[j])
+                    if inter.area > OVERLAP_THRESHOLD:
+                        overlap_count += 1
+                        if len(errors) < MAX_DISPLAY_ERRORS:
+                            overlap_pct = (inter.area / grid_area) * 100
+                            ann_i = valid_polys[i]["ann"]
+                            ann_j = valid_polys[j]["ann"]
+                            errors.append({
+                                "type": "OVERLAP",
+                                "annotation_ids": [ann_i.id, ann_j.id],
+                                "class_names": [ann_i.class_name, ann_j.class_name],
+                                "message": f"Tumpang tindih terdeteksi ({overlap_pct:.4f}% dari grid) antara poligon #{ann_i.id} ({ann_i.class_name}) dan #{ann_j.id} ({ann_j.class_name})"
+                            })
+                except Exception:
+                    pass
+
+        if overlap_count > MAX_DISPLAY_ERRORS:
+            warnings.append({
+                "type": "OVERLAP_OVERFLOW",
+                "message": f"Ditemukan total {overlap_count} tumpang tindih. Menampilkan {MAX_DISPLAY_ERRORS} masalah pertama untuk efisiensi tampilan."
+            })
 
     # 3 & 4. Gap detection and coverage
     coverage_percent = 0.0
@@ -644,12 +817,12 @@ def validate_topology(
             "message": f"Gagal menghitung cakupan: {str(e)}"
         })
 
-    # Unclassified warning
+    # Unclassified polygons ("Belum Teridentifikasi" id=0): Informational warning so topology passes
     if unclassified_ids:
-        errors.append({
+        warnings.append({
             "type": "UNCLASSIFIED",
             "annotation_ids": unclassified_ids,
-            "message": f"{len(unclassified_ids)} poligon masih berstatus 'Belum Terklasifikasi'. Assign kelas tutupan lahan sebelum submit."
+            "message": f"{len(unclassified_ids)} poligon berstatus 'Belum Teridentifikasi'. Topologi tetap valid namun pastikan kelas diassign sebelum finalisasi."
         })
 
     is_valid = len(errors) == 0
@@ -663,33 +836,114 @@ def validate_topology(
     }
 
 
+class AutoHealOptionsRequest(BaseModel):
+    remove_duplicates: bool = True
+    heal_geometries: bool = True
+    clip_overlaps: bool = True
+    overlap_priority: str = "smaller_first"  # "smaller_first", "larger_first", "specific_class_first"
+    remove_slivers: bool = True
+    min_sliver_area_sqm: float = 0.5
+    fill_gaps: bool = False
+    fill_gap_class_id: int = 0
+
+
 @router.post("/grid/{task_grid_id}/auto-heal-topology")
 def auto_heal_topology(
     task_grid_id: int,
+    options: Optional[AutoHealOptionsRequest] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """
-    Auto-heals topological errors in a task grid:
-    1. Removes degenerate zero-area / micro-sliver polygons (< 0.5 m²).
-    2. Heals invalid geometries with Shapely make_valid / buffer(0) (resolves self-intersections and collapsed components).
-    3. Removes zero-area / degenerate collapsed line holes from polygon interiors.
-    4. Resolves minor boundary overlaps using difference operations.
+    Auto-heals topological errors in a task grid with configurable options:
+    1. Removes ghost/duplicate overlapping polygons (> 90% overlap area).
+    2. Removes degenerate zero-area / micro-sliver polygons (< min_sliver_area_sqm).
+    3. Heals invalid geometries with Shapely make_valid / buffer(0) (resolves self-intersections and collapsed components).
+    4. Removes zero-area / degenerate collapsed line holes from polygon interiors.
+    5. Clips overlapping boundaries based on selectable priority.
+    6. Optionally fills residual empty gaps with a specified land cover class.
     """
-    from shapely.geometry import shape, mapping, Polygon
+    from shapely.geometry import shape, mapping, Polygon, box
     from shapely.validation import make_valid
+    from shapely.ops import unary_union
     
+    if options is None:
+        options = AutoHealOptionsRequest()
+        
     task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task grid not found")
 
     annotations = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
     if not annotations:
-        return {"message": "Tidak ada poligon untuk diperbaiki", "healed_count": 0, "removed_count": 0}
+        return {"message": "Tidak ada poligon untuk diperbaiki", "healed_count": 0, "removed_count": 0, "duplicate_count": 0, "clipped_count": 0, "gaps_filled_count": 0}
+
+    # 0. Safety snapshot before modifying geometries
+    create_grid_snapshot_from_db(
+        db=db,
+        task_grid_id=task_grid_id,
+        user_id=current_user.id,
+        note="Sebelum Auto-Heal QC"
+    )
 
     healed_count = 0
     removed_count = 0
-    min_area_deg = 0.5 / (111320.0 ** 2)
+    duplicate_count = 0
+    clipped_count = 0
+    gaps_filled_count = 0
+    
+    min_area_deg = (max(0.01, options.min_sliver_area_sqm) / (111320.0 ** 2))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # PHASE 1: Eliminate exact/near-exact duplicate overlapping polygons (> 90%)
+    # ─────────────────────────────────────────────────────────────────────────
+    if options.remove_duplicates:
+        seen_geoms = []
+        duplicate_ids = set()
+
+        for ann in annotations:
+            try:
+                geom_dict = json.loads(ann.geom_geojson)
+                s_geom = shape(geom_dict)
+            except Exception:
+                continue
+
+            if s_geom.is_empty or s_geom.area < min_area_deg:
+                continue
+
+            is_dup = False
+            for idx, (sg, s_ann) in enumerate(seen_geoms):
+                area_ratio = min(ann.area_sqm, s_ann.area_sqm) / max(ann.area_sqm, s_ann.area_sqm) if max(ann.area_sqm, s_ann.area_sqm) > 0 else 0
+                if area_ratio > 0.85:
+                    try:
+                        inter_area = s_geom.intersection(sg).area
+                        if (inter_area / s_geom.area) > 0.90 and (inter_area / sg.area) > 0.90:
+                            is_dup = True
+                            # Priority: prefer specific class over generic "Belum Teridentifikasi" (id=0) or base "Hutan Lahan Kering" (id=1)
+                            if s_ann.class_id in [0, 1] and ann.class_id not in [0, 1]:
+                                duplicate_ids.add(s_ann.id)
+                                seen_geoms[idx] = (s_geom, ann)
+                            else:
+                                duplicate_ids.add(ann.id)
+                            break
+                    except Exception:
+                        pass
+
+            if not is_dup:
+                seen_geoms.append((s_geom, ann))
+
+        if duplicate_ids:
+            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(duplicate_ids)).update({"annotation_id": None}, synchronize_session=False)
+            db.query(Annotation).filter(Annotation.id.in_(duplicate_ids)).delete(synchronize_session=False)
+            duplicate_count = len(duplicate_ids)
+            removed_count += duplicate_count
+            annotations = [a for a in annotations if a.id not in duplicate_ids]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # PHASE 2: Heal invalid geometries, micro-slivers, and degenerate holes
+    # ─────────────────────────────────────────────────────────────────────────
+    ann_map = {a.id: a for a in annotations}
+    working_list = []
 
     for ann in annotations:
         try:
@@ -699,19 +953,70 @@ def auto_heal_topology(
             # Unparseable geometry: detach pins and delete
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann)
+            ann_map.pop(ann.id, None)
             removed_count += 1
             continue
 
-        # Check for zero area or tiny sliver < 0.5 m²
-        if s_geom.is_empty or s_geom.area < min_area_deg:
+        # Check for zero area or sliver/thin ribbon
+        area_sqm = s_geom.area * (111320.0 ** 2)
+        perim_m = s_geom.length * 111320.0
+        avg_thickness_m = area_sqm / (perim_m / 2.0) if perim_m > 0 else 0
+        is_sliver = (options.remove_slivers and (s_geom.area < min_area_deg or (area_sqm < 60.0 and avg_thickness_m < 0.5)))
+
+        if s_geom.is_empty:
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann)
+            ann_map.pop(ann.id, None)
+            removed_count += 1
+            continue
+
+        if is_sliver:
+            # Instead of leaving a hole/void, absorb sliver into adjacent neighbor
+            s_buff = s_geom.buffer(1.5e-6)
+            best_neighbor = None
+            best_len = -1
+            for other_ann in annotations:
+                if other_ann.id == ann.id or other_ann.id not in ann_map:
+                    continue
+                try:
+                    o_geom = shape(json.loads(other_ann.geom_geojson))
+                    if s_geom.intersects(o_geom) or s_buff.intersects(o_geom):
+                        inter = s_buff.intersection(o_geom)
+                        score = inter.length if inter.length > 0 else inter.area
+                        if score > best_len:
+                            best_len = score
+                            best_neighbor = other_ann
+                except Exception:
+                    pass
+
+            if best_neighbor:
+                try:
+                    o_geom = shape(json.loads(best_neighbor.geom_geojson))
+                    merged = unary_union([o_geom.buffer(1.5e-6), s_geom.buffer(1.5e-6)]).buffer(-1.5e-6)
+                    merged = make_valid(merged)
+                    extracted = _extract_polygons(merged)
+                    if extracted:
+                        best_neighbor.geom_geojson = json.dumps(mapping(extracted[0]))
+                        best_neighbor.area_sqm = extracted[0].area * (111320.0 ** 2)
+                        db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
+                        db.delete(ann)
+                        ann_map.pop(ann.id, None)
+                        removed_count += 1
+                        healed_count += 1
+                        continue
+                except Exception:
+                    pass
+
+            # If isolated floating sliver with no neighbor, delete it
+            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
+            db.delete(ann)
+            ann_map.pop(ann.id, None)
             removed_count += 1
             continue
 
         was_healed = False
         # If invalid (e.g. self-intersection, too few points)
-        if not s_geom.is_valid:
+        if options.heal_geometries and not s_geom.is_valid:
             try:
                 s_geom = make_valid(s_geom)
                 was_healed = True
@@ -723,51 +1028,549 @@ def auto_heal_topology(
                     pass
 
         # If it has degenerate holes, clean them
-        if s_geom.geom_type == 'Polygon' and len(s_geom.interiors) > 0:
+        if options.heal_geometries and s_geom.geom_type == 'Polygon' and len(s_geom.interiors) > 0:
             cleaned_holes = [h for h in s_geom.interiors if Polygon(h).area > 1e-9]
             if len(cleaned_holes) != len(s_geom.interiors):
                 s_geom = Polygon(s_geom.exterior, cleaned_holes)
                 was_healed = True
 
-        # Extract valid polygon(s) from GeometryCollection / MultiPolygon if make_valid expanded it
-        extracted = _extract_polygons(s_geom, min_area_sqm=0.5)
+        effective_min_sqm = options.min_sliver_area_sqm if options.remove_slivers else 0.05
+        extracted = _extract_polygons(s_geom, min_area_sqm=effective_min_sqm)
         if not extracted:
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann)
+            ann_map.pop(ann.id, None)
             removed_count += 1
             continue
 
-        # If make_valid produced exactly 1 clean polygon
-        if len(extracted) == 1:
-            clean_p = extracted[0]
-            if was_healed or clean_p.wkt != s_geom.wkt:
-                ann.geom_geojson = json.dumps(mapping(clean_p))
-                ann.area_sqm = clean_p.area * (111320.0 ** 2)
-                healed_count += 1
-        else:
-            # If make_valid split a self-intersecting polygon into multiple valid pieces
-            p0 = extracted[0]
-            ann.geom_geojson = json.dumps(mapping(p0))
-            ann.area_sqm = p0.area * (111320.0 ** 2)
+        if was_healed:
             healed_count += 1
-            for extra_p in extracted[1:]:
-                new_ann = Annotation(
-                    task_grid_id=task_grid_id,
-                    user_id=ann.user_id,
-                    class_id=ann.class_id,
-                    class_name=ann.class_name,
-                    geom_geojson=json.dumps(mapping(extra_p)),
-                    area_sqm=extra_p.area * (111320.0 ** 2)
-                )
-                db.add(new_ann)
-                healed_count += 1
+
+        working_list.append({
+            "ann": ann,
+            "geom": extracted[0],
+            "area_sqm": extracted[0].area * (111320.0 ** 2),
+            "was_modified": was_healed or (extracted[0].wkt != s_geom.wkt)
+        })
+
+        for extra_p in extracted[1:]:
+            new_ann = Annotation(
+                task_grid_id=task_grid_id,
+                user_id=ann.user_id,
+                class_id=ann.class_id,
+                class_name=ann.class_name,
+                geom_geojson=json.dumps(mapping(extra_p)),
+                area_sqm=extra_p.area * (111320.0 ** 2)
+            )
+            db.add(new_ann)
+            db.flush()
+            working_list.append({
+                "ann": new_ann,
+                "geom": extra_p,
+                "area_sqm": extra_p.area * (111320.0 ** 2),
+                "was_modified": True
+            })
+            healed_count += 1
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # PHASE 3: Auto-Clip Overlaps (Boundary Clashing & Subtraction)
+    # ─────────────────────────────────────────────────────────────────────────
+    accepted_list = []
+    if options.clip_overlaps:
+        # Priority sorting:
+        if options.overlap_priority == "larger_first":
+            working_list.sort(key=lambda x: (1 if x["ann"].class_id in [0, 1] else 0, -x["area_sqm"]))
+        elif options.overlap_priority == "specific_class_first":
+            working_list.sort(key=lambda x: 1 if x["ann"].class_id in [0, 1] else 0)
+        else: # "smaller_first" (default)
+            working_list.sort(key=lambda x: (1 if x["ann"].class_id in [0, 1] else 0, x["area_sqm"]))
+
+        for item in working_list:
+            cur_geom = item["geom"]
+            cur_ann = item["ann"]
+            was_clipped = False
+
+            for accepted in accepted_list:
+                if not cur_geom.is_empty and cur_geom.intersects(accepted["geom"]):
+                    try:
+                        inter = cur_geom.intersection(accepted["geom"])
+                        if inter.area > 1e-10:
+                            cur_geom = cur_geom.difference(accepted["geom"])
+                            cur_geom = make_valid(cur_geom)
+                            was_clipped = True
+                            clipped_count += 1
+                    except Exception:
+                        pass
+
+            effective_min_sqm = options.min_sliver_area_sqm if options.remove_slivers else 0.05
+            extracted = _extract_polygons(cur_geom, min_area_sqm=effective_min_sqm)
+            if not extracted:
+                # Completely enveloped redundant polygon
+                db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == cur_ann.id).update({"annotation_id": None}, synchronize_session=False)
+                db.delete(cur_ann)
+                removed_count += 1
+            else:
+                p0 = extracted[0]
+                if was_clipped or item["was_modified"] or p0.wkt != item["geom"].wkt:
+                    cur_ann.geom_geojson = json.dumps(mapping(p0))
+                    cur_ann.area_sqm = p0.area * (111320.0 ** 2)
+
+                accepted_list.append({
+                    "ann": cur_ann,
+                    "geom": p0,
+                    "area_sqm": p0.area * (111320.0 ** 2)
+                })
+
+                for extra_p in extracted[1:]:
+                    new_ann = Annotation(
+                        task_grid_id=task_grid_id,
+                        user_id=cur_ann.user_id,
+                        class_id=cur_ann.class_id,
+                        class_name=cur_ann.class_name,
+                        geom_geojson=json.dumps(mapping(extra_p)),
+                        area_sqm=extra_p.area * (111320.0 ** 2)
+                    )
+                    db.add(new_ann)
+                    db.flush()
+                    accepted_list.append({
+                        "ann": new_ann,
+                        "geom": extra_p,
+                        "area_sqm": extra_p.area * (111320.0 ** 2)
+                    })
+    else:
+        for item in working_list:
+            if item["was_modified"]:
+                item["ann"].geom_geojson = json.dumps(mapping(item["geom"]))
+                item["ann"].area_sqm = item["area_sqm"]
+            accepted_list.append(item)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # PHASE 4: Fill Residual Empty Gaps (Optional)
+    # ─────────────────────────────────────────────────────────────────────────
+    if options.fill_gaps and accepted_list:
+        try:
+            grid_box = box(task.min_lon, task.min_lat, task.max_lon, task.max_lat)
+            all_valid = [it["geom"] for it in accepted_list if not it["geom"].is_empty and it["geom"].is_valid]
+            if all_valid:
+                union_all = unary_union(all_valid)
+                gap_geom = grid_box.difference(union_all)
+                gap_polys = _extract_polygons(gap_geom, min_area_sqm=max(0.5, options.min_sliver_area_sqm))
+                
+                classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
+                gap_cid = options.fill_gap_class_id if options.fill_gap_class_id in classes_dict else 0
+                gap_cname = classes_dict.get(gap_cid, "Belum Teridentifikasi")
+                
+                for gp in gap_polys:
+                    new_gap_ann = Annotation(
+                        task_grid_id=task_grid_id,
+                        user_id=current_user.id,
+                        class_id=gap_cid,
+                        class_name=gap_cname,
+                        geom_geojson=json.dumps(mapping(gp)),
+                        area_sqm=gp.area * (111320.0 ** 2)
+                    )
+                    db.add(new_gap_ann)
+                    gaps_filled_count += 1
+        except Exception as e:
+            pass
 
     db.commit()
 
+    msg_parts = []
+    if duplicate_count > 0:
+        msg_parts.append(f"{duplicate_count} duplikat layer dihapus")
+    if clipped_count > 0:
+        msg_parts.append(f"{clipped_count} irisan overlap dipotong rapi")
+    if healed_count > 0:
+        msg_parts.append(f"{healed_count} geometri diperbaiki")
+    if (removed_count - duplicate_count) > 0:
+        msg_parts.append(f"{removed_count - duplicate_count} serpihan dibersihkan")
+    if gaps_filled_count > 0:
+        msg_parts.append(f"{gaps_filled_count} celah kosong diisi")
+
+    msg = "Berhasil merapikan topologi! " + (", ".join(msg_parts) if msg_parts else "Semua poligon valid.")
+
+    # Record snapshot of the healed state & audit log
+    create_grid_snapshot_from_db(
+        db=db,
+        task_grid_id=task_grid_id,
+        user_id=current_user.id,
+        note="Hasil Auto-Heal QC"
+    )
+    log_audit(
+        db=db,
+        user_id=current_user.id,
+        action="AUTO_HEAL",
+        entity_type="task_grid",
+        entity_id=task_grid_id,
+        task_grid_id=task_grid_id,
+        details=json.dumps({"healed": healed_count, "duplicates": duplicate_count, "clipped": clipped_count, "gaps": gaps_filled_count})
+    )
+
     return {
-        "message": f"Berhasil merapikan topologi! {healed_count} poligon diperbaiki, {removed_count} serpihan kosong dibersihkan.",
+        "message": msg,
         "healed_count": healed_count,
-        "removed_count": removed_count
+        "removed_count": removed_count,
+        "duplicate_count": duplicate_count,
+        "clipped_count": clipped_count,
+        "gaps_filled_count": gaps_filled_count
+    }
+
+
+@router.post("/grid/{task_grid_id}/clean-slivers")
+def clean_slivers_endpoint(
+    task_grid_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Specifically detects and absorbs all razor-thin slivers and micro-ribbons (< 60m² or thickness < 50cm)
+    into their adjacent neighboring polygons with the longest shared boundary.
+    Leaves NO gaps, voids, or holes behind.
+    """
+    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task grid not found")
+
+    annotations = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
+    if not annotations:
+        return {"message": "Tidak ada poligon untuk dibersihkan.", "absorbed_count": 0}
+
+    # Create safety backup snapshot
+    create_grid_snapshot_from_db(
+        db=db,
+        task_grid_id=task_grid_id,
+        user_id=current_user.id,
+        note="Sebelum Pembersihan Sliver Otomatis"
+    )
+
+    slivers = []
+    regulars = []
+
+    for a in annotations:
+        try:
+            geom = shape(json.loads(a.geom_geojson))
+            if not geom.is_valid:
+                geom = make_valid(geom)
+            area_sqm = a.area_sqm or (geom.area * (111320.0 ** 2))
+            perim_m = geom.length * 111320.0
+            avg_thickness_m = area_sqm / (perim_m / 2.0) if perim_m > 0 else 0
+            if area_sqm < 60.0 and avg_thickness_m < 0.5:
+                slivers.append({"ann": a, "geom": geom, "area": area_sqm})
+            else:
+                regulars.append({"ann": a, "geom": geom, "area": area_sqm})
+        except Exception:
+            continue
+
+    if not slivers:
+        return {"message": "Tidak ditemukan poligon sliver / garis tipis pada grid ini.", "absorbed_count": 0}
+
+    absorbed_count = 0
+    for s in slivers:
+        s_buff = s["geom"].buffer(1.5e-6)
+        best_r = None
+        best_score = -1
+        for r in regulars:
+            if s["geom"].intersects(r["geom"]) or s_buff.intersects(r["geom"]):
+                inter = s_buff.intersection(r["geom"])
+                score = inter.length if inter.length > 0 else inter.area
+                if score > best_score:
+                    best_score = score
+                    best_r = r
+
+        if best_r:
+            try:
+                merged = unary_union([best_r["geom"].buffer(1.5e-6), s["geom"].buffer(1.5e-6)]).buffer(-1.5e-6)
+                merged = make_valid(merged)
+                extracted = _extract_polygons(merged)
+                if extracted:
+                    best_r["geom"] = extracted[0]
+                    best_r["area"] = extracted[0].area * (111320.0 ** 2)
+                    best_r["ann"].geom_geojson = json.dumps(mapping(extracted[0]))
+                    best_r["ann"].area_sqm = best_r["area"]
+                    db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == s["ann"].id).update({"annotation_id": None}, synchronize_session=False)
+                    db.delete(s["ann"])
+                    absorbed_count += 1
+            except Exception:
+                pass
+        else:
+            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == s["ann"].id).update({"annotation_id": None}, synchronize_session=False)
+            db.delete(s["ann"])
+            absorbed_count += 1
+
+    db.commit()
+
+    log_audit(
+        db=db,
+        user_id=current_user.id,
+        action="CLEAN_SLIVERS",
+        entity_type="task_grid",
+        entity_id=task_grid_id,
+        task_grid_id=task_grid_id,
+        details=json.dumps({"absorbed_count": absorbed_count})
+    )
+
+    return {
+        "message": f"Berhasil menyerap {absorbed_count} sliver garis ke poligon tetangga!",
+        "absorbed_count": absorbed_count
+    }
+
+
+class ResolveOverlapRequest(BaseModel):
+    task_grid_id: int
+    ann_id_a: int
+    ann_id_b: int
+    action: str  # "clip_a_by_b", "clip_b_by_a", "merge_into_a", "merge_into_b"
+    target_class_id: Optional[int] = None
+
+
+@router.post("/resolve-overlap")
+def resolve_overlap(
+    req: ResolveOverlapRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Interactively resolves an overlap between two specific annotation polygons:
+    - clip_a_by_b: Subtracts Polygon B from Polygon A (A is trimmed, B remains intact)
+    - clip_b_by_a: Subtracts Polygon A from Polygon B (B is trimmed, A remains intact)
+    - merge_into_a / merge_into_b: Unions both polygons into a single polygon
+    """
+    from shapely.geometry import shape, mapping
+    from shapely.validation import make_valid
+    
+    ann_a = db.query(Annotation).filter(Annotation.id == req.ann_id_a, Annotation.task_grid_id == req.task_grid_id).first()
+    ann_b = db.query(Annotation).filter(Annotation.id == req.ann_id_b, Annotation.task_grid_id == req.task_grid_id).first()
+    
+    if not ann_a or not ann_b:
+        raise HTTPException(status_code=404, detail="Salah satu atau kedua poligon tidak ditemukan pada grid ini")
+        
+    try:
+        geom_a = shape(json.loads(ann_a.geom_geojson))
+        geom_b = shape(json.loads(ann_b.geom_geojson))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Gagal membaca geometri poligon: {e}")
+        
+    if not geom_a.intersects(geom_b):
+        return {"message": f"Poligon #{ann_a.id} dan #{ann_b.id} tidak tumpang tindih."}
+        
+    classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
+    
+    if req.action == "clip_a_by_b":
+        # Subtract B from A: A is clipped, B remains unchanged
+        diff = geom_a.difference(geom_b)
+        diff = make_valid(diff)
+        polys = _extract_polygons(diff, min_area_sqm=0.1)
+        if not polys:
+            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann_a.id).update({"annotation_id": None}, synchronize_session=False)
+            db.delete(ann_a)
+            db.commit()
+            return {"message": f"Poligon #{ann_a.id} terhapus karena seluruh areanya berada di dalam Poligon #{ann_b.id}."}
+            
+        ann_a.geom_geojson = json.dumps(mapping(polys[0]))
+        ann_a.area_sqm = polys[0].area * (111320.0 ** 2)
+        for extra in polys[1:]:
+            new_ann = Annotation(
+                task_grid_id=req.task_grid_id,
+                user_id=ann_a.user_id,
+                class_id=ann_a.class_id,
+                class_name=ann_a.class_name,
+                geom_geojson=json.dumps(mapping(extra)),
+                area_sqm=extra.area * (111320.0 ** 2)
+            )
+            db.add(new_ann)
+        db.commit()
+        return {"message": f"Poligon #{ann_a.id} ({ann_a.class_name}) berhasil dipotong oleh #{ann_b.id} ({ann_b.class_name}). Bentuk #{ann_b.id} tetap utuh."}
+        
+    elif req.action == "clip_b_by_a":
+        # Subtract A from B: B is clipped, A remains unchanged
+        diff = geom_b.difference(geom_a)
+        diff = make_valid(diff)
+        polys = _extract_polygons(diff, min_area_sqm=0.1)
+        if not polys:
+            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann_b.id).update({"annotation_id": None}, synchronize_session=False)
+            db.delete(ann_b)
+            db.commit()
+            return {"message": f"Poligon #{ann_b.id} terhapus karena seluruh areanya berada di dalam Poligon #{ann_a.id}."}
+            
+        ann_b.geom_geojson = json.dumps(mapping(polys[0]))
+        ann_b.area_sqm = polys[0].area * (111320.0 ** 2)
+        for extra in polys[1:]:
+            new_ann = Annotation(
+                task_grid_id=req.task_grid_id,
+                user_id=ann_b.user_id,
+                class_id=ann_b.class_id,
+                class_name=ann_b.class_name,
+                geom_geojson=json.dumps(mapping(extra)),
+                area_sqm=extra.area * (111320.0 ** 2)
+            )
+            db.add(new_ann)
+        db.commit()
+        return {"message": f"Poligon #{ann_b.id} ({ann_b.class_name}) berhasil dipotong oleh #{ann_a.id} ({ann_a.class_name}). Bentuk #{ann_a.id} tetap utuh."}
+        
+    elif req.action.startswith("merge"):
+        union_geom = geom_a.union(geom_b)
+        union_geom = make_valid(union_geom)
+        polys = _extract_polygons(union_geom, min_area_sqm=0.1)
+        if not polys:
+            raise HTTPException(status_code=400, detail="Gagal menggabungkan poligon")
+            
+        target_cid = req.target_class_id if req.target_class_id is not None else ann_a.class_id
+        target_cname = classes_dict.get(target_cid, ann_a.class_name)
+        
+        ann_a.class_id = target_cid
+        ann_a.class_name = target_cname
+        ann_a.geom_geojson = json.dumps(mapping(polys[0]))
+        ann_a.area_sqm = polys[0].area * (111320.0 ** 2)
+        
+        # Point review pins of B to A
+        db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann_b.id).update({"annotation_id": ann_a.id}, synchronize_session=False)
+        db.delete(ann_b)
+        
+        for extra in polys[1:]:
+            new_ann = Annotation(
+                task_grid_id=req.task_grid_id,
+                user_id=ann_a.user_id,
+                class_id=target_cid,
+                class_name=target_cname,
+                geom_geojson=json.dumps(mapping(extra)),
+                area_sqm=extra.area * (111320.0 ** 2)
+            )
+            db.add(new_ann)
+            
+        db.commit()
+        return {"message": f"Poligon #{ann_a.id} dan #{ann_b.id} berhasil digabung menjadi satu poligon '{target_cname}'."}
+        
+    else:
+        raise HTTPException(status_code=400, detail="Aksi tidak dikenal. Gunakan: clip_a_by_b, clip_b_by_a, atau merge_into_a")
+
+
+@router.post("/{annotation_id}/repair-geometry")
+def repair_single_annotation_geometry(
+    annotation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Repairs a single invalid polygon geometry (make_valid, clean degenerate holes).
+    """
+    from shapely.geometry import shape, mapping, Polygon
+    from shapely.validation import make_valid
+    
+    ann = db.query(Annotation).filter(Annotation.id == annotation_id).first()
+    if not ann:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+        
+    try:
+        s_geom = shape(json.loads(ann.geom_geojson))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Format geometri rusak: {e}")
+        
+    try:
+        s_geom = make_valid(s_geom)
+    except Exception:
+        try:
+            s_geom = s_geom.buffer(0)
+        except Exception:
+            pass
+            
+    if s_geom.geom_type == 'Polygon' and len(s_geom.interiors) > 0:
+        cleaned_holes = [h for h in s_geom.interiors if Polygon(h).area > 1e-9]
+        if len(cleaned_holes) != len(s_geom.interiors):
+            s_geom = Polygon(s_geom.exterior, cleaned_holes)
+            
+    polys = _extract_polygons(s_geom, min_area_sqm=0.1)
+    if not polys:
+        raise HTTPException(status_code=400, detail="Geometri tidak dapat dipulihkan atau luasnya 0 m²")
+        
+    ann.geom_geojson = json.dumps(mapping(polys[0]))
+    ann.area_sqm = polys[0].area * (111320.0 ** 2)
+    
+    for extra in polys[1:]:
+        new_ann = Annotation(
+            task_grid_id=ann.task_grid_id,
+            user_id=ann.user_id,
+            class_id=ann.class_id,
+            class_name=ann.class_name,
+            geom_geojson=json.dumps(mapping(extra)),
+            area_sqm=extra.area * (111320.0 ** 2)
+        )
+        db.add(new_ann)
+        
+    db.commit()
+    db.refresh(ann)
+    return {
+        "message": f"Geometri poligon #{ann.id} ({ann.class_name}) berhasil diperbaiki dan valid!",
+        "id": ann.id,
+        "area_sqm": ann.area_sqm
+    }
+
+
+class FillGapsRequest(BaseModel):
+    class_id: int = 0
+    min_gap_area_sqm: float = 1.0
+
+
+@router.post("/grid/{task_grid_id}/fill-gaps")
+def fill_grid_gaps(
+    task_grid_id: int,
+    req: FillGapsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Detects unassigned empty space (gaps) in the task grid and creates new polygons with chosen class.
+    """
+    from shapely.geometry import box, shape, mapping
+    from shapely.ops import unary_union
+    
+    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task grid not found")
+        
+    annotations = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
+    if not annotations:
+        raise HTTPException(status_code=400, detail="Grid belum memiliki poligon dasar")
+        
+    grid_box = box(task.min_lon, task.min_lat, task.max_lon, task.max_lat)
+    valid_geoms = []
+    for ann in annotations:
+        try:
+            g = shape(json.loads(ann.geom_geojson))
+            if g.is_valid and not g.is_empty:
+                valid_geoms.append(g)
+        except Exception:
+            pass
+            
+    if not valid_geoms:
+        raise HTTPException(status_code=400, detail="Tidak ada geometri valid untuk menghitung celah")
+        
+    union_geoms = unary_union(valid_geoms)
+    gap_geom = grid_box.difference(union_geoms)
+    
+    polys = _extract_polygons(gap_geom, min_area_sqm=req.min_gap_area_sqm)
+    if not polys:
+        return {"message": "Tidak ditemukan celah kosong yang melebihi ambang batas luas", "gaps_created": 0}
+        
+    classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
+    cid = req.class_id if req.class_id in classes_dict else 0
+    cname = classes_dict.get(cid, "Belum Teridentifikasi")
+    
+    for p in polys:
+        new_ann = Annotation(
+            task_grid_id=task_grid_id,
+            user_id=current_user.id,
+            class_id=cid,
+            class_name=cname,
+            geom_geojson=json.dumps(mapping(p)),
+            area_sqm=p.area * (111320.0 ** 2)
+        )
+        db.add(new_ann)
+        
+    db.commit()
+    return {
+        "message": f"Berhasil mengisi {len(polys)} celah kosong dengan kelas '{cname}'!",
+        "gaps_created": len(polys)
     }
 
 
@@ -811,20 +1614,93 @@ class SplitByLineRequest(BaseModel):
 class MergePolygonsRequest(BaseModel):
     task_grid_id: int
     annotation_ids: List[int]
-    target_class_id: int
+    target_class_id: Optional[int] = None
 
 class GridMergePolygonsRequest(BaseModel):
     annotation_ids: List[int]
-    target_class_id: int
+    target_class_id: Optional[int] = None
 
 class UpdateAnnotationClassRequest(BaseModel):
     class_id: int
+
+
+def _clean_spikes_and_holes(poly):
+    """
+    Eliminates needle spikes, whiskers, and degenerate collapsed slit holes
+    from a Shapely Polygon.
+    """
+    from shapely.geometry import Polygon as SPolygon, MultiPolygon as SMultiPolygon
+    from shapely.validation import make_valid
+
+    if poly is None or poly.is_empty:
+        return poly
+    if poly.geom_type == 'MultiPolygon':
+        cleaned_parts = [_clean_spikes_and_holes(p) for p in poly.geoms]
+        cleaned_parts = [p for p in cleaned_parts if p and not p.is_empty and p.geom_type == 'Polygon']
+        return SMultiPolygon(cleaned_parts) if cleaned_parts else poly
+    if poly.geom_type != 'Polygon':
+        return poly
+
+    # 1. Clean collapsed/zero-area interior holes
+    cleaned_holes = []
+    if len(poly.interiors) > 0:
+        for h in poly.interiors:
+            if SPolygon(h).area > 1e-9:
+                cleaned_holes.append(h)
+
+    # 2. Clean foldback turnaround spikes on exterior ring:
+    ext_coords = list(poly.exterior.coords)
+    changed = True
+    iterations = 0
+    while changed and len(ext_coords) > 3 and iterations < 10:
+        changed = False
+        iterations += 1
+        n = len(ext_coords) - 1
+        skip = set()
+        for i in range(n):
+            if i in skip:
+                continue
+            prev_pt = ext_coords[(i - 1 + n) % n]
+            curr_pt = ext_coords[i]
+            next_pt = ext_coords[(i + 1) % n]
+            # If distance from prev_pt to next_pt is negligible, it's a spike back-and-forth
+            if abs(prev_pt[0] - next_pt[0]) < 1e-8 and abs(prev_pt[1] - next_pt[1]) < 1e-8:
+                skip.add(i)
+                changed = True
+        if changed:
+            ext_coords = [ext_coords[i] for i in range(n) if i not in skip]
+            if ext_coords and ext_coords[0] != ext_coords[-1]:
+                ext_coords.append(ext_coords[0])
+
+    # 3. Deduplicate consecutive duplicate vertices
+    clean_ext = []
+    for pt in ext_coords:
+        if not clean_ext or abs(pt[0] - clean_ext[-1][0]) > 1e-9 or abs(pt[1] - clean_ext[-1][1]) > 1e-9:
+            clean_ext.append(pt)
+    if len(clean_ext) > 1 and clean_ext[0] != clean_ext[-1]:
+        clean_ext.append(clean_ext[0])
+
+    if len(clean_ext) < 4:
+        return SPolygon()
+
+    try:
+        new_poly = SPolygon(clean_ext, cleaned_holes)
+        if not new_poly.is_valid:
+            new_poly = make_valid(new_poly)
+            if new_poly.geom_type == 'GeometryCollection':
+                valid_pieces = [g for g in new_poly.geoms if g.geom_type == 'Polygon']
+                if valid_pieces:
+                    new_poly = valid_pieces[0] if len(valid_pieces) == 1 else SMultiPolygon(valid_pieces)
+        return new_poly
+    except Exception:
+        return poly
 
 
 def _extract_polygons(geom, min_area_sqm=0.5):
     """
     Recursively unpacks GeometryCollection / MultiPolygon into distinct Polygon objects,
     validates/heals geometry with make_valid, and filters out micro-slivers below min_area_sqm.
+    Cleans spikes and collapsed line holes automatically.
     """
     from shapely.validation import make_valid
     if geom is None or geom.is_empty:
@@ -843,14 +1719,9 @@ def _extract_polygons(geom, min_area_sqm=0.5):
                 pass
 
     if geom.geom_type == 'Polygon':
+        geom = _clean_spikes_and_holes(geom)
         if geom.is_valid and geom.area >= min_area_deg:
-            # Also clean any collapsed degenerate interior holes (holes with zero area or collinear lines)
-            if len(geom.interiors) > 0:
-                from shapely.geometry import Polygon as SPolygon
-                cleaned_holes = [h for h in geom.interiors if SPolygon(h).area > 1e-9]
-                if len(cleaned_holes) != len(geom.interiors):
-                    geom = SPolygon(geom.exterior, cleaned_holes)
-            return [geom] if geom.is_valid and geom.area >= min_area_deg else []
+            return [geom]
         return []
     elif geom.geom_type == 'MultiPolygon':
         polys = []
@@ -955,7 +1826,7 @@ def split_by_polygon(
 
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
     new_class_id = req.new_class_id if req.new_class_id in classes_dict else 0
-    new_class_name = classes_dict.get(new_class_id, "Belum Terklasifikasi")
+    new_class_name = classes_dict.get(new_class_id, "Belum Teridentifikasi")
 
     # Fetch candidate annotations
     query = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id)
@@ -995,7 +1866,7 @@ def split_by_polygon(
                         task_grid_id=req.task_grid_id,
                         user_id=current_user.id,
                         class_id=0,
-                        class_name="Belum Terklasifikasi",
+                        class_name="Belum Teridentifikasi",
                         geom_geojson=json.dumps(dp_geojson),
                         area_sqm=area_sqm
                     ))
@@ -1121,7 +1992,7 @@ def split_by_line(
 
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
     new_class_id = req.new_class_id if req.new_class_id in classes_dict else 0
-    new_class_name = classes_dict.get(new_class_id, "Belum Terklasifikasi")
+    new_class_name = classes_dict.get(new_class_id, "Belum Teridentifikasi")
 
     query = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id)
     if req.target_annotation_id:
@@ -1146,7 +2017,7 @@ def split_by_line(
                         task_grid_id=req.task_grid_id,
                         user_id=current_user.id,
                         class_id=0,
-                        class_name="Belum Terklasifikasi",
+                        class_name="Belum Teridentifikasi",
                         geom_geojson=json.dumps(mapping(p0)),
                         area_sqm=area_sqm
                     ))
@@ -1250,8 +2121,21 @@ def merge_polygons(
         raise HTTPException(status_code=404, detail="Poligon yang dipilih tidak ditemukan.")
 
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
-    target_class_id = req.target_class_id if req.target_class_id in classes_dict else annotations[0].class_id
-    target_class_name = classes_dict.get(target_class_id, annotations[0].class_name)
+    if req.target_class_id and req.target_class_id in classes_dict:
+        target_class_id = req.target_class_id
+        target_class_name = classes_dict[target_class_id]
+    else:
+        # Fallback to the annotation with the LARGEST area among selected polygons
+        def _get_area(ann):
+            try:
+                if ann.area_sqm:
+                    return float(ann.area_sqm)
+                return shape(json.loads(ann.geom_geojson)).area
+            except Exception:
+                return 0.0
+        largest_ann = max(annotations, key=_get_area)
+        target_class_id = largest_ann.class_id
+        target_class_name = classes_dict.get(target_class_id, largest_ann.class_name)
 
     geoms = []
     for ann in annotations:
@@ -1267,7 +2151,22 @@ def merge_polygons(
         raise HTTPException(status_code=400, detail="Geometri poligon tidak valid.")
 
     merged_geom = unary_union(geoms)
+    # Snap micro-gaps cleanly without creating artificial buffer line corridors
+    try:
+        from shapely import set_precision
+        merged_geom = set_precision(merged_geom, grid_size=1e-7)
+    except Exception:
+        pass
+
     merged_polys = _extract_polygons(merged_geom)
+
+    # Clean any whiskers, turnaround spikes, or collapsed slit lines from each polygon
+    cleaned_merged_polys = []
+    for mp in merged_polys:
+        cleaned_p = _clean_spikes_and_holes(mp)
+        if cleaned_p and not cleaned_p.is_empty and cleaned_p.area > 1e-12:
+            cleaned_merged_polys.append(cleaned_p)
+    merged_polys = cleaned_merged_polys or merged_polys
 
     # Delete old annotations (safeguard review pins)
     ann_ids = [ann.id for ann in annotations]

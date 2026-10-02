@@ -10,11 +10,14 @@
 <script setup>
 import { onMounted } from 'vue'
 import { useAuthStore } from './stores/auth'
+import { useThemeStore } from './stores/theme'
 import Navbar from './components/Navbar.vue'
 
 const authStore = useAuthStore()
+const themeStore = useThemeStore()
 
 onMounted(async () => {
+  themeStore.loadTheme()
   if (authStore.token) {
     await authStore.fetchCurrentUser()
   }

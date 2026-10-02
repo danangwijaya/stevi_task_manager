@@ -20,7 +20,7 @@ import numpy as np
 from PIL import Image
 
 from app.core.config import settings
-from app.db.session import get_db
+from app.db.session import get_db, SessionLocal
 from app.db.models import TaskGrid, StudyArea, User
 from app.api.deps import get_current_active_admin
 
@@ -253,6 +253,21 @@ def get_grid_raster_info(grid_code: str, db: Session = Depends(get_db)):
         "bands": ["Blue (B2)", "Green (B3)", "Red (B4)", "NIR (B8)"]
     }
 
+_GRID_TILE_KEY_CACHE: Dict[str, Optional[str]] = {}
+
+def get_grid_tile_key(grid_code: str) -> Optional[str]:
+    """Caches grid_code -> tile_key mapping in memory to eliminate database connection pooling bottlenecks on tile streaming."""
+    if grid_code in _GRID_TILE_KEY_CACHE:
+        return _GRID_TILE_KEY_CACHE[grid_code]
+    db = SessionLocal()
+    try:
+        res = db.query(TaskGrid.tile_key).filter(TaskGrid.grid_code == grid_code).first()
+        tile_key = res[0] if res else None
+        _GRID_TILE_KEY_CACHE[grid_code] = tile_key
+        return tile_key
+    finally:
+        db.close()
+
 @router.get("/tiles/{year}/{grid_code}/{z}/{x}/{y}.png")
 def get_grid_tile(
     year: int,
@@ -263,26 +278,26 @@ def get_grid_tile(
     mode: str = Query("rgb", pattern="^(rgb|cir)$"),
     stretch_min: float = Query(150.0),
     stretch_max: float = Query(2600.0),
-    gamma: float = Query(1.0),
-    db: Session = Depends(get_db)
+    gamma: float = Query(1.0)
 ):
     """
     Serves a 256x256 PNG tile for a specific grid code and year.
     Fast dynamic reading directly from the tiled COG file with dynamic CRS support.
+    Uses in-memory tile_key caching to decouple tile serving from database connection pooling.
     """
-    grid = db.query(TaskGrid).filter(TaskGrid.grid_code == grid_code).first()
-    if not grid:
+    tile_key = get_grid_tile_key(grid_code)
+    if not tile_key:
         return Response(content=TRANSPARENT_TILE_BYTES, media_type="image/png")
 
     year_index = get_year_raster_index(year)
-    match = next((item for item in year_index if item["tile_key"] == grid.tile_key), None)
+    match = next((item for item in year_index if item["tile_key"] == tile_key), None)
 
     if not match:
         # Fallback check inside Sumatera_Barat_{year}
         base_dir = settings.RASTER_BASE_DIR
         for entry in os.listdir(base_dir):
             if str(year) in entry:
-                cand = os.path.join(base_dir, entry, f"sentinel2_sumbar_{year}_10m-{grid.tile_key}.tif")
+                cand = os.path.join(base_dir, entry, f"sentinel2_sumbar_{year}_10m-{tile_key}.tif")
                 if os.path.exists(cand):
                     try:
                         with rasterio.open(cand) as src:

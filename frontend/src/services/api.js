@@ -106,7 +106,11 @@ export default {
   deleteAnnotation: (annId) => api.delete(`/annotations/${annId}`),
   initBasePolygon: (taskGridId) => api.post(`/annotations/grid/${taskGridId}/init-base`),
   validateTopology: (taskGridId) => api.post(`/annotations/grid/${taskGridId}/validate-topology`),
-  autoHealTopology: (taskGridId) => api.post(`/annotations/grid/${taskGridId}/auto-heal-topology`),
+  autoHealTopology: (taskGridId, options = null) => api.post(`/annotations/grid/${taskGridId}/auto-heal-topology`, options || {}),
+  resolveOverlap: (payload) => api.post('/annotations/resolve-overlap', payload),
+  repairAnnotationGeometry: (annId) => api.post(`/annotations/${annId}/repair-geometry`),
+  fillGridGaps: (taskGridId, classId = 0, minArea = 1.0) =>
+    api.post(`/annotations/grid/${taskGridId}/fill-gaps`, { class_id: classId, min_gap_area_sqm: minArea }),
   copyAnnotations: (targetId, sourceId) => api.post(`/annotations/grid/${targetId}/copy-from/${sourceId}`),
   splitByPolygon: (taskGridId, cuttingGeom, targetAnnId = null, newClassId = 0) =>
     api.post('/annotations/split-by-polygon', {
@@ -136,6 +140,12 @@ export default {
   updateAnnotationClass: (annId, classId) =>
     api.put(`/annotations/${annId}/class`, { class_id: classId }),
 
+  // Version Snapshots & Audit Logs
+  getGridSnapshots: (taskGridId) => api.get(`/annotations/grid/${taskGridId}/snapshots`),
+  getGridSnapshotDetail: (taskGridId, snapshotId) => api.get(`/annotations/grid/${taskGridId}/snapshots/${snapshotId}`),
+  restoreGridSnapshot: (taskGridId, snapshotId) => api.post(`/annotations/grid/${taskGridId}/snapshots/${snapshotId}/restore`),
+  getAuditLogs: (params = {}) => api.get('/annotations/audit-logs', { params }),
+
   // GEE Satellite Layers
   getGEEStatus: () => api.get('/gee/status'),
   getGEETiles: (params) => api.get('/gee/tiles', { params }),
@@ -156,9 +166,9 @@ export default {
     return `${getBaseUrl()}/export/vector/shapefile${qs ? '?' + qs : ''}`
   },
   downloadVectorGeoJson: (params = {}) =>
-    api.get('/export/vector/geojson', { params, responseType: 'blob' }),
+    api.get('/export/vector/geojson', { params, responseType: 'blob', timeout: 300000 }),
   downloadVectorShapefile: (params = {}) =>
-    api.get('/export/vector/shapefile', { params, responseType: 'blob' }),
+    api.get('/export/vector/shapefile', { params, responseType: 'blob', timeout: 300000 }),
 
   // Import Custom Grid (Shapefile / GeoJSON)
   importGrid: (formData) => api.post('/tasks/import-grid', formData, {
@@ -175,5 +185,11 @@ export default {
   getGridRasterTileUrl: (year, gridCode, mode = 'rgb', gamma = 1.0) =>
     `${getBaseUrl()}/raster/tiles/${year}/${gridCode}/{z}/{x}/{y}.png?mode=${mode}&gamma=${gamma}`,
   getMosaicRasterTileUrl: (year, mode = 'rgb', gamma = 1.0) =>
-    `${getBaseUrl()}/raster/tiles/${year}/{z}/{x}/{y}.png?mode=${mode}&gamma=${gamma}`
+    `${getBaseUrl()}/raster/tiles/${year}/{z}/{x}/{y}.png?mode=${mode}&gamma=${gamma}`,
+
+  // Progress Reports & Monitoring Table
+  getProgressTable: (params = {}) => api.get('/reports/progress-table', { params }),
+  updateTaskStage: (taskId, data) => api.patch(`/reports/tasks/${taskId}/stages`, data),
+  downloadProgressExcel: (params = {}) => api.get('/reports/export/excel', { params, responseType: 'blob' }),
+  downloadProgressCsv: (params = {}) => api.get('/reports/export/csv', { params, responseType: 'blob' })
 }

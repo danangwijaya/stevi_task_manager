@@ -55,6 +55,7 @@ const routes = [
   },
   {
     path: '/qc',
+    alias: ['/admin/qc', '/admin/review'],
     name: 'qc',
     component: AdminQCView,
     meta: { requiresAuth: true, requiresReviewer: true }
@@ -70,6 +71,15 @@ const routes = [
     name: 'export',
     component: ExportDatasetView,
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/rekap',
+    alias: ['/monitoring', '/rekap-monitoring'],
+    redirect: '/admin?tab=rekap_monitoring'
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/'
   }
 ]
 

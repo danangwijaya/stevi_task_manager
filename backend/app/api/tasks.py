@@ -1121,19 +1121,20 @@ def create_task_review_pin(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
-    """Reviewer or Admin adds a review pin/note to a grid (optionally attached to an annotation)"""
-    role = (current_user.role or "").strip().lower()
-    if role not in ["admin", "dosen"]:
-        raise HTTPException(status_code=403, detail="Hanya Reviewer/Dosen dan Admin yang dapat memberikan catatan review")
-
+    """Reviewer, Admin, or assigned Annotator adds an evaluation pin/note to a grid (independent of polygons or optionally attached)"""
     task = db.query(TaskGrid).filter(TaskGrid.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    role = (current_user.role or "").strip().lower()
+    if role not in ["admin", "dosen"] and task.assigned_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Hanya Reviewer/Dosen, Admin, atau Petugas Grid yang dapat menambahkan pin catatan")
+
     if pin_in.annotation_id:
         ann = db.query(Annotation).filter(Annotation.id == pin_in.annotation_id, Annotation.task_grid_id == task_id).first()
         if not ann:
-            raise HTTPException(status_code=400, detail="Anotasi poligon tidak ditemukan pada grid ini")
+            # If specified annotation was not found, just detach it gracefully
+            pin_in.annotation_id = None
 
     new_pin = TaskReviewPin(
         task_grid_id=task_id,
@@ -1193,7 +1194,7 @@ def update_task_review_pin(
     if pin_update.note is not None:
         role = (current_user.role or "").strip().lower()
         if role not in ["admin", "dosen"] and pin.reviewer_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Hanya Reviewer yang dapat mengubah teks catatan")
+            raise HTTPException(status_code=403, detail="Hanya pembuat catatan atau Reviewer yang dapat mengubah teks catatan")
         pin.note = pin_update.note
 
     db.commit()
@@ -1223,14 +1224,14 @@ def delete_task_review_pin(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
-    """Delete a review pin (Reviewer or Admin)"""
-    role = (current_user.role or "").strip().lower()
-    if role not in ["admin", "dosen"]:
-        raise HTTPException(status_code=403, detail="Hanya Reviewer/Dosen dan Admin yang dapat menghapus catatan")
-
+    """Delete a review pin (Reviewer, Admin, or the pin author)"""
     pin = db.query(TaskReviewPin).filter(TaskReviewPin.id == pin_id, TaskReviewPin.task_grid_id == task_id).first()
     if not pin:
         raise HTTPException(status_code=404, detail="Review pin not found")
+
+    role = (current_user.role or "").strip().lower()
+    if role not in ["admin", "dosen"] and pin.reviewer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Hanya pembuat catatan atau Reviewer/Admin yang dapat menghapus catatan")
 
     db.delete(pin)
     db.commit()

@@ -31,11 +31,13 @@ def test_classes_list():
     response = client.get("/api/v1/annotations/classes")
     assert response.status_code == 200
     classes = response.json()
-    assert len(classes) == 13
+    assert len(classes) == 14
     class_names = [c["name"] for c in classes]
+    assert "Belum Teridentifikasi" in class_names
     assert "Hutan Lahan Kering" in class_names
-    assert "Tanaman Padi Lahan Basah" in class_names
-    assert "Wilayah Operasi Tambang" in class_names
+    assert "Sawah Lahan Basah" in class_names
+    assert "Pertambangan" in class_names
+    assert "Di Luar Wilayah Sampel" in class_names
 
 def test_tasks_summary_and_export():
     # Login

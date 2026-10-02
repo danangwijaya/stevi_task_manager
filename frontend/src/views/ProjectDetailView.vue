@@ -109,7 +109,7 @@
                     </div>
                     <div class="flex items-center gap-2 p-1.5 bg-[#f8f9fa] rounded border border-[#e4e7eb]">
                       <span class="w-3 h-3 rounded-xs bg-[#808000]"></span>
-                      <span>5. Perkebunan Kelapa Sawit</span>
+                      <span>5. Tanaman Perkebunan</span>
                     </div>
                     <div class="flex items-center gap-2 p-1.5 bg-[#f8f9fa] rounded border border-[#e4e7eb]">
                       <span class="w-3 h-3 rounded-xs bg-[#FF0000]"></span>
@@ -138,6 +138,19 @@
                     <div class="flex items-center gap-2 p-1.5 bg-[#f8f9fa] rounded border border-[#e4e7eb]">
                       <span class="w-3 h-3 rounded-xs bg-[#008B8B]"></span>
                       <span>12. Tambak Pesisir</span>
+                    </div>
+                  </div>
+                  <div class="mt-2 pt-2 border-t border-slate-200">
+                    <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Kelas Khusus Topologi & Batas Grid:</span>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-[11px]">
+                      <div class="flex items-center gap-2 p-1.5 bg-slate-50 rounded border border-dashed border-slate-300" title="Placeholder draf topologi (harus diselesaikan sebelum submit)">
+                        <span class="w-3 h-3 rounded-xs bg-[#9CA3AF]"></span>
+                        <span class="text-slate-700">0. Belum Teridentifikasi <span class="text-[9px] text-amber-600 font-semibold">(Draf)</span></span>
+                      </div>
+                      <div class="flex items-center gap-2 p-1.5 bg-slate-50 rounded border border-dashed border-slate-300" title="Wilayah di luar jangkauan citra / tepi margin no-data (lolos QC)">
+                        <span class="w-3 h-3 rounded-xs bg-[#4B5563]"></span>
+                        <span class="text-slate-700">13. Di Luar Wilayah Sampel <span class="text-[9px] text-emerald-600 font-semibold">(No-Data)</span></span>
+                      </div>
                     </div>
                   </div>
                 </li>

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api import auth, tasks, annotations, gee, export_dataset, arcgis, raster
+from app.api import auth, tasks, annotations, gee, export_dataset, arcgis, raster, reports
 from app.db.seed import seed_database
 import logging
 
@@ -32,6 +32,7 @@ def on_startup():
 # Include Routers
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["Authentication & Users"])
 app.include_router(tasks.router, prefix=f"{settings.API_V1_STR}/tasks", tags=["Task Grids & Management"])
+app.include_router(reports.router, prefix=f"{settings.API_V1_STR}/reports", tags=["Progress Reports & Monitoring Table"])
 app.include_router(annotations.router, prefix=f"{settings.API_V1_STR}/annotations", tags=["Spatial Annotations & Classes"])
 app.include_router(raster.router, prefix=f"{settings.API_V1_STR}/raster", tags=["Sentinel-2 Dynamic COG Tile Server"])
 app.include_router(gee.router, prefix=f"{settings.API_V1_STR}/gee", tags=["Google Earth Engine & Satellite Layers"])

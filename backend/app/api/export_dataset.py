@@ -169,8 +169,24 @@ def export_vector_geojson(
 ) -> Any:
     """
     Downloads GeoJSON file containing on-screen digitized training samples with Penutupan Lahan attributes.
+    Optimized with single SQL projection to prevent N+1 query overhead.
     """
-    query = db.query(Annotation).join(TaskGrid)
+    query = (
+        db.query(
+            Annotation.id,
+            Annotation.class_id,
+            Annotation.class_name,
+            Annotation.geom_geojson,
+            Annotation.area_sqm,
+            Annotation.created_at,
+            TaskGrid.grid_code,
+            TaskGrid.status.label("grid_status"),
+            TaskGrid.year.label("grid_year"),
+            User.full_name.label("author_name")
+        )
+        .join(TaskGrid, Annotation.task_grid_id == TaskGrid.id)
+        .outerjoin(User, Annotation.user_id == User.id)
+    )
     if year:
         query = query.filter(TaskGrid.year == year)
     if only_approved:
@@ -178,37 +194,36 @@ def export_vector_geojson(
     if study_area_id:
         query = query.filter(TaskGrid.study_area_id == study_area_id)
 
-    annotations = query.all()
+    rows = query.all()
     classes_meta = {c["id"]: c for c in settings.LAND_COVER_CLASSES}
     
     features = []
-    for ann in annotations:
+    for r in rows:
         try:
-            geom = json.loads(ann.geom_geojson)
-            tg = ann.task_grid
-            cm = classes_meta.get(ann.class_id, {})
-            c_name = ann.class_name or cm.get("name", f"Kelas {ann.class_id}")
-            mapper = ann.author.full_name if ann.author else (tg.assignee.full_name if tg and tg.assignee else "Annotator")
-            area_ha = round((ann.area_sqm or 0) / 10000.0, 4)
-            area_m2 = round(ann.area_sqm or 0, 2)
+            geom = json.loads(r.geom_geojson)
+            cm = classes_meta.get(r.class_id, {})
+            c_name = r.class_name or cm.get("name", f"Kelas {r.class_id}")
+            mapper = r.author_name or "Annotator"
+            area_ha = round((r.area_sqm or 0) / 10000.0, 4)
+            area_m2 = round(r.area_sqm or 0, 2)
 
             features.append({
                 "type": "Feature",
-                "id": ann.id,
+                "id": r.id,
                 "geometry": geom,
                 "properties": {
-                    "id": ann.id,
-                    "kode_pl": ann.class_id,
+                    "id": r.id,
+                    "kode_pl": r.class_id,
                     "nama_pl": c_name,
                     "penutupan_lahan": c_name,
                     "color_hex": cm.get("color", "#9CA3AF"),
-                    "grid_code": tg.grid_code if tg else "",
-                    "tahun": tg.year if tg else None,
-                    "status_grid": tg.status if tg else "",
+                    "grid_code": r.grid_code or "",
+                    "tahun": r.grid_year,
+                    "status_grid": r.grid_status or "",
                     "mapper": mapper,
                     "luas_ha": area_ha,
                     "luas_m2": area_m2,
-                    "created_at": ann.created_at.isoformat() if ann.created_at else None
+                    "created_at": r.created_at.isoformat() if r.created_at else None
                 }
             })
         except Exception:
@@ -247,8 +262,23 @@ def export_vector_shapefile(
 ) -> Any:
     """
     Downloads ESRI Shapefile (.zip) bundle containing on-screen digitized training samples with Penutupan Lahan attributes.
+    Optimized with single SQL projection and multi-polygon standardization.
     """
-    query = db.query(Annotation).join(TaskGrid)
+    query = (
+        db.query(
+            Annotation.id,
+            Annotation.class_id,
+            Annotation.class_name,
+            Annotation.geom_geojson,
+            Annotation.area_sqm,
+            TaskGrid.grid_code,
+            TaskGrid.status.label("grid_status"),
+            TaskGrid.year.label("grid_year"),
+            User.full_name.label("author_name")
+        )
+        .join(TaskGrid, Annotation.task_grid_id == TaskGrid.id)
+        .outerjoin(User, Annotation.user_id == User.id)
+    )
     if year:
         query = query.filter(TaskGrid.year == year)
     if only_approved:
@@ -256,17 +286,17 @@ def export_vector_shapefile(
     if study_area_id:
         query = query.filter(TaskGrid.study_area_id == study_area_id)
 
-    annotations = query.all()
-    if not annotations:
+    rows = query.all()
+    if not rows:
         raise HTTPException(status_code=404, detail="Tidak ada data sampel digitasi vektor yang sesuai dengan filter.")
 
     classes_meta = {c["id"]: c for c in settings.LAND_COVER_CLASSES}
     records = []
     geometries = []
 
-    for ann in annotations:
+    for r in rows:
         try:
-            geom_dict = json.loads(ann.geom_geojson)
+            geom_dict = json.loads(r.geom_geojson)
             s_geom = shape(geom_dict)
             if not s_geom.is_valid:
                 s_geom = s_geom.buffer(0)
@@ -279,19 +309,18 @@ def export_vector_shapefile(
             elif not isinstance(s_geom, MultiPolygon):
                 continue
 
-            tg = ann.task_grid
-            cm = classes_meta.get(ann.class_id, {})
-            c_name = str(ann.class_name or cm.get("name", f"Kelas {ann.class_id}"))[:50]
-            mapper = str(ann.author.full_name if ann.author else (tg.assignee.full_name if tg and tg.assignee else "Annotator"))[:50]
-            grid_code = str(tg.grid_code if tg else "")[:20]
-            status_grid = str(tg.status if tg else "")[:20]
-            tahun = int(tg.year) if (tg and tg.year) else (year or 2026)
-            luas_ha = round((ann.area_sqm or 0) / 10000.0, 4)
-            luas_m2 = round(ann.area_sqm or 0, 2)
+            cm = classes_meta.get(r.class_id, {})
+            c_name = str(r.class_name or cm.get("name", f"Kelas {r.class_id}"))[:50]
+            mapper = str(r.author_name or "Annotator")[:50]
+            grid_code = str(r.grid_code or "")[:20]
+            status_grid = str(r.grid_status or "")[:20]
+            tahun = int(r.grid_year) if r.grid_year else (year or 2026)
+            luas_ha = round((r.area_sqm or 0) / 10000.0, 4)
+            luas_m2 = round(r.area_sqm or 0, 2)
 
             records.append({
-                "ID": int(ann.id),
-                "KODE_PL": int(ann.class_id),
+                "ID": int(r.id),
+                "KODE_PL": int(r.class_id),
                 "NAMA_PL": c_name,
                 "PENUTUPAN": c_name,
                 "GRID_CODE": grid_code,

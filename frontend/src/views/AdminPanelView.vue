@@ -123,6 +123,23 @@
           </button>
 
           <button
+            @click="activeTab = 'rekap_monitoring'"
+            class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer"
+            :class="activeTab === 'rekap_monitoring'
+              ? 'bg-[#d73f3f] text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'"
+          >
+            <div class="flex items-center gap-2.5">
+              <FileSpreadsheet :size="16" :class="activeTab === 'rekap_monitoring' ? 'text-white' : 'text-emerald-600'" />
+              <span>Rekap Monitoring</span>
+            </div>
+            <span class="text-[9px] px-1.5 py-0.5 rounded font-extrabold"
+              :class="activeTab === 'rekap_monitoring' ? 'bg-white text-[#d73f3f]' : 'bg-emerald-100 text-emerald-800'">
+              XLSX
+            </span>
+          </button>
+
+          <button
             @click="activeTab = 'import'"
             class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer"
             :class="activeTab === 'import'
@@ -890,6 +907,13 @@
             </div>
           </div>
 
+        </div>
+
+        <!-- ────────────────────────────────────────────────── -->
+        <!-- VIEW: REKAP MONITORING ANOTASI                     -->
+        <!-- ────────────────────────────────────────────────── -->
+        <div v-if="activeTab === 'rekap_monitoring'" class="space-y-4">
+          <ProgressReportTable />
         </div>
 
         <!-- ────────────────────────────────────────────────── -->
@@ -1698,20 +1722,24 @@ import {
   SlidersHorizontal,
   Save,
   LogOut,
-  Trophy
+  Trophy,
+  FileSpreadsheet
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useAdminStore } from '../stores/admin'
 import { useTasksStore } from '../stores/tasks'
+import { useRoute } from 'vue-router'
 import api from '../services/api'
+import ProgressReportTable from '../components/ProgressReportTable.vue'
 
+const route = useRoute()
 const authStore = useAuthStore()
 const adminStore = useAdminStore()
 const tasksStore = useTasksStore()
 
 // ── Active Sidebar Tab ───────────────────────────────────────────────────
-// Options: 'account_info' | 'stats' | 'users_crud' | 'user_profile' | 'projects' | 'import'
-const activeTab = ref('projects')
+// Options: 'account_info' | 'stats' | 'users_crud' | 'user_profile' | 'projects' | 'import' | 'rekap_monitoring'
+const activeTab = ref(route.query.tab || 'projects')
 const isRefreshing = ref(false)
 
 const currentTabTitle = computed(() => {
@@ -1721,6 +1749,7 @@ const currentTabTitle = computed(() => {
     case 'users_crud': return 'CRUD Pengguna'
     case 'user_profile': return 'Profil Pengguna'
     case 'projects': return 'Panel Admin / Proyek'
+    case 'rekap_monitoring': return 'Rekap Monitoring'
     case 'import': return 'Import Grid Kustom'
     default: return 'Dashboard'
   }
@@ -1733,6 +1762,7 @@ const currentTabHeading = computed(() => {
     case 'users_crud': return 'Manajemen Akun Pengguna & Mahasiswa'
     case 'user_profile': return 'Pengaturan Profil & Keamanan Akun'
     case 'projects': return 'Manajemen Proyek Tasking Grid Spasial'
+    case 'rekap_monitoring': return 'Rekap Monitoring & Evaluasi Anotasi Training Sample'
     case 'import': return 'Import Grid Shapefile / GeoJSON'
     default: return 'Admin Dashboard'
   }

@@ -6,10 +6,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GEOSTEVIA (Geospatial Ecosystem Services Analytics)</title>
     <meta name="description" content="A geospatial analytical platform for ecosystem services assessment, visualization, and spatial decision support." />
-    <!-- Google Fonts: Archivo & Open Sans -->
+    <!-- Google Fonts: Plus Jakarta Sans, Barlow, Inter & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,700&family=Open+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=Inter:ital,opsz,wght@0,14..32,300..800;1,14..32,300..800&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- Font Awesome 6 & Font-GIS Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <link rel="stylesheet" href="https://viglino.github.io/font-gis/css/font-gis.css" />
@@ -19,9 +19,9 @@
         theme: {
           extend: {
             fontFamily: {
-              sans: ['Archivo', '"Open Sans"', '"Helvetica Neue"', 'Helvetica', 'Arial', 'sans-serif'],
-              heading: ['Archivo', '"Open Sans"', '"Helvetica Neue"', 'Helvetica', 'Arial', 'sans-serif'],
-              mono: ['"JetBrains Mono"', 'monospace']
+              sans: ['var(--app-font-family, "Plus Jakarta Sans")', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'sans-serif'],
+              heading: ['var(--app-font-family, "Plus Jakarta Sans")', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'sans-serif'],
+              mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace']
             },
             colors: {
               hotred: {
@@ -37,25 +37,51 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.14.2/dist/leaflet-geoman.css" />
     <style>
+      :root {
+        --app-font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        --app-font-tracking: -0.012em;
+        --app-heading-tracking: -0.02em;
+        --app-base-font-size: 14.5px;
+        --app-border-radius: 0.5rem;
+      }
+
       html {
-        font-size: 15px;
+        font-size: var(--app-base-font-size, 14.5px);
+        transition: font-size 0.15s ease;
       }
       body {
-        font-family: Archivo, "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
         margin: 0;
         padding: 0;
         background-color: #ffffff;
-        color: #2c3038;
+        color: #1e293b;
         -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
         font-size: 1rem;
         line-height: 1.5;
       }
-      h1, h2, h3, h4, .font-heading {
-        font-family: Archivo, "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+      /* ── Dynamic Typography Engine ── */
+      body, button, input, select, textarea, .font-sans {
+        font-family: var(--app-font-family, 'Plus Jakarta Sans') !important;
+        letter-spacing: var(--app-font-tracking, -0.012em);
       }
-      .font-mono {
-        font-family: 'JetBrains Mono', monospace;
+
+      h1, h2, h3, h4, h5, h6, .font-heading {
+        font-family: var(--app-font-family, 'Plus Jakarta Sans') !important;
+        letter-spacing: var(--app-heading-tracking, -0.02em);
       }
+
+      .font-mono, code, pre, kbd {
+        font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace !important;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── UI Density Engine ── */
+      body.density-compact .density-pad {
+        padding-top: 0.35rem !important;
+        padding-bottom: 0.35rem !important;
+      }
+
       .flex {
         flex-wrap: nowrap;
       }
@@ -66,6 +92,30 @@
         flex-wrap: nowrap !important;
       }
     </style>
+    <!-- Early theme initializer to prevent layout shift -->
+    <script>
+      (function() {
+        try {
+          var raw = localStorage.getItem('geostevia_ui_theme');
+          if (raw) {
+            var data = JSON.parse(raw);
+            var root = document.documentElement;
+            if (data.fontSize === 'compact') root.style.setProperty('--app-base-font-size', '13.5px');
+            if (data.fontSize === 'large') root.style.setProperty('--app-base-font-size', '15.5px');
+            if (data.fontFamily === 'barlow') {
+              root.style.setProperty('--app-font-family', "'Barlow', sans-serif");
+              root.style.setProperty('--app-font-tracking', '0.005em');
+            } else if (data.fontFamily === 'inter') {
+              root.style.setProperty('--app-font-family', "'Inter', sans-serif");
+              root.style.setProperty('--app-font-tracking', '-0.011em');
+            } else {
+              root.style.setProperty('--app-font-family', "'Plus Jakarta Sans', sans-serif");
+              root.style.setProperty('--app-font-tracking', '-0.012em');
+            }
+          }
+        } catch(e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

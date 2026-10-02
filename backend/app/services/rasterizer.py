@@ -14,19 +14,20 @@ logger = logging.getLogger(__name__)
 
 # Land Cover Class Color Mapping for PNG Visual Masks
 CLASS_COLOR_PALETTE = {
-    0: (0, 0, 0),       # Background
+    0: (0, 0, 0),       # Background / Belum Teridentifikasi
     1: (0, 100, 0),     # Hutan Lahan Kering
-    2: (46, 139, 87),   # Hutan Lahan Basah dan Mangrove
-    3: (154, 205, 50),  # Semak dan Belukar
-    4: (255, 215, 0),   # Tanaman Pertanian Lahan Kering
+    2: (46, 139, 87),   # Hutan Mangrove / Rawa
+    3: (154, 205, 50),  # Semak & Belukar
+    4: (255, 215, 0),   # Pertanian Lahan Kering
     5: (128, 128, 0),   # Tanaman Perkebunan
-    6: (255, 0, 0),     # Infrastruktur dan Lahan Terbangun
-    7: (210, 180, 140), # Lahan Terbuka Bebas Vegetasi
-    8: (139, 69, 19),   # Wilayah Operasi Tambang
+    6: (255, 0, 0),     # Bangunan & Permukiman
+    7: (210, 180, 140), # Lahan Terbuka
+    8: (139, 69, 19),   # Pertambangan
     9: (0, 0, 255),     # Tubuh Air
-    10: (0, 255, 255),  # Tanaman Padi Lahan Basah
+    10: (0, 255, 255),  # Sawah Lahan Basah
     11: (240, 230, 140),# Savanna
-    12: (0, 139, 139)   # Tambak
+    12: (0, 139, 139),  # Tambak Pesisir
+    13: (75, 85, 99)    # Di Luar Wilayah Sampel (#4B5563)
 }
 
 def geojson_to_pixel_coords(geom, min_lon: float, min_lat: float, max_lon: float, max_lat: float, width: int = 256, height: int = 256):

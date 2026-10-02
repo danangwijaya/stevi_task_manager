@@ -48,40 +48,42 @@
 
     <!-- LIVE STATISTICS BAR -->
     <section class="border-b border-[#e4e7eb] bg-white py-8 px-6 lg:px-12">
-      <div class="max-w-7xl mx-auto space-y-4">
-        <!-- Disclaimer pill box -->
-        <div class="inline-flex items-center gap-2 bg-[#f0f2f5] text-[#555d6b] text-xs px-3 py-1 rounded-lg">
-          <Info :size="13" class="text-[#707a8a]" />
-          <span>Statistik dataset training sample diperbarui secara real-time dari database spasial</span>
+      <div class="max-w-7xl mx-auto space-y-5">
+        <!-- Disclaimer pill box (Rata Kiri) -->
+        <div class="flex justify-start">
+          <div class="inline-flex items-center gap-2 bg-[#f0f2f5] text-[#555d6b] text-xs px-3.5 py-1.5 rounded-lg border border-slate-200/60 shadow-2xs">
+            <Info :size="13" class="text-[#707a8a]" />
+            <span>Statistik dataset training sample diperbarui secara real-time dari database spasial</span>
+          </div>
         </div>
 
-        <!-- 5 Big Metric Numbers -->
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-6 pt-2 text-left md:text-center">
-          <div>
+        <!-- 5 Big Metric Numbers (Rata Tengah) -->
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-6 pt-2 text-center justify-center">
+          <div class="flex flex-col items-center justify-center text-center">
             <div class="text-4xl lg:text-5xl font-black text-[#d73f3f] tracking-tight font-heading">
               {{ tasksStore.stats?.total_tasks ? tasksStore.stats.total_tasks.toLocaleString() : '180' }}
             </div>
             <div class="text-xs font-bold text-[#2c3038] uppercase tracking-wider mt-1">Grid Patches (1024px)</div>
           </div>
 
-          <div>
+          <div class="flex flex-col items-center justify-center text-center">
             <div class="text-4xl lg:text-5xl font-black text-[#d73f3f] tracking-tight font-heading">10.24 km</div>
             <div class="text-xs font-bold text-[#2c3038] uppercase tracking-wider mt-1">Ukuran Per Tile</div>
           </div>
 
-          <div>
+          <div class="flex flex-col items-center justify-center text-center">
             <div class="text-4xl lg:text-5xl font-black text-[#d73f3f] tracking-tight font-heading">12</div>
             <div class="text-xs font-bold text-[#2c3038] uppercase tracking-wider mt-1">Kelas Tutupan Lahan</div>
           </div>
 
-          <div>
+          <div class="flex flex-col items-center justify-center text-center">
             <div class="text-4xl lg:text-5xl font-black text-[#d73f3f] tracking-tight font-heading">
               {{ tasksStore.stats?.student_contributions?.length || 0 }}
             </div>
             <div class="text-xs font-bold text-[#2c3038] uppercase tracking-wider mt-1">Kontributor Terdaftar</div>
           </div>
 
-          <div class="col-span-2 md:col-span-1">
+          <div class="col-span-2 md:col-span-1 flex flex-col items-center justify-center text-center">
             <div class="text-4xl lg:text-5xl font-black text-[#d73f3f] tracking-tight font-heading">
               {{ tasksStore.stats?.approved || 0 }}
             </div>

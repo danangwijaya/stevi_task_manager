@@ -1,6 +1,9 @@
 <template>
   <div v-if="isOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-    <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+    <div
+      class="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full overflow-hidden flex flex-col max-h-[90vh] transition-all duration-200 animate-in fade-in zoom-in-95"
+      :class="activeTab === 'rekap' ? 'max-w-6xl' : 'max-w-3xl'"
+    >
       
       <!-- Modal Header -->
       <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
@@ -47,6 +50,16 @@
         >
           <Users :size="14" />
           <span>CRUD Pengguna (Admin)</span>
+        </button>
+
+        <button
+          v-if="authStore.isReviewer"
+          @click="activeTab = 'rekap'"
+          class="py-3 border-b-2 transition-colors flex items-center gap-2 cursor-pointer"
+          :class="activeTab === 'rekap' ? 'border-rose-600 text-rose-600' : 'border-transparent text-slate-500 hover:text-slate-900'"
+        >
+          <FileSpreadsheet :size="14" />
+          <span>Rekap Monitoring</span>
         </button>
       </div>
 
@@ -238,7 +251,7 @@
           <!-- Quick Page Navigation Shortcuts -->
           <div class="space-y-2 pt-2 border-t border-slate-200">
             <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Akses Langsung Halaman Sistem</div>
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
               <router-link
                 v-if="authStore.isAdmin"
                 to="/admin"
@@ -252,6 +265,20 @@
                 <div class="mt-2 font-bold text-slate-800 text-xs group-hover:text-purple-700">Panel Admin</div>
                 <div class="text-[10px] text-slate-500">CRUD Proyek & User</div>
               </router-link>
+
+              <button
+                v-if="authStore.isReviewer"
+                type="button"
+                @click="activeTab = 'rekap'"
+                class="p-2.5 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded-xl text-left flex flex-col justify-between transition-colors shadow-2xs group cursor-pointer"
+              >
+                <div class="flex items-center justify-between text-teal-700">
+                  <FileSpreadsheet :size="16" />
+                  <span class="text-[9px] font-mono font-bold bg-teal-200 px-1 py-0.2 rounded">XLSX</span>
+                </div>
+                <div class="mt-2 font-bold text-slate-800 text-xs group-hover:text-teal-700">Rekap Monitoring</div>
+                <div class="text-[10px] text-slate-500">Tabel & Download Excel</div>
+              </button>
 
               <router-link
                 to="/export"
@@ -421,6 +448,13 @@
 
         </div>
 
+
+
+        <!-- TAB 5: REKAP MONITORING (KHUSUS SUPERVISI / ADMIN) -->
+        <div v-if="activeTab === 'rekap' && authStore.isReviewer" class="space-y-4">
+          <ProgressReportTable />
+        </div>
+
       </div>
 
       <!-- Modal Footer -->
@@ -559,10 +593,12 @@ import {
   Building2,
   MapPin,
   Save,
-  FileText
+  FileText,
+  FileSpreadsheet
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import api from '../services/api'
+import ProgressReportTable from './ProgressReportTable.vue'
 
 const props = defineProps({
   isOpen: {

@@ -451,51 +451,51 @@ const toggleOnlyApproved = () => {
   fetchVectorSummary()
 }
 
-const downloadGeoJSON = async () => {
+const downloadGeoJSON = () => {
   downloadingGeojson.value = true
   try {
     const params = {}
     if (vectorFilterYear.value) params.year = vectorFilterYear.value
     if (vectorOnlyApproved.value) params.only_approved = true
 
-    const response = await api.downloadVectorGeoJson(params)
-    const blob = new Blob([response.data], { type: 'application/geo+json' })
-    const url = window.URL.createObjectURL(blob)
+    const downloadUrl = api.getVectorGeoJsonDownloadUrl(params)
     const link = document.createElement('a')
-    link.href = url
+    link.href = downloadUrl
     link.setAttribute('download', `training_samples_penutupan_lahan_${vectorFilterYear.value || 'all'}.geojson`)
     document.body.appendChild(link)
     link.click()
     link.remove()
-    window.URL.revokeObjectURL(url)
   } catch (err) {
-    alert(err.response?.data?.detail || 'Gagal mengunduh file GeoJSON.')
+    console.error('Download error:', err)
+    alert('Gagal memulai unduhan file GeoJSON.')
   } finally {
-    downloadingGeojson.value = false
+    setTimeout(() => {
+      downloadingGeojson.value = false
+    }, 2000)
   }
 }
 
-const downloadShapefile = async () => {
+const downloadShapefile = () => {
   downloadingShp.value = true
   try {
     const params = {}
     if (vectorFilterYear.value) params.year = vectorFilterYear.value
     if (vectorOnlyApproved.value) params.only_approved = true
 
-    const response = await api.downloadVectorShapefile(params)
-    const blob = new Blob([response.data], { type: 'application/zip' })
-    const url = window.URL.createObjectURL(blob)
+    const downloadUrl = api.getVectorShapefileDownloadUrl(params)
     const link = document.createElement('a')
-    link.href = url
+    link.href = downloadUrl
     link.setAttribute('download', `training_samples_penutupan_lahan_${vectorFilterYear.value || 'all'}_shp.zip`)
     document.body.appendChild(link)
     link.click()
     link.remove()
-    window.URL.revokeObjectURL(url)
   } catch (err) {
-    alert(err.response?.data?.detail || 'Gagal mengunduh file Shapefile.')
+    console.error('Download error:', err)
+    alert('Gagal memulai unduhan file Shapefile.')
   } finally {
-    downloadingShp.value = false
+    setTimeout(() => {
+      downloadingShp.value = false
+    }, 2000)
   }
 }
 
