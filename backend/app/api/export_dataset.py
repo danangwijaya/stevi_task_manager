@@ -11,7 +11,7 @@ from shapely.geometry import shape, Polygon, MultiPolygon
 import geopandas as gpd
 
 from app.db.session import get_db
-from app.db.models import TaskGrid, Annotation, User, ExportJob
+from app.db.models import TaskGrid, Annotation, User, ExportJob, StudyArea
 from app.core.config import settings
 from app.api.deps import get_current_user, get_current_active_admin
 from app.services.rasterizer import build_unet_dataset_package
@@ -152,12 +152,18 @@ def get_vector_export_summary(
     years_q = db.query(TaskGrid.year).distinct().all()
     available_years = sorted([y[0] for y in years_q if y[0] is not None])
 
+    study_areas = [
+        {"id": sa.id, "name": sa.name, "description": sa.description}
+        for sa in db.query(StudyArea).order_by(StudyArea.id.asc()).all()
+    ]
+
     return {
         "total_samples": total_samples,
         "total_area_ha": total_area_ha,
         "total_grids": len(unique_grids),
         "classes": sorted(list(class_counts.values()), key=lambda x: x["count"], reverse=True),
-        "available_years": available_years
+        "available_years": available_years,
+        "study_areas": study_areas
     }
 
 @router.get("/vector/geojson")
@@ -240,8 +246,14 @@ def export_vector_geojson(
         "features": features
     }
 
+    area_slug = "nasional"
+    if study_area_id:
+        sa = db.query(StudyArea).filter(StudyArea.id == study_area_id).first()
+        if sa and sa.name:
+            area_slug = "".join(c if c.isalnum() else "_" for c in sa.name.lower()).strip("_")
+
     content = json.dumps(geojson_data, ensure_ascii=False, indent=2)
-    filename = f"training_samples_penutupan_lahan_{year or 'all'}.geojson"
+    filename = f"training_samples_{area_slug}_{year or 'all'}.geojson"
     
     return Response(
         content=content,
@@ -341,7 +353,13 @@ def export_vector_shapefile(
 
     # Create temporary directory for shapefile generation
     temp_dir = tempfile.mkdtemp(prefix="export_shp_")
-    shp_basename = f"training_samples_penutupan_lahan_{year or 'all'}"
+    area_slug = "nasional"
+    if study_area_id:
+        sa = db.query(StudyArea).filter(StudyArea.id == study_area_id).first()
+        if sa and sa.name:
+            area_slug = "".join(c if c.isalnum() else "_" for c in sa.name.lower()).strip("_")
+
+    shp_basename = f"training_samples_{area_slug}_{year or 'all'}"
     shp_path = os.path.join(temp_dir, f"{shp_basename}.shp")
 
     try:

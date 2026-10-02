@@ -49,6 +49,22 @@
 
         <!-- Filter Controls -->
         <div class="flex items-center gap-2.5 flex-wrap">
+          <!-- Filter Project / Wilayah -->
+          <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-600">
+            <MapPin :size="14" class="text-teal-600" />
+            <label class="text-[11px] text-slate-400 font-bold uppercase">Project / Wilayah:</label>
+            <select
+              v-model="vectorFilterArea"
+              @change="fetchVectorSummary"
+              class="bg-transparent border-0 text-slate-800 text-xs font-bold focus:outline-hidden cursor-pointer max-w-[180px] sm:max-w-xs"
+            >
+              <option value="">Semua Project (Nasional)</option>
+              <option v-for="p in studyAreaOptions" :key="p.id" :value="p.id">
+                {{ p.name }}
+              </option>
+            </select>
+          </div>
+
           <!-- Filter Tahun -->
           <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-600">
             <Calendar :size="14" class="text-slate-400" />
@@ -375,7 +391,7 @@ dataset_sentinel2/
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import L from 'leaflet'
 import {
   Package,
@@ -405,11 +421,19 @@ const exportResult = ref(null)
 
 // Vector Export States
 const vectorSummary = ref(null)
+const vectorFilterArea = ref('')
 const vectorFilterYear = ref('')
 const vectorOnlyApproved = ref(false)
 const availableYears = ref([])
 const downloadingGeojson = ref(false)
 const downloadingShp = ref(false)
+
+const studyAreaOptions = computed(() => {
+  if (vectorSummary.value?.study_areas?.length) {
+    return vectorSummary.value.study_areas
+  }
+  return tasksStore.projects || []
+})
 
 let splitMap = null
 let splitGridLayer = null
@@ -433,6 +457,7 @@ const formatNumber = (val) => {
 const fetchVectorSummary = async () => {
   try {
     const params = {}
+    if (vectorFilterArea.value) params.study_area_id = vectorFilterArea.value
     if (vectorFilterYear.value) params.year = vectorFilterYear.value
     if (vectorOnlyApproved.value) params.only_approved = true
 
@@ -455,13 +480,13 @@ const downloadGeoJSON = () => {
   downloadingGeojson.value = true
   try {
     const params = {}
+    if (vectorFilterArea.value) params.study_area_id = vectorFilterArea.value
     if (vectorFilterYear.value) params.year = vectorFilterYear.value
     if (vectorOnlyApproved.value) params.only_approved = true
 
     const downloadUrl = api.getVectorGeoJsonDownloadUrl(params)
     const link = document.createElement('a')
     link.href = downloadUrl
-    link.setAttribute('download', `training_samples_penutupan_lahan_${vectorFilterYear.value || 'all'}.geojson`)
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -479,13 +504,13 @@ const downloadShapefile = () => {
   downloadingShp.value = true
   try {
     const params = {}
+    if (vectorFilterArea.value) params.study_area_id = vectorFilterArea.value
     if (vectorFilterYear.value) params.year = vectorFilterYear.value
     if (vectorOnlyApproved.value) params.only_approved = true
 
     const downloadUrl = api.getVectorShapefileDownloadUrl(params)
     const link = document.createElement('a')
     link.href = downloadUrl
-    link.setAttribute('download', `training_samples_penutupan_lahan_${vectorFilterYear.value || 'all'}_shp.zip`)
     document.body.appendChild(link)
     link.click()
     link.remove()
