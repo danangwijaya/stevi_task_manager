@@ -377,22 +377,27 @@
         </span>
       </div>
 
-      <!-- Slim Topology Indicator Bar (Preserves 100% Main Map Height) -->
+      <!-- Slim Topology Indicator Bar (Preserves 100% Main Map Height - Shadcn Alert Style) -->
       <div
         v-if="topologyResult && !topologyResult.valid"
-        class="bg-slate-900/95 text-slate-100 px-4 py-2 text-xs z-10 shrink-0 shadow-md flex items-center justify-between gap-3 border-b border-rose-500/50 backdrop-blur-sm animate-in fade-in"
+        role="alert"
+        class="bg-rose-50/95 text-rose-950 px-4 py-2 text-xs z-10 shrink-0 shadow-xs flex items-center justify-between gap-3 border-b border-rose-200/90 backdrop-blur-md animate-in fade-in duration-150"
       >
-        <div class="flex items-center gap-2 font-bold min-w-0">
-          <AlertTriangle :size="15" class="text-amber-400 shrink-0" />
-          <span class="truncate">
-            Ditemukan <b class="text-rose-300 underline font-mono">{{ topologyResult.errors.length }} Masalah Topologi</b>
-            <span class="text-slate-400 text-[11px] font-normal hidden md:inline ml-1">(Overlap, Celah, atau Simpul Melilit)</span>
-          </span>
+        <div class="flex items-center gap-2.5 font-medium min-w-0">
+          <div class="w-6 h-6 rounded-md bg-rose-100/90 border border-rose-200 flex items-center justify-center text-rose-600 shrink-0">
+            <AlertTriangle :size="13" />
+          </div>
+          <div class="truncate">
+            <span class="font-bold text-rose-950">
+              Ditemukan <span class="underline decoration-rose-400 font-mono text-rose-700 font-extrabold">{{ topologyResult.errors.length }} Masalah Topologi</span>
+            </span>
+            <span class="text-rose-700/80 text-[11px] font-normal hidden md:inline ml-1.5">(Tumpang tindih, celah batas, atau simpul melilit)</span>
+          </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <button
             @click="openTopologySurgeryModal"
-            class="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer transform hover:scale-[1.02]"
+            class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
             title="Buka Studio Popup untuk perbaikan topologi dengan kanvas zoom tak terbatas dan tools lengkap"
           >
             <Maximize2 :size="13" />
@@ -401,7 +406,7 @@
           <button
             @click="handleCleanSlivers"
             :disabled="isCleaningSlivers"
-            class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-semibold hidden lg:flex items-center gap-1 cursor-pointer transition-colors"
+            class="px-2.5 py-1.5 bg-white hover:bg-rose-100/70 text-rose-800 border border-rose-200 rounded-md text-xs font-medium hidden lg:flex items-center gap-1 shadow-2xs cursor-pointer transition-colors"
             title="Rapatkan sliver celah batas"
           >
             <Sparkles :size="12" :class="{ 'animate-spin': isCleaningSlivers }" />
@@ -410,7 +415,7 @@
           <button
             @click="handleAutoHeal"
             :disabled="isHealingTopology"
-            class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold hidden sm:flex items-center gap-1 cursor-pointer transition-colors"
+            class="px-2.5 py-1.5 bg-white hover:bg-rose-100/70 text-rose-800 border border-rose-200 rounded-md text-xs font-medium hidden sm:flex items-center gap-1 shadow-2xs cursor-pointer transition-colors"
             title="Koreksi otomatis cepat"
           >
             <Wand2 :size="12" :class="{ 'animate-spin': isHealingTopology }" />
@@ -418,7 +423,7 @@
           </button>
           <button
             @click="topologyResult = null"
-            class="text-slate-400 hover:text-white p-1 rounded-md cursor-pointer transition-colors"
+            class="text-rose-400 hover:text-rose-700 hover:bg-rose-100/80 p-1 rounded-md cursor-pointer transition-colors"
             title="Tutup banner ini"
           >
             <X :size="15" />
