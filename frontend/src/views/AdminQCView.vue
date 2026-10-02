@@ -1082,15 +1082,15 @@
           <div class="lg:col-span-7 bg-white border border-slate-200 p-4 rounded-2xl flex flex-col justify-between gap-3 shadow-2xs">
             
             <!-- Admin / Reviewer Assign Grid to Account -->
-            <div v-if="authStore.isReviewer || authStore.isAdmin" class="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-1.5 shadow-2xs">
+            <div v-if="authStore.isReviewer || authStore.isAdmin" class="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-1.5 shadow-2xs overflow-hidden">
               <div class="flex items-center justify-between text-[11px] font-bold text-indigo-950">
                 <span class="flex items-center gap-1.5"><UserCheck :size="13" class="text-indigo-600" /> Penugasan Grid Ini:</span>
                 <span class="text-indigo-700 font-semibold truncate max-w-[200px]">{{ selectedTask.assigned_user_name || 'Belum Ditugaskan' }}</span>
               </div>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 min-w-0">
                 <select
                   v-model="selectedAssignUserId"
-                  class="flex-1 bg-white border border-indigo-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                  class="flex-1 min-w-0 bg-white border border-indigo-200 hover:border-indigo-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium truncate focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors"
                 >
                   <option :value="null">-- Lepas Penugasan (Tersedia) --</option>
                   <option v-for="u in userList" :key="u.id" :value="u.id">
@@ -1100,7 +1100,7 @@
                 <button
                   @click="assignCurrentTaskToUser"
                   :disabled="loadingAction"
-                  class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+                  class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer shrink-0 whitespace-nowrap disabled:opacity-50 shadow-xs"
                 >
                   Tugaskan
                 </button>

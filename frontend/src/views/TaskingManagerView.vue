@@ -244,15 +244,15 @@
             <!-- Admin / Reviewer Direct Assignment Box -->
             <div
               v-if="authStore.isReviewer"
-              class="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl space-y-2 shadow-2xs"
+              class="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl space-y-2 shadow-2xs overflow-hidden"
             >
               <div class="flex items-center justify-between text-[11px] font-bold text-indigo-950">
                 <span class="flex items-center gap-1.5"><UserCheck :size="13" class="text-indigo-600" /> Tugaskan ke Akun (Admin):</span>
               </div>
-              <div class="flex items-center gap-1.5">
+              <div class="flex items-center gap-2 min-w-0">
                 <select
                   v-model="selectedAssignUserId"
-                  class="flex-1 bg-white border border-indigo-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                  class="flex-1 min-w-0 bg-white border border-indigo-200 hover:border-indigo-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-medium truncate focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors shadow-2xs"
                 >
                   <option :value="null">-- Lepas Penugasan (Tersedia) --</option>
                   <option v-for="u in userList" :key="u.id" :value="u.id">
@@ -262,7 +262,7 @@
                 <button
                   @click="assignSelectedTaskToUser"
                   :disabled="actionLoading"
-                  class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer shrink-0"
+                  class="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-50 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer shrink-0 whitespace-nowrap shadow-xs"
                 >
                   Tugaskan
                 </button>
