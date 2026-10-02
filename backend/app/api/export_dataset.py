@@ -29,6 +29,7 @@ def cleanup_temp_dir(dir_path: str):
 def trigger_export(
     year: Optional[int] = 2025,
     only_approved: bool = False, # if True only APPROVED, if False include SUBMITTED for fast testing
+    study_area_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
@@ -39,6 +40,8 @@ def trigger_export(
     query = db.query(TaskGrid)
     if year:
         query = query.filter(TaskGrid.year == year)
+    if study_area_id:
+        query = query.filter(TaskGrid.study_area_id == study_area_id)
     if only_approved:
         query = query.filter(TaskGrid.status == "APPROVED")
     else:

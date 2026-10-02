@@ -151,8 +151,8 @@ export default {
   getGEETiles: (params) => api.get('/gee/tiles', { params }),
 
   // 1-Click Export & Vector Export
-  triggerExport: (year = 2025, onlyApproved = false) => 
-    api.post('/export/trigger', null, { params: { year, only_approved: onlyApproved } }),
+  triggerExport: (year = 2025, onlyApproved = false, studyAreaId = null) => 
+    api.post('/export/trigger', null, { params: { year, only_approved: onlyApproved, study_area_id: studyAreaId } }),
   getDownloadUrl: (jobId) => `${getBaseUrl()}/export/download/${jobId}`,
   
   // Vector Training Samples Export (GeoJSON & Shapefile)

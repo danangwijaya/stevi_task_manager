@@ -614,7 +614,9 @@ const triggerExport = async () => {
   exporting.value = true
   exportResult.value = null
   try {
-    const response = await api.triggerExport(2026, false)
+    const yr = vectorFilterYear.value ? Number(vectorFilterYear.value) : 2025
+    const areaId = vectorFilterArea.value ? Number(vectorFilterArea.value) : null
+    const response = await api.triggerExport(yr, vectorOnlyApproved.value, areaId)
     exportResult.value = response.data
   } catch (err) {
     alert(err.response?.data?.detail || 'Gagal mengekspor dataset.')
