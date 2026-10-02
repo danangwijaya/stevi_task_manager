@@ -736,7 +736,8 @@ def validate_topology(
                 "type": "SELF_INTERSECTION",
                 "annotation_id": ann.id,
                 "class_name": ann.class_name,
-                "message": f"Poligon memiliki geometri tidak valid: {reason}"
+                "geometry": mapping(s_geom),
+                "message": f"Poligon #{ann.id} memiliki geometri tidak valid: {reason}"
             })
             # Try to fix for further analysis
             try:
@@ -751,7 +752,11 @@ def validate_topology(
             unclassified_ids.append(ann.id)
 
     # 2. Overlap detection with STRtree spatial index (10x-100x faster than O(N^2))
-    OVERLAP_THRESHOLD = 1e-10  # ~1 sq meter in degree² terms
+    # 1 deg ~ 111320 meters, 1 sq meter ~ 8.07e-11 deg²
+    SQM_TO_DEG2 = 1.0 / (111320.0 ** 2)
+    ERROR_OVERLAP_THRESHOLD = 3.0 * SQM_TO_DEG2   # Overlaps >= 3.0 m² are blocking errors
+    WARNING_OVERLAP_THRESHOLD = 0.5 * SQM_TO_DEG2 # Overlaps 0.5 - 3.0 m² are non-blocking micro-slivers
+
     valid_polys = [sp for sp in shapely_polygons if sp["geom"].is_valid and not sp["geom"].is_empty]
     
     if len(valid_polys) > 1:
@@ -766,18 +771,32 @@ def validate_topology(
             if i < j:
                 try:
                     inter = geoms_list[i].intersection(geoms_list[j])
-                    if inter.area > OVERLAP_THRESHOLD:
+                    if inter.area > ERROR_OVERLAP_THRESHOLD:
                         overlap_count += 1
                         if len(errors) < MAX_DISPLAY_ERRORS:
                             overlap_pct = (inter.area / grid_area) * 100
+                            overlap_sqm = inter.area * (111320.0 ** 2)
                             ann_i = valid_polys[i]["ann"]
                             ann_j = valid_polys[j]["ann"]
                             errors.append({
                                 "type": "OVERLAP",
                                 "annotation_ids": [ann_i.id, ann_j.id],
                                 "class_names": [ann_i.class_name, ann_j.class_name],
-                                "message": f"Tumpang tindih terdeteksi ({overlap_pct:.4f}% dari grid) antara poligon #{ann_i.id} ({ann_i.class_name}) dan #{ann_j.id} ({ann_j.class_name})"
+                                "area_sqm": round(overlap_sqm, 2),
+                                "geometry": mapping(inter),
+                                "message": f"Tumpang tindih {round(overlap_sqm, 1)} m² ({overlap_pct:.4f}% dari grid) antara poligon #{ann_i.id} ({ann_i.class_name}) dan #{ann_j.id} ({ann_j.class_name})"
                             })
+                    elif inter.area > WARNING_OVERLAP_THRESHOLD:
+                        overlap_sqm = inter.area * (111320.0 ** 2)
+                        ann_i = valid_polys[i]["ann"]
+                        ann_j = valid_polys[j]["ann"]
+                        warnings.append({
+                            "type": "MICRO_OVERLAP",
+                            "annotation_ids": [ann_i.id, ann_j.id],
+                            "area_sqm": round(overlap_sqm, 2),
+                            "geometry": mapping(inter),
+                            "message": f"Tumpang tindih mikro tepi {round(overlap_sqm, 2)} m² antara #{ann_i.id} dan #{ann_j.id} (toleransi digitasi wajar)"
+                        })
                 except Exception:
                     pass
 
@@ -799,17 +818,22 @@ def validate_topology(
             coverage_percent = min(coverage_percent, 100.0)
 
             gap_area = grid_box.difference(covered)
-            if gap_area.area > OVERLAP_THRESHOLD:
+            if gap_area.area > ERROR_OVERLAP_THRESHOLD:
                 gap_pct = (gap_area.area / grid_area) * 100
+                gap_sqm = gap_area.area * (111320.0 ** 2)
                 if gap_pct > 5.0:
                     errors.append({
                         "type": "GAP",
-                        "message": f"Area kosong (gap) terdeteksi: {gap_pct:.2f}% dari grid belum tercakup poligon"
+                        "area_sqm": round(gap_sqm, 2),
+                        "geometry": mapping(gap_area),
+                        "message": f"Area kosong (gap) terdeteksi: {gap_pct:.2f}% dari grid ({round(gap_sqm, 1)} m²) belum tercakup poligon"
                     })
                 elif gap_pct > 0.5:
                     warnings.append({
                         "type": "SMALL_GAP",
-                        "message": f"Area kosong kecil terdeteksi: {gap_pct:.2f}% dari grid — pertimbangkan untuk menutup celah"
+                        "area_sqm": round(gap_sqm, 2),
+                        "geometry": mapping(gap_area),
+                        "message": f"Area kosong kecil terdeteksi: {gap_pct:.2f}% dari grid ({round(gap_sqm, 1)} m²) — pertimbangkan untuk menutup celah"
                     })
     except Exception as e:
         warnings.append({
@@ -1034,7 +1058,7 @@ def auto_heal_topology(
                 s_geom = Polygon(s_geom.exterior, cleaned_holes)
                 was_healed = True
 
-        effective_min_sqm = options.min_sliver_area_sqm if options.remove_slivers else 0.05
+        effective_min_sqm = max(3.0, options.min_sliver_area_sqm) if options.remove_slivers else 2.0
         extracted = _extract_polygons(s_geom, min_area_sqm=effective_min_sqm)
         if not extracted:
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
@@ -1054,23 +1078,25 @@ def auto_heal_topology(
         })
 
         for extra_p in extracted[1:]:
-            new_ann = Annotation(
-                task_grid_id=task_grid_id,
-                user_id=ann.user_id,
-                class_id=ann.class_id,
-                class_name=ann.class_name,
-                geom_geojson=json.dumps(mapping(extra_p)),
-                area_sqm=extra_p.area * (111320.0 ** 2)
-            )
-            db.add(new_ann)
-            db.flush()
-            working_list.append({
-                "ann": new_ann,
-                "geom": extra_p,
-                "area_sqm": extra_p.area * (111320.0 ** 2),
-                "was_modified": True
-            })
-            healed_count += 1
+            extra_sqm = extra_p.area * (111320.0 ** 2)
+            if extra_sqm >= 3.0:
+                new_ann = Annotation(
+                    task_grid_id=task_grid_id,
+                    user_id=ann.user_id,
+                    class_id=ann.class_id,
+                    class_name=ann.class_name,
+                    geom_geojson=json.dumps(mapping(extra_p)),
+                    area_sqm=extra_sqm
+                )
+                db.add(new_ann)
+                db.flush()
+                working_list.append({
+                    "ann": new_ann,
+                    "geom": extra_p,
+                    "area_sqm": extra_sqm,
+                    "was_modified": True
+                })
+                healed_count += 1
 
     # ─────────────────────────────────────────────────────────────────────────
     # PHASE 3: Auto-Clip Overlaps (Boundary Clashing & Subtraction)
@@ -1085,6 +1111,7 @@ def auto_heal_topology(
         else: # "smaller_first" (default)
             working_list.sort(key=lambda x: (1 if x["ann"].class_id in [0, 1] else 0, x["area_sqm"]))
 
+        clip_thresh = 2.0 / (111320.0 ** 2)
         for item in working_list:
             cur_geom = item["geom"]
             cur_ann = item["ann"]
@@ -1094,7 +1121,7 @@ def auto_heal_topology(
                 if not cur_geom.is_empty and cur_geom.intersects(accepted["geom"]):
                     try:
                         inter = cur_geom.intersection(accepted["geom"])
-                        if inter.area > 1e-10:
+                        if inter.area > clip_thresh:
                             cur_geom = cur_geom.difference(accepted["geom"])
                             cur_geom = make_valid(cur_geom)
                             was_clipped = True
@@ -1102,7 +1129,7 @@ def auto_heal_topology(
                     except Exception:
                         pass
 
-            effective_min_sqm = options.min_sliver_area_sqm if options.remove_slivers else 0.05
+            effective_min_sqm = max(3.0, options.min_sliver_area_sqm) if options.remove_slivers else 2.0
             extracted = _extract_polygons(cur_geom, min_area_sqm=effective_min_sqm)
             if not extracted:
                 # Completely enveloped redundant polygon
@@ -1122,21 +1149,23 @@ def auto_heal_topology(
                 })
 
                 for extra_p in extracted[1:]:
-                    new_ann = Annotation(
-                        task_grid_id=task_grid_id,
-                        user_id=cur_ann.user_id,
-                        class_id=cur_ann.class_id,
-                        class_name=cur_ann.class_name,
-                        geom_geojson=json.dumps(mapping(extra_p)),
-                        area_sqm=extra_p.area * (111320.0 ** 2)
-                    )
-                    db.add(new_ann)
-                    db.flush()
-                    accepted_list.append({
-                        "ann": new_ann,
-                        "geom": extra_p,
-                        "area_sqm": extra_p.area * (111320.0 ** 2)
-                    })
+                    extra_sqm = extra_p.area * (111320.0 ** 2)
+                    if extra_sqm >= 3.0:
+                        new_ann = Annotation(
+                            task_grid_id=task_grid_id,
+                            user_id=cur_ann.user_id,
+                            class_id=cur_ann.class_id,
+                            class_name=cur_ann.class_name,
+                            geom_geojson=json.dumps(mapping(extra_p)),
+                            area_sqm=extra_sqm
+                        )
+                        db.add(new_ann)
+                        db.flush()
+                        accepted_list.append({
+                            "ann": new_ann,
+                            "geom": extra_p,
+                            "area_sqm": extra_sqm
+                        })
     else:
         for item in working_list:
             if item["was_modified"]:
@@ -1350,9 +1379,18 @@ def resolve_overlap(
         geom_b = shape(json.loads(ann_b.geom_geojson))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Gagal membaca geometri poligon: {e}")
+
+    if not geom_a.is_valid:
+        geom_a = make_valid(geom_a)
+    if not geom_b.is_valid:
+        geom_b = make_valid(geom_b)
         
     if not geom_a.intersects(geom_b):
         return {"message": f"Poligon #{ann_a.id} dan #{ann_b.id} tidak tumpang tindih."}
+
+    inter = geom_a.intersection(geom_b)
+    if inter.is_empty or inter.area <= 0:
+        return {"message": f"Poligon #{ann_a.id} dan #{ann_b.id} hanya bersentuhan di garis batas (tidak bertumpuk)."}
         
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
     
@@ -1360,7 +1398,7 @@ def resolve_overlap(
         # Subtract B from A: A is clipped, B remains unchanged
         diff = geom_a.difference(geom_b)
         diff = make_valid(diff)
-        polys = _extract_polygons(diff, min_area_sqm=0.1)
+        polys = _extract_polygons(diff, min_area_sqm=3.0)
         if not polys:
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann_a.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann_a)
@@ -1370,15 +1408,17 @@ def resolve_overlap(
         ann_a.geom_geojson = json.dumps(mapping(polys[0]))
         ann_a.area_sqm = polys[0].area * (111320.0 ** 2)
         for extra in polys[1:]:
-            new_ann = Annotation(
-                task_grid_id=req.task_grid_id,
-                user_id=ann_a.user_id,
-                class_id=ann_a.class_id,
-                class_name=ann_a.class_name,
-                geom_geojson=json.dumps(mapping(extra)),
-                area_sqm=extra.area * (111320.0 ** 2)
-            )
-            db.add(new_ann)
+            extra_sqm = extra.area * (111320.0 ** 2)
+            if extra_sqm >= 3.0:
+                new_ann = Annotation(
+                    task_grid_id=req.task_grid_id,
+                    user_id=ann_a.user_id,
+                    class_id=ann_a.class_id,
+                    class_name=ann_a.class_name,
+                    geom_geojson=json.dumps(mapping(extra)),
+                    area_sqm=extra_sqm
+                )
+                db.add(new_ann)
         db.commit()
         return {"message": f"Poligon #{ann_a.id} ({ann_a.class_name}) berhasil dipotong oleh #{ann_b.id} ({ann_b.class_name}). Bentuk #{ann_b.id} tetap utuh."}
         
@@ -1386,7 +1426,7 @@ def resolve_overlap(
         # Subtract A from B: B is clipped, A remains unchanged
         diff = geom_b.difference(geom_a)
         diff = make_valid(diff)
-        polys = _extract_polygons(diff, min_area_sqm=0.1)
+        polys = _extract_polygons(diff, min_area_sqm=3.0)
         if not polys:
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann_b.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann_b)
@@ -1396,15 +1436,17 @@ def resolve_overlap(
         ann_b.geom_geojson = json.dumps(mapping(polys[0]))
         ann_b.area_sqm = polys[0].area * (111320.0 ** 2)
         for extra in polys[1:]:
-            new_ann = Annotation(
-                task_grid_id=req.task_grid_id,
-                user_id=ann_b.user_id,
-                class_id=ann_b.class_id,
-                class_name=ann_b.class_name,
-                geom_geojson=json.dumps(mapping(extra)),
-                area_sqm=extra.area * (111320.0 ** 2)
-            )
-            db.add(new_ann)
+            extra_sqm = extra.area * (111320.0 ** 2)
+            if extra_sqm >= 3.0:
+                new_ann = Annotation(
+                    task_grid_id=req.task_grid_id,
+                    user_id=ann_b.user_id,
+                    class_id=ann_b.class_id,
+                    class_name=ann_b.class_name,
+                    geom_geojson=json.dumps(mapping(extra)),
+                    area_sqm=extra_sqm
+                )
+                db.add(new_ann)
         db.commit()
         return {"message": f"Poligon #{ann_b.id} ({ann_b.class_name}) berhasil dipotong oleh #{ann_a.id} ({ann_a.class_name}). Bentuk #{ann_a.id} tetap utuh."}
         
@@ -1696,7 +1738,7 @@ def _clean_spikes_and_holes(poly):
         return poly
 
 
-def _extract_polygons(geom, min_area_sqm=0.5):
+def _extract_polygons(geom, min_area_sqm=3.0):
     """
     Recursively unpacks GeometryCollection / MultiPolygon into distinct Polygon objects,
     validates/heals geometry with make_valid, and filters out micro-slivers below min_area_sqm.

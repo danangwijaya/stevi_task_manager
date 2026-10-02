@@ -4957,6 +4957,20 @@ const focusErrorPolygon = (err) => {
   }
 
   if (targetIds.length === 0 || !featureGroup || !map) {
+    if (err.geometry && map) {
+      try {
+        const errLayer = L.geoJSON(err.geometry, {
+          style: { color: '#FF0000', fillColor: '#EF4444', fillOpacity: 0.65, weight: 3, dashArray: '5, 5' }
+        }).addTo(map)
+        const errBounds = errLayer.getBounds()
+        if (errBounds.isValid()) {
+          map.flyToBounds(errBounds, { padding: [120, 120], maxZoom: 20, duration: 0.5 })
+        }
+        setTimeout(() => { if (map && errLayer) map.removeLayer(errLayer) }, 6000)
+        showToast(`⚠️ Menyorot area: ${err.message || err.type}`)
+        return
+      } catch (_) {}
+    }
     showToast('⚠️ Tidak ada ID poligon untuk disorot')
     return
   }
@@ -4970,6 +4984,20 @@ const focusErrorPolygon = (err) => {
   })
 
   if (matchedLayers.length === 0) {
+    if (err.geometry && map) {
+      try {
+        const errLayer = L.geoJSON(err.geometry, {
+          style: { color: '#FF0000', fillColor: '#EF4444', fillOpacity: 0.65, weight: 3, dashArray: '5, 5' }
+        }).addTo(map)
+        const errBounds = errLayer.getBounds()
+        if (errBounds.isValid()) {
+          map.flyToBounds(errBounds, { padding: [120, 120], maxZoom: 20, duration: 0.5 })
+        }
+        setTimeout(() => { if (map && errLayer) map.removeLayer(errLayer) }, 6000)
+        showToast(`⚠️ Menyorot lokasi masalah: ${err.message}`)
+        return
+      } catch (_) {}
+    }
     showToast(`⚠️ Poligon #${targetIds.join(', #')} tidak ditemukan di peta. Coba jalankan ulang Cek Topologi.`)
     return
   }
@@ -5123,7 +5151,15 @@ const initSurgeryMap = () => {
     surgeryLayerGroup = null
   }
 
+  // Pre-calculate fallback center & zoom from task grid or main map so canvas is NEVER pitch black!
+  const taskCenter = tasksStore.currentTask
+    ? [(tasksStore.currentTask.min_lat + tasksStore.currentTask.max_lat) / 2, (tasksStore.currentTask.min_lon + tasksStore.currentTask.max_lon) / 2]
+    : (map ? map.getCenter() : [-0.5, 100.5])
+  const taskZoom = map ? Math.max(map.getZoom(), 17) : 18
+
   surgeryMapInstance = L.map('topology-surgery-map-canvas', {
+    center: taskCenter,
+    zoom: taskZoom,
     maxZoom: 24,
     minZoom: 2,
     zoomControl: true,
@@ -5260,6 +5296,7 @@ const loadSurgeryError = (idx) => {
           dashArray: '5, 5'
         }
       }).addTo(surgeryLayerGroup)
+      errLayer.bindTooltip(`⚠️ ${err.message || 'Area Masalah Topologi'}`, { sticky: true })
       layersToFit.push(errLayer)
     } catch (e) {
       console.warn('Could not draw error geometry:', e)
@@ -5277,7 +5314,24 @@ const loadSurgeryError = (idx) => {
         }
       }, 100)
     }
-  } else if (surgeryInvolvedPolygons.value.length === 0 && topologyResult.value?.errors?.length) {
+  } else {
+    // Guaranteed fallback: If no specific polygon layers were found (e.g. general gap or sync delay),
+    // center and fit to task grid bounds so map canvas is NEVER blank or pitch black!
+    if (tasksStore.currentTask) {
+      const t = tasksStore.currentTask
+      surgeryMapInstance.fitBounds([[t.min_lat, t.min_lon], [t.max_lat, t.max_lon]], { padding: [40, 40] })
+    } else if (map) {
+      surgeryMapInstance.setView(map.getCenter(), Math.max(map.getZoom(), 17))
+    }
+    setTimeout(() => {
+      if (surgeryMapInstance) {
+        surgeryMapInstance.invalidateSize()
+        surgeryCurrentZoom.value = surgeryMapInstance.getZoom()
+      }
+    }, 100)
+  }
+
+  if (surgeryInvolvedPolygons.value.length === 0 && topologyResult.value?.errors?.length && targetIds.length > 0) {
     // If features were still populating after save/reload, retry once
     setTimeout(() => {
       if (surgeryMapInstance && surgeryInvolvedPolygons.value.length === 0) {
@@ -7414,6 +7468,13 @@ const submitForReview = async () => {
   // Save first
   await saveAnnotations()
 
+  // CRITICAL: Reload features so local featureGroup layers and features.value have fresh DB IDs
+  try {
+    await loadTaskData(selectedTaskId.value, true)
+  } catch (reloadErr) {
+    console.warn('Could not reload features after pre-submit save:', reloadErr)
+  }
+
   // Run topology validation before submit
   topologyLoading.value = true
   try {
@@ -7422,7 +7483,31 @@ const submitForReview = async () => {
 
     if (!topoRes.data.valid) {
       const errorSummary = topoRes.data.errors.map(e => `• [${e.type}] ${e.message}`).join('\n')
-      alert(`⚠️ Validasi Topologi Gagal!\n\nMasalah yang ditemukan:\n${errorSummary}\n\nPerbaiki masalah di atas sebelum submit untuk review QC.`)
+      const canAutoHeal = topoRes.data.errors.every(e => ['OVERLAP', 'SELF_INTERSECTION', 'INVALID_GEOM'].includes(e.type))
+
+      if (canAutoHeal) {
+        if (confirm(`⚠️ Validasi Topologi Mendeteksi ${topoRes.data.errors.length} Masalah Overlap/Geometri:\n\n${errorSummary}\n\nIngin jalankan Auto-Heal otomatis untuk merapikan poligon dan langsung submit ke QC?`)) {
+          showToast('Menjalankan Auto-Heal topologi...')
+          try {
+            await api.autoHealTopology(selectedTaskId.value)
+            await loadTaskData(selectedTaskId.value, true)
+            const recheck = await api.validateTopology(selectedTaskId.value)
+            topologyResult.value = recheck.data
+            if (recheck.data.valid) {
+              const ok = await tasksStore.updateStatus(selectedTaskId.value, 'SUBMITTED')
+              if (ok) {
+                showToast('🎉 Topologi berhasil dirapikan otomatis & tugas berhasil disubmit untuk review QC!')
+              }
+              topologyLoading.value = false
+              return
+            }
+          } catch (healErr) {
+            console.warn('Pre-submit auto-heal failed:', healErr)
+          }
+        }
+      }
+
+      alert(`⚠️ Validasi Topologi Gagal!\n\nMasalah yang ditemukan:\n${errorSummary}\n\nKlik 'Buka Studio Perbaikan Topologi' untuk merapikan poligon sebelum submit.`)
       topologyLoading.value = false
       return
     }
