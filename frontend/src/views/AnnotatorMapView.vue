@@ -1242,41 +1242,40 @@
           </filter>
         </svg>
 
-        <!-- Docked Enterprise GIS Bottom Status Bar -->
-        <div class="absolute bottom-0 left-0 right-0 z-10 bg-slate-900/95 text-slate-300 backdrop-blur-xs border-t border-slate-700/80 px-3 py-1 flex items-center justify-between text-[11px] font-mono select-none pointer-events-auto overflow-hidden">
-          <div class="flex items-center gap-2.5 overflow-hidden">
-            <div class="flex items-center gap-1.5 text-slate-400">
-              <span class="text-slate-500 font-bold">ZOOM:</span>
-              <span class="text-white font-semibold">{{ mapZoom }}</span>
-              <span class="text-[9px] text-amber-400 font-sans font-bold bg-amber-950/80 px-1 py-0.2 rounded border border-amber-800/80">Maks. 300m</span>
+        <!-- GIS Bottom Status Bar (Clean Light Theme, No AI Slop) -->
+        <div class="absolute bottom-0 left-0 right-0 z-10 bg-white/95 text-slate-600 backdrop-blur-md border-t border-slate-200/90 px-3.5 py-1.5 flex items-center justify-between text-[11px] font-mono select-none pointer-events-auto overflow-hidden shadow-2xs">
+          <div class="flex items-center gap-3 overflow-hidden">
+            <div class="flex items-center gap-1.5 text-slate-500">
+              <span class="text-slate-400 font-semibold text-[10px] tracking-wider uppercase">Zoom:</span>
+              <span class="text-slate-800 font-semibold">{{ mapZoom }}</span>
             </div>
-            <span class="text-slate-700">|</span>
-            <div class="flex items-center gap-1.5 text-slate-400">
-              <span class="text-slate-500 font-bold">SKALA:</span>
-              <span class="text-white font-semibold">{{ mapScaleRatio }}</span>
+            <span class="text-slate-200">|</span>
+            <div class="flex items-center gap-1.5 text-slate-500">
+              <span class="text-slate-400 font-semibold text-[10px] tracking-wider uppercase">Skala:</span>
+              <span class="text-slate-800 font-semibold">{{ mapScaleRatio }}</span>
             </div>
             <template v-if="cursorCoords.lat">
-              <span class="text-slate-700">|</span>
-              <div class="flex items-center gap-1.5 text-slate-400">
-                <span class="text-slate-500 font-bold">KOORDINAT:</span>
-                <span class="text-emerald-400 font-semibold">{{ cursorCoords.lat }}°, {{ cursorCoords.lng }}°</span>
+              <span class="text-slate-200">|</span>
+              <div class="flex items-center gap-1.5 text-slate-500">
+                <span class="text-slate-400 font-semibold text-[10px] tracking-wider uppercase">Koordinat:</span>
+                <span class="text-slate-700 font-medium">{{ cursorCoords.lat }}°, {{ cursorCoords.lng }}°</span>
               </div>
             </template>
-            <span class="text-slate-700 hidden lg:inline">|</span>
-            <div class="hidden lg:flex items-center gap-1.5 text-slate-400">
-              <span class="text-slate-500 font-bold">PROYEKSI:</span>
-              <span class="text-slate-300">WGS 84 (EPSG:4326)</span>
+            <span class="text-slate-200 hidden lg:inline">|</span>
+            <div class="hidden lg:flex items-center gap-1.5 text-slate-500">
+              <span class="text-slate-400 font-semibold text-[10px] tracking-wider uppercase">Proyeksi:</span>
+              <span class="text-slate-600">WGS 84 (EPSG:4326)</span>
             </div>
           </div>
-          <div class="flex items-center gap-2.5 shrink-0 pl-2">
-            <div class="flex items-center gap-1.5 text-slate-400">
-              <span class="text-slate-500 font-bold">OBJEK:</span>
-              <span class="text-white font-semibold">{{ features.length }} Poligon</span>
+          <div class="flex items-center gap-3 shrink-0 pl-2">
+            <div class="flex items-center gap-1.5 text-slate-500">
+              <span class="text-slate-400 font-semibold text-[10px] tracking-wider uppercase">Objek:</span>
+              <span class="text-slate-800 font-semibold">{{ features.length }} Poligon</span>
             </div>
-            <span class="text-slate-700 hidden sm:inline">|</span>
-            <div class="hidden sm:flex items-center gap-1.5 text-slate-400">
-              <span class="text-slate-500 font-bold">TOTAL LUAS:</span>
-              <span class="text-emerald-400 font-semibold">{{ formatArea(totalAreaSqm) }}</span>
+            <span class="text-slate-200 hidden sm:inline">|</span>
+            <div class="hidden sm:flex items-center gap-1.5 text-slate-500">
+              <span class="text-slate-400 font-semibold text-[10px] tracking-wider uppercase">Total Luas:</span>
+              <span class="text-slate-800 font-semibold">{{ formatArea(totalAreaSqm) }}</span>
             </div>
           </div>
         </div>
@@ -1284,16 +1283,16 @@
         <!-- Floating Multi-Selection Action Toolbar -->
         <div
           v-if="selectedPolyUiIds.size > 0"
-          class="absolute bottom-10 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 text-white px-3.5 py-1.5 rounded-md shadow-xl border border-slate-700 backdrop-blur-md flex items-center gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-150"
+          class="absolute bottom-10 left-1/2 -translate-x-1/2 z-40 bg-white/95 text-slate-800 px-3.5 py-1.5 rounded-lg shadow-xl border border-slate-200 backdrop-blur-md flex items-center gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-150"
         >
-          <div class="flex items-center gap-1.5 pr-2 border-r border-slate-700 text-xs font-mono text-slate-200">
+          <div class="flex items-center gap-1.5 pr-2.5 border-r border-slate-200 text-xs font-mono font-medium text-slate-700">
             <span>{{ selectedPolyUiIds.size }} Poligon Terpilih</span>
           </div>
 
           <!-- Action 1: Hapus Massal -->
           <button
             @click="batchDeleteSelectedPolygons"
-            class="bg-red-700 hover:bg-red-600 text-white text-xs font-medium px-2.5 py-1 rounded-md shadow-2xs transition-all flex items-center gap-1 cursor-pointer"
+            class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium px-2.5 py-1 rounded-md shadow-2xs transition-colors flex items-center gap-1 cursor-pointer"
             title="Hapus semua poligon terpilih"
           >
             <Trash2 :size="13" />
@@ -1304,7 +1303,7 @@
           <button
             @click="batchMergeSelectedPolygons"
             :disabled="selectedPolyUiIds.size < 2"
-            class="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white text-xs font-medium px-2.5 py-1 rounded-md shadow-2xs transition-all flex items-center gap-1 cursor-pointer"
+            class="bg-white hover:bg-slate-50 disabled:opacity-40 text-slate-700 border border-slate-200 text-xs font-medium px-2.5 py-1 rounded-md shadow-2xs transition-colors flex items-center gap-1 cursor-pointer"
             title="Gabungkan semua poligon terpilih menjadi 1 poligon utuh"
           >
             <Combine :size="13" />
@@ -1314,7 +1313,7 @@
           <!-- Action 3: Batal -->
           <button
             @click="clearPolygonSelection"
-            class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+            class="text-slate-400 hover:text-slate-700 p-1 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
             title="Batal seleksi"
           >
             <X :size="14" />
@@ -1352,9 +1351,9 @@
       <!-- Toast Notification -->
       <div
         v-if="toastMessage"
-        class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/95 text-white border border-slate-700 px-4 py-2 rounded-xl shadow-2xl z-30 text-xs font-semibold flex items-center gap-2 backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150"
+        class="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white text-slate-800 border border-slate-200 px-4 py-2 rounded-lg shadow-xl z-30 text-xs font-medium flex items-center gap-2 backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150"
       >
-        <CheckCircle2 :size="14" class="text-emerald-400" />
+        <CheckCircle2 :size="15" class="text-emerald-600" />
         <span>{{ toastMessage }}</span>
       </div>
     </main>
@@ -2335,38 +2334,33 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════ -->
-    <!-- DEDICATED TOPOLOGY SURGERY STUDIO MODAL (Unlimited Zoom & Surgery) -->
+    <!-- TOPOLOGY CORRECTION MODAL (Clean Light Theme, No AI Slop)          -->
     <!-- ═══════════════════════════════════════════════════════════════════ -->
     <div
       v-if="showTopologySurgeryModal"
-      class="fixed inset-0 z-[9999] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-5 animate-in fade-in duration-200"
+      class="fixed inset-0 z-[9999] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-2 sm:p-5 animate-in fade-in duration-150"
     >
-      <div class="w-full max-w-6xl h-[92vh] max-h-[900px] bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl flex flex-col overflow-hidden text-slate-100">
+      <div class="w-full max-w-6xl h-[92vh] max-h-[900px] bg-white border border-slate-200 rounded-xl shadow-2xl flex flex-col overflow-hidden text-slate-800">
         
-        <!-- Studio Header -->
-        <div class="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+        <!-- Modal Header -->
+        <div class="px-5 py-3 bg-white border-b border-slate-200 flex items-center justify-between gap-3 shrink-0">
           <div class="flex items-center gap-3 min-w-0">
-            <div class="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
-              <Sparkles :size="18" />
+            <div class="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700 shrink-0">
+              <Wrench :size="16" />
             </div>
             <div class="min-w-0">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-extrabold text-sm text-white tracking-wide">Studio Perbaikan Topologi</span>
-                <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-amber-300 font-bold">
-                  Zoom Tak Terbatas (&lt; 50m / Sentimeter)
-                </span>
-              </div>
-              <p class="text-xs text-slate-400 truncate hidden sm:block">
-                Peta terisolasi khusus fokus pada geometri bermasalah tanpa mengganggu kanvas utama.
+              <span class="font-bold text-sm text-slate-900 tracking-tight">Perbaikan Topologi</span>
+              <p class="text-xs text-slate-500 truncate hidden sm:block">
+                Periksa dan selesaikan tumpang tindih serta kesalahan batas poligon
               </p>
             </div>
           </div>
 
           <!-- Stepper Navigator -->
           <div class="flex items-center gap-2 shrink-0">
-            <div class="flex items-center bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 gap-2 text-xs font-bold text-slate-200 shadow-inner">
-              <span class="text-slate-400 text-[11px] hidden sm:inline">Masalah:</span>
-              <span class="font-mono text-amber-400 font-black">
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 gap-1.5 text-xs text-slate-600">
+              <span class="text-[11px] hidden sm:inline">Masalah</span>
+              <span class="font-mono font-bold text-slate-900">
                 {{ (surgeryErrorIndex + 1) }} / {{ topologyResult?.errors?.length || 0 }}
               </span>
             </div>
@@ -2375,7 +2369,7 @@
               <button
                 @click="prevSurgeryError"
                 :disabled="surgeryIsProcessing || !topologyResult?.errors?.length"
-                class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer border border-slate-700"
+                class="px-2.5 py-1 bg-white hover:bg-slate-50 disabled:opacity-40 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer border border-slate-200 shadow-2xs"
                 title="Lihat masalah sebelumnya"
               >
                 <ChevronLeft :size="14" />
@@ -2384,7 +2378,7 @@
               <button
                 @click="nextSurgeryError"
                 :disabled="surgeryIsProcessing || !topologyResult?.errors?.length"
-                class="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
                 title="Lihat masalah berikutnya"
               >
                 <span class="hidden md:inline">Selanjutnya</span>
@@ -2394,79 +2388,78 @@
 
             <button
               @click="closeTopologySurgeryModal"
-              class="ml-2 p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl cursor-pointer transition-colors"
-              title="Tutup Studio Perbaikan"
+              class="ml-1 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
+              title="Tutup"
             >
               <X :size="18" />
             </button>
           </div>
         </div>
 
-        <!-- Studio Body: Split View (Map Canvas + Surgery Control Center) -->
-        <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 bg-slate-950">
+        <!-- Body: Split View (Map Canvas + Control Panel) -->
+        <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 bg-slate-100">
           
-          <!-- LEFT / CENTER: Dedicated Leaflet High-Precision Surgery Map Canvas (col-span-8) -->
-          <div class="lg:col-span-8 h-full relative border-r border-slate-800 overflow-hidden flex flex-col bg-slate-950">
+          <!-- LEFT / CENTER: Map Canvas (col-span-8) -->
+          <div class="lg:col-span-8 h-full relative border-r border-slate-200 overflow-hidden flex flex-col bg-slate-100">
             
             <div
               id="topology-surgery-map-canvas"
               :class="{ 'delete-vertex-active': surgeryVertexModeActive && surgeryVertexAction === 'delete' }"
-              class="w-full h-full min-h-[480px] flex-1 z-0 bg-slate-950"
+              class="w-full h-full min-h-[480px] flex-1 z-0 bg-slate-100"
             ></div>
 
             <!-- In-place loading spinner during surgery / revalidation -->
             <div
               v-if="surgeryIsProcessing || topologyLoading"
-              class="absolute inset-0 z-30 bg-slate-950/70 backdrop-blur-xs flex flex-col items-center justify-center gap-3 transition-opacity"
+              class="absolute inset-0 z-30 bg-white/80 backdrop-blur-xs flex flex-col items-center justify-center gap-2.5 transition-opacity"
             >
-              <div class="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+              <div class="w-8 h-8 border-2 border-slate-900 border-t-transparent rounded-full animate-spin"></div>
               <div class="text-center">
-                <p class="text-xs font-bold text-amber-300 tracking-wide">Menyinkronkan Perbaikan Topologi...</p>
-                <p class="text-[11px] text-slate-400 mt-0.5">Memperbarui geometri dan memvalidasi ulang</p>
+                <p class="text-xs font-semibold text-slate-900">Menyinkronkan Perbaikan Topologi...</p>
+                <p class="text-[11px] text-slate-500 mt-0.5">Memperbarui geometri dan memvalidasi ulang</p>
               </div>
             </div>
 
-            <!-- Floating Overlay: Zoom & Scale Badge -->
+            <!-- Floating Overlay: Zoom Badge & Reset -->
             <div class="absolute top-3 left-3 z-20 flex items-center gap-2">
-              <div class="bg-slate-900/90 backdrop-blur-md border border-slate-700/80 px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold text-slate-200 shadow-lg flex items-center gap-1.5">
-                <Focus :size="12" class="text-amber-400" />
+              <div class="bg-white/95 backdrop-blur-md border border-slate-200 px-2.5 py-1 rounded-lg text-xs font-mono font-medium text-slate-700 shadow-sm flex items-center gap-1.5">
+                <Focus :size="12" class="text-slate-500" />
                 <span>Zoom: {{ surgeryCurrentZoom }}x</span>
-                <span class="text-slate-400 text-[10px] font-normal hidden sm:inline">({{ surgeryCurrentZoom >= 20 ? 'Level Sentimeter' : 'Detil Mikro' }})</span>
               </div>
               <button
                 @click="resetSurgeryZoom"
-                class="bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 px-2.5 py-1 rounded-xl text-[11px] font-bold text-slate-300 hover:text-white shadow-lg cursor-pointer transition-all flex items-center gap-1"
+                class="bg-white/95 hover:bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-700 shadow-sm cursor-pointer transition-colors flex items-center gap-1"
                 title="Reset zoom kembali pas ke batas poligon"
               >
                 <RotateCcw :size="11" />
-                <span>Reset Detil</span>
+                <span>Reset</span>
               </button>
             </div>
 
-            <!-- Floating Overlay: Vertex Edit (QGIS / Figma Style) Toolbar -->
+            <!-- Floating Overlay: Vertex Edit Toolbar -->
             <div class="absolute bottom-3 left-3 z-20 flex items-center gap-2 flex-wrap max-w-[95%]">
-              <div class="flex items-center bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl p-1 gap-1 shadow-xl">
-                <!-- Toggle Edit Simpul Master Button -->
+              <div class="flex items-center bg-white/95 backdrop-blur-md border border-slate-200 rounded-lg p-1 gap-1 shadow-md">
+                <!-- Toggle Edit Simpul Button -->
                 <button
                   @click="toggleSurgeryVertexEdit"
-                  class="px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border"
+                  class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
                   :class="surgeryVertexModeActive
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-xs'
-                    : 'hover:bg-slate-800 text-slate-300 border-transparent'"
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'hover:bg-slate-100 text-slate-700'"
                 >
                   <Edit3 :size="13" />
-                  <span>{{ surgeryVertexModeActive ? 'Edit Simpul Aktif' : 'Aktifkan Edit Simpul' }}</span>
+                  <span>{{ surgeryVertexModeActive ? 'Edit Simpul Aktif' : 'Edit Simpul' }}</span>
                 </button>
 
-                <!-- Touch helper button for multi-select without keyboard shift -->
+                <!-- Shift helper button for multi-select -->
                 <template v-if="surgeryVertexModeActive">
-                  <div class="h-4 w-px bg-slate-700 mx-0.5"></div>
+                  <div class="h-4 w-px bg-slate-200 mx-0.5"></div>
                   <button
                     @click="toggleSurgeryMultiSelect"
-                    class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer"
+                    class="px-2 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
                     :class="surgeryMultiSelectActive
-                      ? 'bg-blue-600 text-white shadow-xs ring-1 ring-blue-400/70 font-black'
-                      : 'text-slate-400 hover:text-blue-300'"
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'"
                     title="Tahan Shift di keyboard atau aktifkan tombol ini untuk memilih beberapa titik"
                   >
                     <Check :size="12" />
@@ -2475,28 +2468,28 @@
                 </template>
               </div>
 
-              <!-- When 1 or more vertices are selected (QGIS / Figma style) -->
+              <!-- When 1 or more vertices are selected -->
               <div
                 v-if="surgeryVertexModeActive && selectedSurgeryVertices.length > 0"
-                class="flex items-center bg-blue-950/95 backdrop-blur-md border border-blue-500/60 rounded-2xl p-1 gap-1.5 shadow-xl animate-in fade-in slide-in-from-bottom-2 duration-150"
+                class="flex items-center bg-blue-50 border border-blue-200 rounded-lg p-1 gap-1.5 shadow-md animate-in fade-in duration-150"
               >
-                <div class="px-2.5 py-1 text-xs font-mono font-black text-blue-200 flex items-center gap-1.5">
-                  <span class="w-2 h-2 rounded-full bg-blue-400 animate-ping"></span>
-                  <span>{{ selectedSurgeryVertices.length }} Titik Terpilih</span>
+                <div class="px-2 py-0.5 text-xs font-mono font-semibold text-blue-900 flex items-center gap-1.5">
+                  <span class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                  <span>{{ selectedSurgeryVertices.length }} Terpilih</span>
                 </div>
 
                 <button
                   @click="deleteSelectedSurgeryVertices"
-                  class="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1 cursor-pointer border border-rose-400"
+                  class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-xs font-medium transition-colors shadow-2xs flex items-center gap-1 cursor-pointer"
                   title="Hapus titik simpul yang terpilih (Shortcut: Delete / Backspace)"
                 >
                   <Trash2 :size="12" />
-                  <span>Hapus ({{ selectedSurgeryVertices.length }}) [Del]</span>
+                  <span>Hapus [Del]</span>
                 </button>
 
                 <button
                   @click="clearSurgeryVertexSelection"
-                  class="p-1.5 text-slate-300 hover:text-white hover:bg-blue-900/60 rounded-lg cursor-pointer transition-colors"
+                  class="p-1 text-slate-400 hover:text-slate-700 rounded-md cursor-pointer transition-colors"
                   title="Batal pilihan titik (Esc)"
                 >
                   <X :size="13" />
@@ -2508,10 +2501,10 @@
                 v-if="surgeryVertexModeActive && hasSurgeryVertexEdits"
                 @click="saveSurgeryVertexEdits"
                 :disabled="surgeryIsProcessing"
-                class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg flex items-center gap-1.5 cursor-pointer border border-emerald-400 animate-pulse"
+                class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-medium transition-colors shadow-sm flex items-center gap-1 cursor-pointer"
               >
                 <Save :size="13" />
-                <span>Simpan Perubahan Titik</span>
+                <span>Simpan Titik</span>
               </button>
 
               <!-- Cancel Changes Button -->
@@ -2519,7 +2512,7 @@
                 v-if="surgeryVertexModeActive && hasSurgeryVertexEdits"
                 @click="cancelSurgeryVertexEdits"
                 :disabled="surgeryIsProcessing"
-                class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all shadow-lg flex items-center gap-1 cursor-pointer border border-slate-700"
+                class="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-md text-xs font-medium transition-colors shadow-2xs flex items-center gap-1 cursor-pointer"
                 title="Batal dan kembalikan titik simpul semula"
               >
                 <RotateCcw :size="12" />
@@ -2528,59 +2521,59 @@
             </div>
 
             <!-- Legend Overlay Bottom Right -->
-            <div class="absolute bottom-3 right-3 z-20 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 px-3 py-2 rounded-xl text-[11px] text-slate-300 shadow-lg space-y-1 hidden sm:block">
+            <div class="absolute bottom-3 right-3 z-20 bg-white/95 backdrop-blur-md border border-slate-200 px-3 py-2 rounded-lg text-xs text-slate-700 shadow-sm space-y-1 hidden sm:block">
               <div class="flex items-center gap-2">
-                <span class="w-3 h-3 rounded-xs border border-amber-300 bg-amber-500/40"></span>
-                <span>Poligon A (Utama)</span>
+                <span class="w-3 h-3 rounded-xs border border-amber-400 bg-amber-200"></span>
+                <span class="font-medium text-slate-800">Poligon A</span>
               </div>
               <div v-if="surgeryCurrentError?.annotation_ids?.length >= 2" class="flex items-center gap-2">
-                <span class="w-3 h-3 rounded-xs border border-cyan-300 bg-cyan-500/40"></span>
-                <span>Poligon B (Tumpang-tindih)</span>
+                <span class="w-3 h-3 rounded-xs border border-cyan-400 bg-cyan-200"></span>
+                <span class="font-medium text-slate-800">Poligon B</span>
               </div>
             </div>
 
           </div>
 
-          <!-- RIGHT: Surgery Control Center & Precision Actions (col-span-4) -->
-          <div class="lg:col-span-4 h-full bg-slate-900 overflow-y-auto p-4 sm:p-5 flex flex-col justify-between gap-4 border-t lg:border-t-0 border-slate-800">
+          <!-- RIGHT: Control Panel (col-span-4) -->
+          <div class="lg:col-span-4 h-full bg-slate-50/70 overflow-y-auto p-4 flex flex-col justify-between gap-4 border-t lg:border-t-0 border-slate-200">
             
-            <div class="space-y-4">
+            <div class="space-y-3.5">
               <!-- Current Error Diagnostic Card -->
-              <div class="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3">
+              <div class="bg-white border border-slate-200 rounded-xl p-3.5 space-y-2.5 shadow-2xs">
                 <div class="flex items-center justify-between">
                   <span
-                    class="text-[10px] font-mono font-black uppercase px-2 py-0.5 rounded-lg border tracking-wider"
+                    class="text-[11px] font-mono font-bold uppercase px-2 py-0.5 rounded-md border tracking-wider"
                     :class="surgeryCurrentError?.type === 'OVERLAP'
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      ? 'bg-rose-50 text-rose-700 border-rose-200'
                       : surgeryCurrentError?.type === 'SELF_INTERSECTION'
-                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                      : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'"
+                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                      : 'bg-indigo-50 text-indigo-700 border-indigo-200'"
                   >
                     {{ surgeryCurrentError?.type || 'MASALAH GEOMETRI' }}
                   </span>
-                  <span v-if="surgeryCurrentError?.area_sqm" class="text-xs font-mono text-slate-400">
-                    Luas: <b class="text-white">{{ (surgeryCurrentError.area_sqm).toFixed(2) }} m²</b>
+                  <span v-if="surgeryCurrentError?.area_sqm" class="text-xs font-mono text-slate-500">
+                    Luas: <b class="text-slate-800">{{ (surgeryCurrentError.area_sqm).toFixed(2) }} m²</b>
                   </span>
                 </div>
 
                 <div>
-                  <h4 class="text-xs font-bold text-slate-200">Keterangan Diagnostik:</h4>
-                  <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+                  <h4 class="text-xs font-semibold text-slate-800">Keterangan:</h4>
+                  <p class="text-xs text-slate-600 mt-0.5 leading-relaxed">
                     {{ surgeryCurrentError?.message || 'Geometri poligon memerlukan perbaikan topologi.' }}
                   </p>
                 </div>
 
                 <!-- Involved Polygons Specs -->
-                <div class="pt-2 border-t border-slate-800/80 space-y-2 text-xs">
-                  <div v-for="(poly, pIdx) in surgeryInvolvedPolygons" :key="poly.id" class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+                <div class="pt-2 border-t border-slate-100 space-y-1.5 text-xs">
+                  <div v-for="(poly, pIdx) in surgeryInvolvedPolygons" :key="poly.id" class="p-2 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between">
                     <div class="flex items-center gap-2">
-                      <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: poly.color || (pIdx === 0 ? '#F59E0B' : '#06B6D4') }"></span>
-                      <div>
-                        <span class="font-mono font-bold text-white text-xs">#{{ poly.id }}</span>
-                        <span class="text-slate-400 text-[11px] ml-1.5">({{ poly.class_name }})</span>
+                      <span class="w-2.5 h-2.5 rounded-full shrink-0" :style="{ backgroundColor: poly.color || (pIdx === 0 ? '#F59E0B' : '#06B6D4') }"></span>
+                      <div class="truncate">
+                        <span class="font-mono font-bold text-slate-900 text-xs">#{{ poly.id }}</span>
+                        <span class="text-slate-500 text-[11px] ml-1.5">({{ poly.class_name }})</span>
                       </div>
                     </div>
-                    <span class="text-[11px] font-mono text-slate-400">
+                    <span class="text-[11px] font-mono text-slate-600 shrink-0">
                       {{ poly.area_sqm ? `${poly.area_sqm.toFixed(1)} m²` : '' }}
                     </span>
                   </div>
@@ -2589,9 +2582,9 @@
 
               <!-- Available Surgery Operations -->
               <div class="space-y-2">
-                <span class="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                  <Wrench :size="13" class="text-amber-400" />
-                  <span>Aksi Bedah Cepat (1-Click GIS)</span>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                  <Layers :size="13" />
+                  <span>Tindakan Koreksi</span>
                 </span>
 
                 <!-- Overlap Actions -->
@@ -2599,16 +2592,16 @@
                   <button
                     @click="executeSurgeryClip('clip_b_by_a')"
                     :disabled="surgeryIsProcessing"
-                    class="w-full p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700/90 border border-slate-700 text-left transition-all cursor-pointer group disabled:opacity-50"
+                    class="w-full p-3 rounded-xl bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-200 text-left transition-colors cursor-pointer group disabled:opacity-50 shadow-2xs"
                   >
-                    <div class="flex items-center justify-between text-xs font-bold text-amber-300 group-hover:text-amber-200">
+                    <div class="flex items-center justify-between text-xs font-semibold text-slate-900">
                       <span class="flex items-center gap-1.5">
-                        <Scissors :size="14" />
+                        <Scissors :size="14" class="text-amber-600" />
                         <span>Potong Poligon B (#{{ surgeryInvolvedPolygons[1]?.id }})</span>
                       </span>
-                      <span class="text-[10px] font-normal text-slate-400">Pertahankan A</span>
+                      <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Pertahankan A</span>
                     </div>
-                    <p class="text-[11px] text-slate-400 mt-0.5">
+                    <p class="text-[11px] text-slate-500 mt-1 leading-normal">
                       Pangkas bagian tumpang tindih dari Poligon B sehingga bentuk Poligon A (#{{ surgeryInvolvedPolygons[0]?.id }}) tetap utuh.
                     </p>
                   </button>
@@ -2616,16 +2609,16 @@
                   <button
                     @click="executeSurgeryClip('clip_a_by_b')"
                     :disabled="surgeryIsProcessing"
-                    class="w-full p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700/90 border border-slate-700 text-left transition-all cursor-pointer group disabled:opacity-50"
+                    class="w-full p-3 rounded-xl bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-200 text-left transition-colors cursor-pointer group disabled:opacity-50 shadow-2xs"
                   >
-                    <div class="flex items-center justify-between text-xs font-bold text-cyan-300 group-hover:text-cyan-200">
+                    <div class="flex items-center justify-between text-xs font-semibold text-slate-900">
                       <span class="flex items-center gap-1.5">
-                        <Scissors :size="14" />
+                        <Scissors :size="14" class="text-cyan-600" />
                         <span>Potong Poligon A (#{{ surgeryInvolvedPolygons[0]?.id }})</span>
                       </span>
-                      <span class="text-[10px] font-normal text-slate-400">Pertahankan B</span>
+                      <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Pertahankan B</span>
                     </div>
-                    <p class="text-[11px] text-slate-400 mt-0.5">
+                    <p class="text-[11px] text-slate-500 mt-1 leading-normal">
                       Pangkas bagian tumpang tindih dari Poligon A sehingga bentuk Poligon B (#{{ surgeryInvolvedPolygons[1]?.id }}) tetap utuh.
                     </p>
                   </button>
@@ -2633,16 +2626,16 @@
                   <button
                     @click="executeSurgeryMerge"
                     :disabled="surgeryIsProcessing"
-                    class="w-full p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700/90 border border-slate-700 text-left transition-all cursor-pointer group disabled:opacity-50"
+                    class="w-full p-3 rounded-xl bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-200 text-left transition-colors cursor-pointer group disabled:opacity-50 shadow-2xs"
                   >
-                    <div class="flex items-center justify-between text-xs font-bold text-indigo-300 group-hover:text-indigo-200">
+                    <div class="flex items-center justify-between text-xs font-semibold text-slate-900">
                       <span class="flex items-center gap-1.5">
-                        <Combine :size="14" />
+                        <Combine :size="14" class="text-indigo-600" />
                         <span>Gabung Kedua Poligon (Union)</span>
                       </span>
-                      <span class="text-[10px] font-normal text-slate-400">Merge</span>
+                      <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Merge</span>
                     </div>
-                    <p class="text-[11px] text-slate-400 mt-0.5">
+                    <p class="text-[11px] text-slate-500 mt-1 leading-normal">
                       Satukan Poligon #{{ surgeryInvolvedPolygons[0]?.id }} dan #{{ surgeryInvolvedPolygons[1]?.id }} menjadi satu bidang utuh.
                     </p>
                   </button>
@@ -2653,46 +2646,45 @@
                   <button
                     @click="executeSurgeryHeal"
                     :disabled="surgeryIsProcessing"
-                    class="w-full p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700/90 border border-slate-700 text-left transition-all cursor-pointer group disabled:opacity-50"
+                    class="w-full p-3 rounded-xl bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-200 text-left transition-colors cursor-pointer group disabled:opacity-50 shadow-2xs"
                   >
-                    <div class="flex items-center justify-between text-xs font-bold text-emerald-300 group-hover:text-emerald-200">
+                    <div class="flex items-center justify-between text-xs font-semibold text-slate-900">
                       <span class="flex items-center gap-1.5">
-                        <Sparkles :size="14" />
-                        <span>Auto-Rapikan Simpul (Buffer 0)</span>
+                        <Wrench :size="14" class="text-emerald-600" />
+                        <span>Perbaiki Geometri (Buffer 0)</span>
                       </span>
-                      <span class="text-[10px] font-normal text-slate-400">1-Click</span>
+                      <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">Koreksi</span>
                     </div>
-                    <p class="text-[11px] text-slate-400 mt-0.5">
-                      Urai simpul yang melilit secara otomatis dengan topologi buffer standar.
+                    <p class="text-[11px] text-slate-500 mt-1 leading-normal">
+                      Urai simpul geometri yang melilit secara otomatis dengan topologi buffer standar.
                     </p>
                   </button>
                 </template>
 
-                <!-- Dedicated Vertex Edit & Delete Section (QGIS / Figma Style) -->
-                <div class="p-3.5 rounded-2xl bg-slate-800/90 border border-slate-700 space-y-3">
+                <!-- Vertex Edit Section -->
+                <div class="p-3.5 rounded-xl bg-white border border-slate-200 space-y-3 shadow-2xs">
                   <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2">
-                      <div class="w-7 h-7 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                      <div class="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center border border-slate-200">
                         <Edit3 :size="14" />
                       </div>
-                      <div>
-                        <span class="text-xs font-black text-white">Edit Titik Simpul</span>
-                        <p class="text-[10px] text-slate-400">Mode QGIS / Figma / ArcGIS</p>
-                      </div>
+                      <span class="text-xs font-bold text-slate-900">Edit Titik Simpul</span>
                     </div>
                     <span
-                      class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md"
-                      :class="surgeryVertexModeActive ? (selectedSurgeryVertices.length > 0 ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40') : 'bg-slate-900 text-slate-500 border border-slate-800'"
+                      class="text-[10px] font-mono font-medium px-2 py-0.5 rounded-md"
+                      :class="surgeryVertexModeActive
+                        ? (selectedSurgeryVertices.length > 0 ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200')
+                        : 'bg-slate-100 text-slate-600 border border-slate-200'"
                     >
                       {{ surgeryVertexModeActive ? (selectedSurgeryVertices.length > 0 ? `${selectedSurgeryVertices.length} TITIK TERPILIH` : 'AKTIF') : 'NONAKTIF' }}
                     </span>
                   </div>
 
-                  <!-- Quick Master Toggle if not active -->
+                  <!-- Quick Toggle if not active -->
                   <div v-if="!surgeryVertexModeActive" class="pt-0.5">
                     <button
                       @click="toggleSurgeryVertexEdit"
-                      class="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer"
+                      class="w-full py-2 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                     >
                       <Edit3 :size="13" />
                       <span>Aktifkan Edit Titik Simpul</span>
@@ -2702,69 +2694,69 @@
                   <!-- Multi-Select Action Banner when vertices are selected -->
                   <div
                     v-if="surgeryVertexModeActive && selectedSurgeryVertices.length > 0"
-                    class="p-3 rounded-xl bg-blue-950/90 border border-blue-500/60 space-y-2.5 animate-in fade-in duration-150"
+                    class="p-2.5 rounded-lg bg-blue-50 border border-blue-200 space-y-2 animate-in fade-in duration-150"
                   >
-                    <div class="flex items-center justify-between text-xs font-bold text-blue-200">
+                    <div class="flex items-center justify-between text-xs font-semibold text-blue-900">
                       <span class="flex items-center gap-1.5">
-                        <span class="w-2 h-2 rounded-full bg-blue-400 animate-ping"></span>
-                        <span>{{ selectedSurgeryVertices.length }} Titik Simpul Terpilih</span>
+                        <span class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                        <span>{{ selectedSurgeryVertices.length }} Titik Terpilih</span>
                       </span>
                       <button
                         @click="clearSurgeryVertexSelection"
-                        class="text-[11px] text-blue-300 hover:text-white underline cursor-pointer"
+                        class="text-[11px] text-blue-600 hover:text-blue-800 underline cursor-pointer"
                       >
                         Batal (Esc)
                       </button>
                     </div>
 
-                    <p class="text-[11px] text-blue-300/80 leading-tight">
-                      Tarik salah satu titik untuk menggeser semuanya bersamaan, atau hapus titik:
+                    <p class="text-[11px] text-blue-800/80 leading-tight">
+                      Geser salah satu titik untuk memindahkan bersamaan, atau hapus:
                     </p>
 
                     <button
                       @click="deleteSelectedSurgeryVertices"
-                      class="w-full py-2 px-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-colors border border-rose-400"
+                      class="w-full py-1.5 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-xs font-medium flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
                     >
                       <Trash2 :size="13" />
-                      <span>Hapus {{ selectedSurgeryVertices.length }} Titik Terpilih [Del]</span>
+                      <span>Hapus {{ selectedSurgeryVertices.length }} Titik [Del]</span>
                     </button>
                   </div>
 
-                  <!-- Pro GIS Shortcut Guide (Like QGIS / Figma) -->
-                  <div class="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px] text-slate-300 space-y-2">
-                    <div class="flex items-center justify-between text-[11px] font-bold text-amber-400">
+                  <!-- Guide -->
+                  <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 space-y-1.5">
+                    <div class="flex items-center justify-between text-[11px] font-semibold text-slate-800">
                       <span class="flex items-center gap-1">
                         <Info :size="12" />
-                        <span>Panduan Operasi (QGIS Style)</span>
+                        <span>Panduan</span>
                       </span>
                       <button
                         v-if="surgeryVertexModeActive"
                         @click="toggleSurgeryMultiSelect"
-                        class="px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition-colors border"
+                        class="px-2 py-0.5 rounded text-[10px] font-medium cursor-pointer transition-colors border"
                         :class="surgeryMultiSelectActive
-                          ? 'bg-blue-600 text-white border-blue-400'
-                          : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'"
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'"
                       >
                         {{ surgeryMultiSelectActive ? '✓ Shift Aktif' : 'Tahan Shift' }}
                       </button>
                     </div>
 
-                    <ul class="space-y-1.5 text-[11px] text-slate-400 leading-snug">
+                    <ul class="space-y-1 text-[11px] text-slate-600 leading-snug">
                       <li class="flex items-start gap-1.5">
-                        <span class="text-amber-400 font-bold">•</span>
-                        <span><b>Pilih Titik:</b> Klik pada titik sudut poligon.</span>
+                        <span class="text-slate-400 font-bold">•</span>
+                        <span><b>Pilih:</b> Klik titik sudut pada poligon.</span>
                       </li>
                       <li class="flex items-start gap-1.5">
-                        <span class="text-amber-400 font-bold">•</span>
-                        <span><b>Pilih Banyak:</b> Tahan tombol <code>Shift</code> lalu klik titik-titik lain.</span>
+                        <span class="text-slate-400 font-bold">•</span>
+                        <span><b>Pilih Banyak:</b> Tahan <code>Shift</code> lalu klik titik lain.</span>
                       </li>
                       <li class="flex items-start gap-1.5">
-                        <span class="text-amber-400 font-bold">•</span>
-                        <span><b>Geser Titik:</b> Tarik simpul untuk memindahkan (semua titik terpilih akan ikut bergeser).</span>
+                        <span class="text-slate-400 font-bold">•</span>
+                        <span><b>Geser:</b> Tarik simpul untuk memindahkan posisi.</span>
                       </li>
                       <li class="flex items-start gap-1.5">
-                        <span class="text-amber-400 font-bold">•</span>
-                        <span><b>Hapus Titik:</b> Tekan tombol <code>Delete</code> / <code>Backspace</code> di keyboard atau klik tombol Hapus.</span>
+                        <span class="text-slate-400 font-bold">•</span>
+                        <span><b>Hapus:</b> Tekan tombol <code>Delete</code> di keyboard.</span>
                       </li>
                     </ul>
                   </div>
@@ -2774,15 +2766,15 @@
                     <button
                       @click="saveSurgeryVertexEdits"
                       :disabled="surgeryIsProcessing"
-                      class="flex-1 py-1.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-colors"
+                      class="flex-1 py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
                     >
                       <Save :size="13" />
-                      <span>Simpan Perubahan</span>
+                      <span>Simpan Titik</span>
                     </button>
                     <button
                       @click="cancelSurgeryVertexEdits"
                       :disabled="surgeryIsProcessing"
-                      class="py-1.5 px-3 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                      class="py-1.5 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-md text-xs font-medium flex items-center justify-center gap-1 cursor-pointer transition-colors shadow-2xs"
                       title="Kembalikan geometri sebelum diedit"
                     >
                       <RotateCcw :size="12" />
@@ -2792,13 +2784,13 @@
                 </div>
 
                 <!-- Delete Polygon Option -->
-                <div v-if="surgeryInvolvedPolygons.length" class="pt-2 border-t border-slate-800/80 flex items-center gap-2">
+                <div v-if="surgeryInvolvedPolygons.length" class="pt-1 border-t border-slate-200 flex items-center gap-2">
                   <button
                     v-for="poly in surgeryInvolvedPolygons"
                     :key="'del-' + poly.id"
                     @click="executeSurgeryDelete(poly.id)"
                     :disabled="surgeryIsProcessing"
-                    class="flex-1 py-1.5 px-2 bg-rose-950/50 hover:bg-rose-900 border border-rose-800 text-rose-300 hover:text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+                    class="flex-1 py-1.5 px-2 bg-white hover:bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
                     :title="`Hapus Poligon #${poly.id} dari database`"
                   >
                     <Trash2 :size="12" />
@@ -2808,14 +2800,14 @@
               </div>
             </div>
 
-            <!-- Studio Footer Actions -->
-            <div class="pt-3 border-t border-slate-800 space-y-2">
-              <div class="flex items-center justify-between text-xs text-slate-400 px-1">
-                <span>Auto-Lanjut ke Masalah Berikutnya:</span>
+            <!-- Footer Actions -->
+            <div class="pt-3 border-t border-slate-200 space-y-2.5">
+              <div class="flex items-center justify-between text-xs text-slate-600 px-1">
+                <span>Lanjut otomatis ke masalah berikutnya</span>
                 <input
                   v-model="surgeryAutoAdvance"
                   type="checkbox"
-                  class="w-4 h-4 rounded text-amber-500 bg-slate-800 border-slate-700 cursor-pointer"
+                  class="w-4 h-4 rounded text-slate-900 border-slate-300 focus:ring-slate-900 cursor-pointer"
                 />
               </div>
 
@@ -2823,15 +2815,15 @@
                 <button
                   @click="handleAutoHealRemaining"
                   :disabled="surgeryIsProcessing"
-                  class="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  class="flex-1 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
                 >
-                  <Wand2 :size="13" />
-                  <span>Auto-Heal Sisa</span>
+                  <Wrench :size="13" />
+                  <span>Koreksi Otomatis Sisa</span>
                 </button>
 
                 <button
                   @click="closeTopologySurgeryModal"
-                  class="flex-1 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-md"
+                  class="flex-1 py-2 bg-slate-900 hover:bg-slate-800 text-white font-medium rounded-lg text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                 >
                   <CheckCircle2 :size="14" />
                   <span>Selesai & Tutup</span>
