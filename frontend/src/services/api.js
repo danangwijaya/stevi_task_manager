@@ -191,5 +191,14 @@ export default {
   getProgressTable: (params = {}) => api.get('/reports/progress-table', { params }),
   updateTaskStage: (taskId, data) => api.patch(`/reports/tasks/${taskId}/stages`, data),
   downloadProgressExcel: (params = {}) => api.get('/reports/export/excel', { params, responseType: 'blob' }),
-  downloadProgressCsv: (params = {}) => api.get('/reports/export/csv', { params, responseType: 'blob' })
+  downloadProgressCsv: (params = {}) => api.get('/reports/export/csv', { params, responseType: 'blob' }),
+
+  // AI-Assisted Digitizing (Magic Wand)
+  requestAISegment: (data) => api.post('/annotations/ai-segment', data),
+
+  // Leaderboard & Productivity Analytics
+  getMapperLeaderboard: (params = {}) => api.get('/tasks/analytics/leaderboard', { params }),
+
+  // Tile Cache Management
+  clearTileCache: () => api.post('/raster/clear-tile-cache')
 }

@@ -306,6 +306,39 @@
             </button>
           </div>
 
+          <!-- Offline & Auto-save Status Pill -->
+          <div
+            class="px-2.5 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 border shadow-2xs"
+            :class="isNetworkOnline ? 'bg-slate-50 text-slate-700 border-slate-200' : 'bg-amber-50 text-amber-800 border-amber-300'"
+            :title="isNetworkOnline ? (localDraftStatus ? `Draf lokal tersimpan (${localDraftStatus.polygonCount} poligon)` : 'Koneksi Online — Auto-save IndexedDB Aktif') : 'Mode Offline — Perubahan disimpan di browser lokal'"
+          >
+            <Wifi v-if="isNetworkOnline" :size="13" class="text-emerald-600" />
+            <WifiOff v-else :size="13" class="text-amber-600 animate-pulse" />
+            <span class="text-[11px] font-bold hidden xl:inline">{{ isNetworkOnline ? 'Online' : 'Offline' }}</span>
+            <span v-if="localDraftStatus" class="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 hidden lg:inline">💾 Draf Aman</span>
+          </div>
+
+          <!-- Swipe Map (Bandingkan Tahun) Button -->
+          <button
+            @click="toggleSwipeMode"
+            class="px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-xs cursor-pointer"
+            :class="isSwipeMode ? 'bg-cyan-600 text-white border-cyan-600 ring-2 ring-cyan-400/30' : 'bg-white text-slate-700 hover:bg-slate-50 border-slate-300'"
+            title="Bandingkan citra satelit dua tahun berbeda dengan pembagi layar vertikal (Swipe Map)"
+          >
+            <Split :size="13" :class="isSwipeMode ? 'text-white' : 'text-cyan-600'" />
+            <span class="hidden md:inline">{{ isSwipeMode ? 'Tutup Swipe' : 'Swipe Citra' }}</span>
+          </button>
+
+          <!-- Leaderboard Button -->
+          <button
+            @click="openLeaderboardModal"
+            class="bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-300 transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            title="Buka Leaderboard Produktivitas Mapper & Pencapaian Tim"
+          >
+            <Trophy :size="13" class="text-amber-500" />
+            <span class="hidden lg:inline">Leaderboard</span>
+          </button>
+
           <!-- Tombol Buka Panel Citra & Spektral -->
           <button
             @click="showImageryPanel = !showImageryPanel"
@@ -548,6 +581,20 @@
               <span class="text-[9px] font-mono opacity-60 font-semibold">V</span>
             </button>
 
+            <!-- Tool: AI Magic Wand (Click to Segment) -->
+            <button
+              @click="setDigitizeMode('ai_wand')"
+              class="px-2.5 py-1.5 rounded-md text-xs font-medium flex items-center justify-between transition-all cursor-pointer text-left"
+              :class="activeTool === 'ai_wand' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'"
+              title="AI Magic Wand: Klik objek tutupan lahan di peta untuk deteksi batas poligon otomatis (Shortcut: W)"
+            >
+              <div class="flex items-center gap-2">
+                <Wand2 :size="14" :class="activeTool === 'ai_wand' ? 'text-amber-300 animate-pulse' : 'text-indigo-600'" />
+                <span class="text-[11px] font-semibold">AI Magic Wand</span>
+              </div>
+              <span class="text-[9px] font-mono opacity-60 font-semibold">W</span>
+            </button>
+
             <!-- Tool: Split with Line (Blade) -->
             <button
               @click="setDigitizeMode('split_line')"
@@ -785,9 +832,9 @@
               </div>
 
               <!-- Slider Transparansi Poligon Tetangga (jika aktif) -->
-              <div v-if="showNeighborPolygons" class="space-y-1 pt-1 border-t border-slate-200">
+              <div v-if="showNeighborPolygons" class="space-y-1.5 pt-1 border-t border-slate-200">
                 <div class="flex items-center justify-between text-[9px] text-slate-800">
-                  <span class="text-slate-500">Transparansi Poligon:</span>
+                  <span class="text-slate-500">Transparansi:</span>
                   <span class="font-mono font-bold">{{ Math.round(neighborPolygonsOpacity * 100) }}%</span>
                 </div>
                 <input
@@ -800,8 +847,21 @@
                   class="w-full h-1 bg-slate-200 rounded-md appearance-none cursor-pointer accent-slate-800"
                   title="Atur transparansi warna poligon grid sebelah"
                 />
-                <div class="text-[8px] text-slate-400 leading-tight">
-                  * Garis acuan sambungan (hanya baca)
+
+                <!-- Toggle Snapping ke Batas Grid Tetangga -->
+                <div class="pt-1 border-t border-slate-200 flex items-center justify-between text-[9px]">
+                  <span class="text-slate-600 font-medium flex items-center gap-1">
+                    <Magnet :size="10" :class="isNeighborSnappingEnabled ? 'text-indigo-600' : 'text-slate-400'" />
+                    <span>Snap Grid Tetangga:</span>
+                  </span>
+                  <button
+                    @click="toggleNeighborSnapping"
+                    class="px-1.5 py-0.5 rounded text-[8.5px] font-bold border transition-colors cursor-pointer"
+                    :class="isNeighborSnappingEnabled ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs' : 'bg-white text-slate-500 border-slate-300'"
+                    title="Aktifkan agar kursor menempel ke titik sudut poligon grid sebelah saat memotong atau membuat poligon"
+                  >
+                    {{ isNeighborSnappingEnabled ? 'ON' : 'OFF' }}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1253,6 +1313,122 @@
             <X :size="12" />
             <span>Batal (Esc)</span>
           </button>
+        </div>
+
+        <!-- Floating Banner: Pulihkan Draf Offline / Lokal (Poin 1) -->
+        <div
+          v-if="showDraftRestorePrompt && pendingDraftToRestore"
+          class="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-white/95 text-slate-800 px-4 py-2.5 rounded-xl shadow-xl flex items-center gap-3 text-xs border border-amber-300 backdrop-blur-md animate-in fade-in slide-in-from-top-2"
+        >
+          <div class="w-7 h-7 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+            <Save :size="16" />
+          </div>
+          <div>
+            <div class="font-bold text-xs text-slate-900">Ditemukan Draf Lokal di Browser</div>
+            <div class="text-[11px] text-slate-600">
+              Terdapat cadangan offline dari jam {{ new Date(pendingDraftToRestore.updatedAt).toLocaleTimeString() }} ({{ pendingDraftToRestore.features?.length || 0 }} poligon).
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5 ml-2">
+            <button
+              @click="restoreOfflineDraft"
+              class="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer"
+            >
+              Pulihkan Draf
+            </button>
+            <button
+              @click="discardOfflineDraftPrompt"
+              class="px-2 py-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg text-xs font-medium cursor-pointer"
+            >
+              Abaikan
+            </button>
+          </div>
+        </div>
+
+        <!-- Floating Banner: AI Magic Wand Pending Candidate (Poin 3) -->
+        <div
+          v-if="aiSegmentCandidate"
+          class="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 text-white px-4 py-2.5 rounded-xl shadow-xl flex items-center gap-3 text-xs border border-indigo-500 backdrop-blur-md animate-in fade-in slide-in-from-top-2"
+        >
+          <div class="w-7 h-7 rounded-lg bg-indigo-600 text-amber-300 flex items-center justify-center shrink-0">
+            <Wand2 :size="16" class="animate-pulse" />
+          </div>
+          <div>
+            <div class="font-bold text-xs text-white flex items-center gap-2">
+              <span>Hasil Segmentasi AI</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-800 text-indigo-200 font-mono">
+                {{ aiSegmentCandidate.properties?.class_name || 'Tutupan Lahan' }}
+              </span>
+              <span class="text-[10px] text-slate-400">
+                {{ aiSegmentCandidate.properties?.area_ha || 0 }} ha
+              </span>
+            </div>
+            <div class="text-[10px] text-slate-300">
+              Tekan Enter untuk memasukkan poligon, atau Esc untuk membatalkan
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5 ml-2">
+            <button
+              @click="acceptAiCandidate"
+              class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1"
+            >
+              <Check :size="13" />
+              <span>Terima (Enter)</span>
+            </button>
+            <button
+              @click="cancelAiCandidate"
+              class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
+            >
+              <X :size="13" />
+              <span>Batal (Esc)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Swipe Map Overlay: Draggable Split Slider and Top Year Tags (Poin 2) -->
+        <div
+          v-if="isSwipeMode"
+          class="pointer-events-none absolute inset-0 z-20 overflow-hidden"
+        >
+          <!-- Left Side Label Tag -->
+          <div class="pointer-events-auto absolute top-3 left-4 bg-slate-900/90 text-white px-3 py-1 rounded-lg text-xs font-bold shadow-lg border border-slate-700 backdrop-blur-sm flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+            <span>Kiri (Tahun {{ swipeLeftYear }})</span>
+            <select
+              v-model.number="swipeLeftYear"
+              @change="updateSwipeLayers"
+              class="bg-slate-800 text-slate-200 text-[11px] rounded px-1.5 py-0.5 border border-slate-600 cursor-pointer"
+            >
+              <option :value="2022">2022</option>
+              <option :value="2025">2025</option>
+            </select>
+          </div>
+
+          <!-- Right Side Label Tag -->
+          <div class="pointer-events-auto absolute top-3 right-4 bg-slate-900/90 text-white px-3 py-1 rounded-lg text-xs font-bold shadow-lg border border-slate-700 backdrop-blur-sm flex items-center gap-2">
+            <span>Kanan (Tahun {{ swipeRightYear }})</span>
+            <select
+              v-model.number="swipeRightYear"
+              @change="updateSwipeLayers"
+              class="bg-slate-800 text-slate-200 text-[11px] rounded px-1.5 py-0.5 border border-slate-600 cursor-pointer"
+            >
+              <option :value="2022">2022</option>
+              <option :value="2025">2025</option>
+            </select>
+            <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+          </div>
+
+          <!-- Draggable Divider Line -->
+          <div
+            class="pointer-events-auto absolute top-0 bottom-0 w-1 bg-white shadow-[0_0_12px_rgba(0,0,0,0.6)] cursor-ew-resize flex items-center justify-center select-none"
+            :style="{ left: `${swipePosition}%` }"
+            @mousedown="onSwipeMouseDown"
+          >
+            <!-- Handle Button in center -->
+            <div class="w-8 h-8 rounded-full bg-white text-slate-800 shadow-xl border-2 border-slate-700 flex items-center justify-center cursor-ew-resize hover:scale-110 active:scale-95 transition-transform">
+              <Split :size="16" class="text-slate-800" />
+            </div>
+          </div>
         </div>
 
         <!-- SVG Gamma Filter Definition for Leaflet Tile GPU Filtering -->
@@ -2392,6 +2568,98 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- LEADERBOARD & MAPPER ANALYTICS MODAL (Poin 6)                       -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <div
+      v-if="showLeaderboardModal"
+      class="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150"
+    >
+      <div class="w-full max-w-3xl bg-white border border-slate-200 rounded-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden text-slate-800">
+        <!-- Header -->
+        <div class="px-6 py-4 bg-gradient-to-r from-amber-500 to-amber-600 text-white flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center text-white">
+              <Trophy :size="22" />
+            </div>
+            <div>
+              <h2 class="text-lg font-black tracking-tight">Leaderboard Mapper GEOSTEVIA</h2>
+              <p class="text-xs text-amber-100">Produktivitas digitasi, luas tutupan lahan, dan approval rating tim</p>
+            </div>
+          </div>
+          <button
+            @click="showLeaderboardModal = false"
+            class="w-8 h-8 rounded-lg bg-black/10 hover:bg-black/20 flex items-center justify-center text-white cursor-pointer transition-colors"
+          >
+            <X :size="16" />
+          </button>
+        </div>
+
+        <!-- Leaderboard Table Body -->
+        <div class="p-6 overflow-y-auto flex-1">
+          <div v-if="leaderboardLoading" class="py-12 flex flex-col items-center justify-center text-slate-400 gap-2">
+            <RotateCw :size="24" class="animate-spin text-amber-500" />
+            <span class="text-xs font-medium">Memuat statistik leaderboard...</span>
+          </div>
+          <div v-else-if="leaderboardList.length === 0" class="py-12 text-center text-slate-500 text-xs">
+            Belum ada data aktivitas digitasi yang tercatat.
+          </div>
+          <div v-else class="space-y-2">
+            <div
+              v-for="(item, idx) in leaderboardList"
+              :key="item.user_id"
+              class="p-3.5 rounded-xl border flex items-center justify-between gap-4 transition-all hover:shadow-xs"
+              :class="idx === 0 ? 'bg-amber-50/70 border-amber-300 ring-1 ring-amber-300/50' : idx === 1 ? 'bg-slate-50 border-slate-300' : idx === 2 ? 'bg-orange-50/50 border-orange-200' : 'bg-white border-slate-200'"
+            >
+              <div class="flex items-center gap-3.5 min-w-0">
+                <div
+                  class="w-8 h-8 rounded-full font-black text-xs flex items-center justify-center shrink-0"
+                  :class="idx === 0 ? 'bg-amber-500 text-white shadow-xs' : idx === 1 ? 'bg-slate-400 text-white' : idx === 2 ? 'bg-orange-400 text-white' : 'bg-slate-100 text-slate-600'"
+                >
+                  {{ idx + 1 }}
+                </div>
+                <div class="min-w-0">
+                  <div class="font-bold text-sm text-slate-900 truncate flex items-center gap-2">
+                    <span>{{ item.full_name || item.username }}</span>
+                    <span v-if="idx === 0" class="text-amber-500 text-xs">👑 Juara 1</span>
+                  </div>
+                  <div class="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                    <span>{{ item.completed_grids }} Grid Selesai</span>
+                    <span>•</span>
+                    <span>{{ item.total_polygons }} Poligon</span>
+                    <span>•</span>
+                    <span>{{ item.total_area_ha }} Ha</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-4 shrink-0 text-right">
+                <div class="hidden sm:block">
+                  <div class="text-[10px] text-slate-400 font-medium">QC Approval</div>
+                  <div class="text-xs font-bold text-emerald-700">{{ item.approval_rate }}%</div>
+                </div>
+                <div>
+                  <div class="text-[10px] text-amber-700 font-bold uppercase tracking-wider">Skor Poin</div>
+                  <div class="text-base font-black text-amber-600 font-mono">{{ item.score.toLocaleString() }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 shrink-0">
+          <span>Skor dihitung dari: Grid selesai × 100 + Poligon × 1 + Luas Ha × 5</span>
+          <button
+            @click="showLeaderboardModal = false"
+            class="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-xl transition-colors cursor-pointer"
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
     <!-- TOPOLOGY CORRECTION MODAL (Clean Light Theme, No AI Slop)          -->
     <!-- ═══════════════════════════════════════════════════════════════════ -->
     <div
@@ -2963,7 +3231,11 @@ import {
   Move,
   Info,
   Magnet,
-  Search
+  Search,
+  Wifi,
+  WifiOff,
+  Trophy,
+  Split
 } from 'lucide-vue-next'
 import * as turf from '@turf/turf'
 import { useAuthStore } from '../stores/auth'
@@ -2971,6 +3243,7 @@ import { useTasksStore } from '../stores/tasks'
 import { useAnnotationsStore } from '../stores/annotations'
 import api from '../services/api'
 import { imageMapLayer } from 'esri-leaflet'
+import { saveTaskDraft, getTaskDraft, clearTaskDraft } from '../services/offlineStorage'
 
 const route = useRoute()
 const router = useRouter()
@@ -2989,6 +3262,32 @@ const isSnappingEnabled = ref(true)
 const polyListPage = ref(1)
 const polyListPageSize = 40
 const polySearchQuery = ref('')
+
+// ─── OFFLINE DRAFT & NETWORK RESILIENCE (POIN 1) ─────────────
+const isNetworkOnline = ref(typeof navigator !== 'undefined' ? navigator.onLine : true)
+const localDraftStatus = ref(null) // { updatedAt, polygonCount }
+const showDraftRestorePrompt = ref(false)
+const pendingDraftToRestore = ref(null)
+
+// ─── TEMPORAL COMPARISON SWIPE MAP (POIN 2) ─────────────────
+const isSwipeMode = ref(false)
+const swipeLeftYear = ref(2022)
+const swipeRightYear = ref(2025)
+const swipePosition = ref(50) // percentage 0 - 100
+const isDraggingSwipe = ref(false)
+
+// ─── AI-ASSISTED DIGITIZING (POIN 3) ────────────────────────
+const isAiSegmenting = ref(false)
+const aiWandTolerance = ref(28.0)
+const aiSegmentCandidate = ref(null)
+
+// ─── EDGE-MATCHING & NEIGHBOR SNAPPING (POIN 4) ─────────────
+const isNeighborSnappingEnabled = ref(true)
+
+// ─── MAPPER LEADERBOARD (POIN 6) ────────────────────────────
+const showLeaderboardModal = ref(false)
+const leaderboardLoading = ref(false)
+const leaderboardList = ref([])
 
 const filteredAndPagedFeatures = computed(() => {
   let list = (features.value || []).map((f, i) => ({ feat: f, originalIdx: i }))
@@ -3185,6 +3484,48 @@ const getFeatureUiId = (feat) => {
   const uiId = id ? `f_id_${id}` : `f_tmp_${Date.now()}_${++_featureUiCounter}`
   feat._uiId = uiId
   return uiId
+}
+
+// STRICT SINGLEPART GUARANTEE:
+// Explodes any MultiPolygon or GeometryCollection into distinct singlepart Polygon features
+const explodeGeoJsonFeature = (feat) => {
+  if (!feat) return []
+  const geom = feat.geometry || feat
+  if (!geom) return [feat]
+
+  if (geom.type === 'MultiPolygon' && Array.isArray(geom.coordinates)) {
+    return geom.coordinates.map((polyCoords, idx) => {
+      const baseProps = feat.properties ? { ...feat.properties } : {}
+      const rawId = feat.id || baseProps.id
+      const subId = rawId ? `${rawId}_p${idx + 1}` : undefined
+      const subFeat = {
+        type: 'Feature',
+        id: subId,
+        geometry: {
+          type: 'Polygon',
+          coordinates: polyCoords
+        },
+        properties: {
+          ...baseProps,
+          id: subId
+        }
+      }
+      subFeat._uiId = getFeatureUiId(subFeat)
+      return subFeat
+    })
+  } else if (geom.type === 'GeometryCollection' && Array.isArray(geom.geometries)) {
+    const list = []
+    geom.geometries.forEach((subGeom) => {
+      if (subGeom.type === 'Polygon' || subGeom.type === 'MultiPolygon') {
+        const dummyFeat = { type: 'Feature', geometry: subGeom, properties: { ...(feat.properties || {}) } }
+        list.push(...explodeGeoJsonFeature(dummyFeat))
+      }
+    })
+    return list.length > 0 ? list : [feat]
+  }
+
+  if (!feat._uiId) feat._uiId = getFeatureUiId(feat)
+  return [feat]
 }
 
 const selectableTasks = computed(() => {
@@ -3540,6 +3881,7 @@ const pushHistory = () => {
     history.value.shift()
   }
   historyIndex.value = history.value.length - 1
+  queueOfflineDraftSave()
 }
 
 const undo = async () => {
@@ -3596,12 +3938,16 @@ const restoreFeaturesToMap = (snapshotFeatures) => {
   })
 
   featureGroup.clearLayers()
-  features.value = snapshotFeatures
+  const singlepartSnapshot = []
+  snapshotFeatures.forEach(feat => {
+    singlepartSnapshot.push(...explodeGeoJsonFeature(feat))
+  })
+  features.value = singlepartSnapshot
 
   const classesMap = {}
   annotationsStore.classes.forEach(c => { classesMap[c.id] = c })
 
-  snapshotFeatures.forEach(feat => {
+  singlepartSnapshot.forEach(feat => {
     feat._uiId = getFeatureUiId(feat)
     const geojsonLayer = L.geoJSON(feat, {
       style: () => {
@@ -3680,8 +4026,22 @@ const handleKeydown = (e) => {
     }
   }
 
-  // 3. Escape key: cancel active draw mode, clear vertex selection, or reset to pointer
+  // 2b. Enter key: accept AI Magic Wand candidate if available
+  if (e.key === 'Enter') {
+    if (aiSegmentCandidate.value) {
+      e.preventDefault()
+      acceptAiCandidate()
+      return
+    }
+  }
+
+  // 3. Escape key: cancel AI candidate, draw mode, clear vertex selection, or reset to pointer
   if (e.key === 'Escape') {
+    if (aiSegmentCandidate.value) {
+      cancelAiCandidate()
+      return
+    }
+
     if (showTopologySurgeryModal.value && selectedSurgeryVertices.value.length > 0) {
       clearSurgeryVertexSelection()
       showToast('Pilihan titik simpul dibatalkan')
@@ -3722,6 +4082,8 @@ const handleKeydown = (e) => {
     const k = e.key.toLowerCase()
     if (k === 'v') {
       setDigitizeMode(null)
+    } else if (k === 'w') {
+      setDigitizeMode('ai_wand')
     } else if (k === 'c') {
       setDigitizeMode('split_line')
     } else if (k === 'x') {
@@ -3758,6 +4120,10 @@ let neighboringGridsLayer = null
 let neighborPolygonsLayer = null
 let featureGroup = null
 let reviewPinsLayerGroup = null
+let swipeLeftTileLayer = null
+let swipeRightTileLayer = null
+let aiCandidatePreviewLayer = null
+let draftAutoSaveTimer = null
 const features = ref([])
 const outsideDimOpacity = ref(0.12) // Default lembut agar citra grid sebelah terlihat jernih
 const showNeighborPolygons = ref(false) // Default OFF agar kanvas bersih, mapper bisa aktifkan saat perlu edge-matching
@@ -3852,8 +4218,12 @@ const loadNeighborPolygons = async (taskId) => {
         }
       },
       onEachFeature: (feature, layer) => {
-        layer.options.pmIgnore = true
-        layer.options.snapIgnore = false
+        layer.options.pmIgnore = false
+        layer.options.snapIgnore = !isNeighborSnappingEnabled.value
+        if (isNeighborSnappingEnabled.value && layer.pm) {
+          layer.pm.enable({ snappable: true, allowSelfIntersection: false })
+          layer.pm.disable()
+        }
         const p = feature.properties || {}
         layer.bindTooltip(`
           <div class="text-xs font-sans">
@@ -3903,6 +4273,21 @@ const toggleNeighborPolygons = async () => {
       neighborPolygonsLayer = null
     }
   }
+}
+
+const toggleNeighborSnapping = () => {
+  isNeighborSnappingEnabled.value = !isNeighborSnappingEnabled.value
+  if (neighborPolygonsLayer) {
+    neighborPolygonsLayer.eachLayer(l => {
+      l.options.pmIgnore = false
+      l.options.snapIgnore = !isNeighborSnappingEnabled.value
+      if (isNeighborSnappingEnabled.value && l.pm) {
+        l.pm.enable({ snappable: true, allowSelfIntersection: false })
+        l.pm.disable()
+      }
+    })
+  }
+  showToast(`Snap ke Batas Grid Tetangga: ${isNeighborSnappingEnabled.value ? 'AKTIF' : 'NONAKTIF'}`)
 }
 
 const getArcgisRasterFunction = (layerId) => {
@@ -4112,9 +4497,21 @@ const showToast = (msg) => {
   setTimeout(() => { toastMessage.value = '' }, 3500)
 }
 
+const onNetworkOnline = () => {
+  isNetworkOnline.value = true
+  showToast('🌐 Koneksi internet kembali aktif!')
+}
+
+const onNetworkOffline = () => {
+  isNetworkOnline.value = false
+  showToast('⚠️ Koneksi terputus — Perubahan otomatis disimpan di browser (IndexedDB).')
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('keyup', handleKeyup)
+  window.addEventListener('online', onNetworkOnline)
+  window.addEventListener('offline', onNetworkOffline)
   
   // Fetch available dynamic raster years (2025, 2022, 2018+)
   try {
@@ -4167,6 +4564,12 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('keyup', handleKeyup)
   window.removeEventListener('mouseup', onMapMouseUp)
+  window.removeEventListener('online', onNetworkOnline)
+  window.removeEventListener('offline', onNetworkOffline)
+  window.removeEventListener('mousemove', onSwipeMouseMove)
+  window.removeEventListener('mouseup', onSwipeMouseUp)
+  destroySwipeLayers()
+  if (draftAutoSaveTimer) clearTimeout(draftAutoSaveTimer)
   if (map) {
     map.remove()
     map = null
@@ -4260,10 +4663,15 @@ const initMap = () => {
   // Review Pins Layer Group
   reviewPinsLayerGroup = L.layerGroup().addTo(map)
 
-  // Direct map click for Evaluation Pins:
+  // Direct map click for Evaluation Pins & AI Magic Wand:
   map.on('click', (e) => {
     if (isAddEvaluationPinMode.value) {
       onMapClickForEvaluationPin(e)
+      return
+    }
+    if (activeTool.value === 'ai_wand') {
+      onMapClickForAiWand(e)
+      return
     }
   })
 
@@ -4606,6 +5014,13 @@ const setDigitizeMode = (mode, force = false) => {
       })
       break
 
+    case 'ai_wand':
+      showToast('Alat Aktif: 🪄 AI Magic Wand. Klik area pada citra untuk segmentasi otomatis.')
+      if (map && map.getContainer()) {
+        map.getContainer().style.cursor = 'crosshair'
+      }
+      break
+
     case 'delete':
       showToast('Alat Aktif: Hapus Poligon. Klik objek yang ingin dihapus.')
       break
@@ -4613,6 +5028,279 @@ const setDigitizeMode = (mode, force = false) => {
     case 'merge':
       showToast('Alat Aktif: Gabung Poligon. Pilih 2 atau lebih poligon bersebelahan.')
       break
+  }
+}
+
+// ─── OFFLINE DRAFT & INDEXEDDB AUTO-SAVE (POIN 1) ─────────────
+const queueOfflineDraftSave = () => {
+  if (!selectedTaskId.value || !features.value) return
+  if (draftAutoSaveTimer) clearTimeout(draftAutoSaveTimer)
+  draftAutoSaveTimer = setTimeout(async () => {
+    try {
+      await saveTaskDraft(selectedTaskId.value, features.value)
+      localDraftStatus.value = {
+        updatedAt: new Date().toISOString(),
+        polygonCount: features.value.length
+      }
+    } catch (err) {
+      console.warn('Gagal auto-save draf lokal ke IndexedDB:', err)
+    }
+  }, 1000)
+}
+
+const restoreOfflineDraft = () => {
+  if (!pendingDraftToRestore.value) return
+  const draftFeats = pendingDraftToRestore.value.features || []
+  restoreFeaturesToMap(draftFeats)
+  pushHistory()
+  showDraftRestorePrompt.value = false
+  showToast(`✓ Draf lokal offline (${draftFeats.length} poligon) berhasil dipulihkan!`)
+}
+
+const discardOfflineDraftPrompt = () => {
+  showDraftRestorePrompt.value = false
+  if (selectedTaskId.value) {
+    clearTaskDraft(selectedTaskId.value)
+  }
+  pendingDraftToRestore.value = null
+  localDraftStatus.value = null
+  showToast('Draf offline diabaikan.')
+}
+
+// ─── TEMPORAL COMPARISON SWIPE MAP (POIN 2) ─────────────────
+const toggleSwipeMode = () => {
+  isSwipeMode.value = !isSwipeMode.value
+  if (isSwipeMode.value) {
+    if (tileLayer && map) {
+      map.removeLayer(tileLayer)
+      tileLayer = null
+    }
+    if (arcgisLayer && map) {
+      map.removeLayer(arcgisLayer)
+      arcgisLayer = null
+    }
+    initSwipeLayers()
+    showToast('Mode Swipe aktif: Geser garis pembagi untuk membandingkan citra')
+  } else {
+    destroySwipeLayers()
+    updateTileLayer()
+    showToast('Mode Swipe ditutup, kembali ke citra tunggal')
+  }
+}
+
+const initSwipeLayers = () => {
+  if (!map) return
+  destroySwipeLayers()
+
+  const currentGrid = tasksStore.currentTask?.grid_code
+  const leftUrl = currentGrid
+    ? api.getGridRasterTileUrl(swipeLeftYear.value, currentGrid, 'rgb', imagerySettings.value.gamma)
+    : api.getMosaicRasterTileUrl(swipeLeftYear.value, 'rgb', imagerySettings.value.gamma)
+  const rightUrl = currentGrid
+    ? api.getGridRasterTileUrl(swipeRightYear.value, currentGrid, 'rgb', imagerySettings.value.gamma)
+    : api.getMosaicRasterTileUrl(swipeRightYear.value, 'rgb', imagerySettings.value.gamma)
+
+  swipeLeftTileLayer = L.tileLayer(leftUrl, {
+    maxZoom: 16,
+    maxNativeZoom: 16,
+    attribution: `Sentinel-2 Sumbar (${swipeLeftYear.value})`
+  }).addTo(map)
+
+  swipeRightTileLayer = L.tileLayer(rightUrl, {
+    maxZoom: 16,
+    maxNativeZoom: 16,
+    attribution: `Sentinel-2 Sumbar (${swipeRightYear.value})`
+  }).addTo(map)
+
+  swipeLeftTileLayer.bringToBack()
+  swipeRightTileLayer.bringToBack()
+
+  swipeLeftTileLayer.on('load', updateSwipeClip)
+  swipeRightTileLayer.on('load', updateSwipeClip)
+  setTimeout(updateSwipeClip, 50)
+}
+
+const updateSwipeLayers = () => {
+  if (isSwipeMode.value) {
+    initSwipeLayers()
+  }
+}
+
+const destroySwipeLayers = () => {
+  if (swipeLeftTileLayer && map) {
+    map.removeLayer(swipeLeftTileLayer)
+    swipeLeftTileLayer = null
+  }
+  if (swipeRightTileLayer && map) {
+    map.removeLayer(swipeRightTileLayer)
+    swipeRightTileLayer = null
+  }
+}
+
+const updateSwipeClip = () => {
+  const pos = swipePosition.value
+  if (swipeLeftTileLayer && swipeLeftTileLayer.getContainer) {
+    const el = swipeLeftTileLayer.getContainer()
+    if (el) el.style.clipPath = `polygon(0% 0%, ${pos}% 0%, ${pos}% 100%, 0% 100%)`
+  }
+  if (swipeRightTileLayer && swipeRightTileLayer.getContainer) {
+    const el = swipeRightTileLayer.getContainer()
+    if (el) el.style.clipPath = `polygon(${pos}% 0%, 100% 0%, 100% 100%, ${pos}% 100%)`
+  }
+}
+
+const onSwipeMouseDown = (e) => {
+  e.preventDefault()
+  isDraggingSwipe.value = true
+  window.addEventListener('mousemove', onSwipeMouseMove)
+  window.addEventListener('mouseup', onSwipeMouseUp)
+}
+
+const onSwipeMouseMove = (e) => {
+  if (!isDraggingSwipe.value) return
+  const container = document.getElementById('map-container')
+  if (!container) return
+  const rect = container.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  const pct = Math.max(5, Math.min(95, (x / rect.width) * 100))
+  swipePosition.value = Math.round(pct)
+  updateSwipeClip()
+}
+
+const onSwipeMouseUp = () => {
+  if (isDraggingSwipe.value) {
+    isDraggingSwipe.value = false
+    window.removeEventListener('mousemove', onSwipeMouseMove)
+    window.removeEventListener('mouseup', onSwipeMouseUp)
+  }
+}
+
+// ─── AI-ASSISTED DIGITIZING (POIN 3) ────────────────────────
+const onMapClickForAiWand = async (e) => {
+  if (isAiSegmenting.value) return
+  const lat = e.latlng.lat
+  const lon = e.latlng.lng
+  const gridCode = tasksStore.currentTask?.grid_code
+  const year = currentYear.value || 2025
+
+  if (!gridCode) {
+    showToast('Pilih grid tugas terlebih dahulu untuk menggunakan AI Magic Wand.')
+    return
+  }
+
+  try {
+    isAiSegmenting.value = true
+    const res = await api.requestAISegment({
+      task_grid_id: selectedTaskId.value || tasksStore.currentTask?.id,
+      grid_code: gridCode,
+      year: year,
+      lat: lat,
+      lon: lon,
+      tolerance: aiWandTolerance.value
+    })
+    const feat = res.data?.feature || (res.data?.geometry ? res.data : null)
+    if (feat && feat.geometry) {
+      if (!feat.properties) feat.properties = {}
+      if (feat.properties.suggested_class_name && !feat.properties.class_name) {
+        feat.properties.class_name = feat.properties.suggested_class_name
+        feat.properties.class_id = feat.properties.suggested_class_id
+      }
+      aiSegmentCandidate.value = feat
+
+      if (aiCandidatePreviewLayer && map) {
+        map.removeLayer(aiCandidatePreviewLayer)
+      }
+
+      aiCandidatePreviewLayer = L.geoJSON(feat, {
+        style: {
+          color: '#6366f1',
+          weight: 3,
+          dashArray: '6, 6',
+          fillColor: '#818cf8',
+          fillOpacity: 0.6
+        }
+      }).addTo(map)
+
+      showToast(`🪄 AI Segmentasi terdeteksi: ${feat.properties?.class_name || 'Poligon'} (${feat.properties?.area_ha || 0} ha, ${Math.round((feat.properties?.confidence || 0.8) * 100)}% yakin). Tekan Enter untuk menerima.`)
+    } else {
+      showToast('AI tidak menemukan batas area homogen yang cukup jelas. Coba klik di lokasi lain.')
+    }
+  } catch (err) {
+    console.error('Error running AI segment:', err)
+    showToast('Gagal AI Magic Wand: ' + (err.response?.data?.detail || err.message))
+  } finally {
+    isAiSegmenting.value = false
+  }
+}
+
+const acceptAiCandidate = () => {
+  if (!aiSegmentCandidate.value || !map) return
+  const candidate = aiSegmentCandidate.value
+
+  let assignedClassId = annotationsStore.selectedClass?.id
+  if (!assignedClassId && candidate.properties?.class_id) {
+    assignedClassId = candidate.properties.class_id
+  }
+  if (!assignedClassId && annotationsStore.classes.length > 0) {
+    assignedClassId = annotationsStore.classes[0].id
+  }
+  const matchedCls = annotationsStore.classes.find(c => c.id === assignedClassId)
+
+  candidate.properties = {
+    ...candidate.properties,
+    class_id: assignedClassId,
+    class_name: matchedCls ? matchedCls.name : 'Tutupan Lahan',
+    color: matchedCls ? matchedCls.color : '#9CA3AF'
+  }
+  candidate._uiId = getFeatureUiId(candidate)
+
+  if (aiCandidatePreviewLayer && map) {
+    map.removeLayer(aiCandidatePreviewLayer)
+    aiCandidatePreviewLayer = null
+  }
+
+  const newLyr = L.geoJSON(candidate, {
+    style: () => {
+      const color = candidate.properties.color || '#9CA3AF'
+      return { color, fillColor: color, fillOpacity: polygonOpacity.value, weight: 2 }
+    }
+  })
+
+  newLyr.eachLayer(l => {
+    l.feature = candidate
+    l._uiId = candidate._uiId
+    bindLayerEvents(l)
+    featureGroup.addLayer(l)
+  })
+
+  features.value.push(candidate)
+  aiSegmentCandidate.value = null
+  pushHistory()
+  queueOfflineDraftSave()
+  showToast(`✓ Poligon AI [${candidate.properties.class_name}] berhasil dimasukkan!`)
+}
+
+const cancelAiCandidate = () => {
+  if (aiCandidatePreviewLayer && map) {
+    map.removeLayer(aiCandidatePreviewLayer)
+    aiCandidatePreviewLayer = null
+  }
+  aiSegmentCandidate.value = null
+  showToast('Pratinjau poligon AI dibatalkan.')
+}
+
+// ─── MAPPER LEADERBOARD (POIN 6) ────────────────────────────
+const openLeaderboardModal = async () => {
+  showLeaderboardModal.value = true
+  leaderboardLoading.value = true
+  try {
+    const res = await api.getMapperLeaderboard()
+    leaderboardList.value = res.data?.leaderboard || []
+  } catch (err) {
+    console.error('Gagal mengambil data leaderboard:', err)
+    showToast('Gagal memuat statistik leaderboard.')
+  } finally {
+    leaderboardLoading.value = false
   }
 }
 
@@ -4626,19 +5314,49 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
 
   // 1. Remove deleted layers from Leaflet map & local features array
   if (deletedIds && deletedIds.length > 0) {
-    const delSet = new Set(deletedIds)
+    const delStrSet = new Set(deletedIds.map(id => String(id)))
     const layersToRemove = []
     featureGroup.eachLayer(l => {
-      const fid = l.feature?.id || l.feature?.properties?.id
-      if (fid && delSet.has(fid)) {
-        layersToRemove.push(l)
+      const fid = l.feature?.id ?? l.feature?.properties?.id
+      if (fid !== undefined && fid !== null) {
+        const fidStr = String(fid)
+        const baseId = fidStr.includes('_p') ? fidStr.split('_p')[0] : fidStr
+        if (delStrSet.has(fidStr) || delStrSet.has(baseId)) {
+          layersToRemove.push(l)
+          return
+        }
+      }
+      if (l._uiId) {
+        for (const delId of delStrSet) {
+          if (l._uiId === `f_id_${delId}` || l._uiId.startsWith(`f_id_${delId}_`)) {
+            layersToRemove.push(l)
+            break
+          }
+        }
       }
     })
-    layersToRemove.forEach(l => featureGroup.removeLayer(l))
+
+    layersToRemove.forEach(l => {
+      try {
+        if (map && map.pm) l.pm?.disable()
+        featureGroup.removeLayer(l)
+        if (map.hasLayer(l)) map.removeLayer(l)
+      } catch (_) {}
+    })
 
     features.value = features.value.filter(f => {
-      const fid = f.id || f.properties?.id
-      return !fid || !delSet.has(fid)
+      const fid = f.id ?? f.properties?.id
+      if (fid !== undefined && fid !== null) {
+        const fidStr = String(fid)
+        const baseId = fidStr.includes('_p') ? fidStr.split('_p')[0] : fidStr
+        if (delStrSet.has(fidStr) || delStrSet.has(baseId)) return false
+      }
+      if (f._uiId) {
+        for (const delId of delStrSet) {
+          if (f._uiId === `f_id_${delId}` || f._uiId.startsWith(`f_id_${delId}_`)) return false
+        }
+      }
+      return true
     })
   }
 
@@ -4646,14 +5364,14 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
   if (updatedFeatures && updatedFeatures.length > 0) {
     const upMap = new Map()
     updatedFeatures.forEach(uf => {
-      const fid = uf.id || uf.properties?.id
-      if (fid) upMap.set(fid, uf)
+      const fid = uf.id ?? uf.properties?.id
+      if (fid !== undefined && fid !== null) upMap.set(String(fid), uf)
     })
 
     featureGroup.eachLayer(l => {
-      const fid = l.feature?.id || l.feature?.properties?.id
-      if (fid && upMap.has(fid)) {
-        const uf = upMap.get(fid)
+      const fid = l.feature?.id ?? l.feature?.properties?.id
+      if (fid !== undefined && fid !== null && upMap.has(String(fid))) {
+        const uf = upMap.get(String(fid))
         l.feature = uf
         const cls = classesMap[uf.properties?.class_id]
         const color = cls?.color || '#9CA3AF'
@@ -4664,17 +5382,22 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
     })
 
     features.value = features.value.map(f => {
-      const fid = f.id || f.properties?.id
-      if (fid && upMap.has(fid)) {
-        return upMap.get(fid)
+      const fid = f.id ?? f.properties?.id
+      if (fid !== undefined && fid !== null && upMap.has(String(fid))) {
+        return upMap.get(String(fid))
       }
       return f
     })
   }
 
-  // 3. Add created features
+  // 3. Add created features (STRICT SINGLEPART: unpack any MultiPolygon!)
   if (createdFeatures && createdFeatures.length > 0) {
+    const strictCreated = []
     createdFeatures.forEach(feat => {
+      strictCreated.push(...explodeGeoJsonFeature(feat))
+    })
+
+    strictCreated.forEach(feat => {
       feat._uiId = getFeatureUiId(feat)
       const geojsonLayer = L.geoJSON(feat, {
         style: () => {
@@ -4704,17 +5427,50 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
   return true
 }
 
+// Helper to find target polygon for line/polygon split
+const findTargetPolygonForCut = (cutGeom) => {
+  if (clickedFeatureIdx.value !== null && features.value[clickedFeatureIdx.value]) {
+    const cf = features.value[clickedFeatureIdx.value]
+    const rawId = cf.properties?.id || cf.id
+    const annId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
+    return { feat: cf, annId }
+  }
+
+  if (!features.value || features.value.length === 0 || !cutGeom) return { feat: null, annId: null }
+
+  try {
+    const cutFeat = cutGeom.type === 'LineString' ? turf.lineString(cutGeom.coordinates) : turf.polygon(cutGeom.coordinates)
+    for (const feat of features.value) {
+      if (!feat || !feat.geometry) continue
+      try {
+        if (turf.booleanIntersects(cutFeat, feat)) {
+          const rawId = feat.properties?.id || feat.id
+          const annId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
+          if (annId) {
+            return { feat, annId }
+          }
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  return { feat: null, annId: null }
+}
+
 // Handle Line Split
 const handleSplitByLine = async (lineGeom) => {
   if (!selectedTaskId.value) return
   const previousTool = activeTool.value
   showToast('Memproses pemotongan garis...')
 
-  // Get active class for newly created slice
-  const newClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
+  // Detect target polygon under cut line
+  const { feat: targetFeat, annId: targetAnnId } = findTargetPolygonForCut(lineGeom)
+
+  // Default to 0 so backend preserves the parent polygon's original class (prevents unexpected Bangunan class)
+  const targetClassId = 0
 
   try {
-    const res = await api.splitByLine(selectedTaskId.value, lineGeom, null, newClass?.id || 0)
+    const res = await api.splitByLine(selectedTaskId.value, lineGeom, targetAnnId, targetClassId)
     showToast(res.data?.message || 'Poligon berhasil dipotong!')
     if (res.data?.deleted_ids || res.data?.created_features) {
       applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
@@ -4736,10 +5492,11 @@ const handleSplitByPolygon = async (cuttingGeom) => {
   const previousTool = activeTool.value
   showToast('Memproses pemisahan area poligon...')
 
-  const newClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
+  const { feat: targetFeat, annId: targetAnnId } = findTargetPolygonForCut(cuttingGeom)
+  const targetClassId = 0
 
   try {
-    const res = await api.splitByPolygon(selectedTaskId.value, cuttingGeom, null, newClass?.id || 0)
+    const res = await api.splitByPolygon(selectedTaskId.value, cuttingGeom, targetAnnId, targetClassId)
     showToast(res.data?.message || 'Poligon berhasil dipisah menjadi bagian mandiri!')
     if (res.data?.deleted_ids || res.data?.created_features) {
       applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
@@ -4848,12 +5605,28 @@ const executeMerge = async () => {
   const targetColor = targetClass?.color || '#006400'
 
   const annotationIds = selectedForMerge.value.map(f => f.id || f.properties?.id).filter(Boolean)
+  const selectedUiIds = new Set(selectedForMerge.value.map(f => f._uiId).filter(Boolean))
+  const allAreDbIntegers = annotationIds.length === selectedForMerge.value.length &&
+    annotationIds.every(id => Number.isInteger(Number(id)) && !String(id).includes('_'))
 
   try {
-    // If backend IDs exist for all selected polygons, use backend merge API
-    if (annotationIds.length === selectedForMerge.value.length) {
-      const res = await api.mergePolygons(selectedTaskId.value, annotationIds, targetClassId)
+    // If backend integer IDs exist for all selected polygons, use backend merge API
+    if (allAreDbIntegers) {
+      const res = await api.mergePolygons(selectedTaskId.value, annotationIds.map(Number), targetClassId)
       showToast(res.data?.message || `Poligon berhasil digabungkan menjadi '${targetClassName}'!`)
+
+      // Explicitly purge selected layers immediately from Leaflet map & memory
+      featureGroup.eachLayer(l => {
+        const lUiId = l._uiId || l.feature?._uiId
+        const lId = l.feature?.id || l.feature?.properties?.id
+        if ((lUiId && selectedUiIds.has(lUiId)) || (lId && annotationIds.map(String).includes(String(lId)))) {
+          try {
+            featureGroup.removeLayer(l)
+            if (map && map.hasLayer(l)) map.removeLayer(l)
+          } catch (_) {}
+        }
+      })
+
       if (res.data?.deleted_ids || res.data?.created_features) {
         applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
       } else {
@@ -4867,8 +5640,23 @@ const executeMerge = async () => {
       })
       const fc = turf.featureCollection(validPolys)
       let unioned = turf.union(fc)
-      if (!unioned) {
-        throw new Error('Gagal menyatukan poligon. Pastikan poligon saling bersentuhan atau bertampalan.')
+
+      // If union resulted in MultiPolygon, try micro-buffer bridge (~1.5 meters)
+      if (unioned && unioned.geometry?.type === 'MultiPolygon') {
+        try {
+          const bufferedFc = turf.featureCollection(validPolys.map(p => turf.buffer(p, 0.0015, { units: 'kilometers' })))
+          const bUnion = turf.union(bufferedFc)
+          if (bUnion) {
+            const deflated = turf.buffer(bUnion, -0.0015, { units: 'kilometers' })
+            if (deflated && deflated.geometry?.type === 'Polygon') {
+              unioned = deflated
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (!unioned || unioned.geometry?.type === 'MultiPolygon') {
+        throw new Error('Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bersentuhan yang dapat digabungkan.')
       }
       unioned = cleanPolygonSpikesAndRings(unioned)
 
@@ -6621,6 +7409,13 @@ const bindLayerEvents = (layer) => {
       return
     }
 
+    // 2b. Mode AI Magic Wand (klik di area poligon untuk segmentasi otomatis):
+    if (activeTool.value === 'ai_wand') {
+      L.DomEvent.stopPropagation(e)
+      onMapClickForAiWand(e)
+      return
+    }
+
     // 3. Mode digitizing / pemotongan lain: biarkan Geoman menangani tanpa popup
     if (activeTool.value !== null) {
       return
@@ -7219,16 +8014,20 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
     map.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 })
   }
 
-  // 5. Load Existing Polygons
+  // 5. Load Existing Polygons (STRICT SINGLEPART GUARANTEE)
   featureGroup.clearLayers()
   const fetchedFeatures = await annotationsStore.fetchGridAnnotations(taskId)
-  features.value = fetchedFeatures
+  const strictFeatures = []
+  fetchedFeatures.forEach(feat => {
+    strictFeatures.push(...explodeGeoJsonFeature(feat))
+  })
+  features.value = strictFeatures
 
   const classesMap = {}
   annotationsStore.classes.forEach(c => { classesMap[c.id] = c })
 
-  if (fetchedFeatures.length > 0) {
-    fetchedFeatures.forEach(feat => {
+  if (strictFeatures.length > 0) {
+    strictFeatures.forEach(feat => {
       feat._uiId = getFeatureUiId(feat)
       const geojsonLayer = L.geoJSON(feat, {
         style: () => {
@@ -7248,6 +8047,26 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
         featureGroup.addLayer(l)
       })
     })
+  }
+
+  // Check for local offline draft in IndexedDB (Poin 1)
+  try {
+    const draft = await getTaskDraft(taskId)
+    if (draft && draft.features && draft.features.length > 0) {
+      localDraftStatus.value = {
+        updatedAt: draft.updatedAt,
+        polygonCount: draft.features.length
+      }
+      if (draft.features.length !== fetchedFeatures.length) {
+        pendingDraftToRestore.value = draft
+        showDraftRestorePrompt.value = true
+      }
+    } else {
+      localDraftStatus.value = null
+      showDraftRestorePrompt.value = false
+    }
+  } catch (err) {
+    console.warn('Gagal membaca draf IndexedDB:', err)
   }
 
   // 5. Fetch sibling task information across other available years
@@ -7695,7 +8514,10 @@ const syncFeaturesFromMap = () => {
       area_sqm: currentProps.area_sqm || null
     }
     layer.feature = json
-    newFeatures.push(json)
+
+    // STRICT SINGLEPART: Explode any multi-part features
+    const exploded = explodeGeoJsonFeature(json)
+    newFeatures.push(...exploded)
   })
   features.value = newFeatures
 }
@@ -7716,6 +8538,11 @@ const saveAnnotations = async () => {
   if (ok) {
     showToast('Semua poligon draf berhasil disimpan!')
     await tasksStore.fetchTaskDetail(selectedTaskId.value)
+    if (selectedTaskId.value) {
+      await clearTaskDraft(selectedTaskId.value)
+      localDraftStatus.value = null
+      showDraftRestorePrompt.value = false
+    }
   }
 }
 

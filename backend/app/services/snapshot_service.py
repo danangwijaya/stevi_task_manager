@@ -183,6 +183,8 @@ def restore_grid_snapshot(
     db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).delete()
 
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
+    from shapely.geometry import mapping
+    from app.api.annotations import _extract_polygons
 
     new_annotations = []
     for f in features:
@@ -191,23 +193,22 @@ def restore_grid_snapshot(
         class_name = props.get("class_name", classes_dict.get(class_id, "Unknown"))
         geom_dict = f.get("geometry", {})
         
-        area_sqm = props.get("area_sqm")
-        if area_sqm is None:
-            try:
-                s_geom = shape(geom_dict)
-                area_sqm = s_geom.area * (111320.0 ** 2)
-            except Exception:
-                area_sqm = 0.0
-
-        ann = Annotation(
-            task_grid_id=task_grid_id,
-            user_id=user_id,
-            class_id=class_id,
-            class_name=class_name,
-            geom_geojson=json.dumps(geom_dict),
-            area_sqm=float(area_sqm)
-        )
-        new_annotations.append(ann)
+        try:
+            s_geom = shape(geom_dict)
+            extracted = _extract_polygons(s_geom, min_area_sqm=0.1)
+            for p in extracted:
+                p_area_sqm = p.area * (111320.0 ** 2)
+                ann = Annotation(
+                    task_grid_id=task_grid_id,
+                    user_id=user_id,
+                    class_id=class_id,
+                    class_name=class_name,
+                    geom_geojson=json.dumps(mapping(p)),
+                    area_sqm=float(p_area_sqm)
+                )
+                new_annotations.append(ann)
+        except Exception:
+            continue
 
     if new_annotations:
         db.bulk_save_objects(new_annotations)

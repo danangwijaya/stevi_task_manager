@@ -1237,3 +1237,89 @@ def delete_task_review_pin(
     db.commit()
     return {"success": True, "message": "Catatan review berhasil dihapus"}
 
+
+# ─────────────────────────────────────────────
+# MAPPER LEADERBOARD & PRODUCTIVITY ANALYTICS
+# ─────────────────────────────────────────────
+
+@router.get("/analytics/leaderboard")
+def get_mapper_leaderboard(
+    study_area_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """
+    Returns gamified leaderboard and productivity metrics for mappers:
+    ranks, polygon counts, completed grids, approval ratings, and achievement badges.
+    """
+    users = db.query(User).filter(User.is_active == True).all()
+
+    leaderboard = []
+    for u in users:
+        # Base query for tasks assigned to this user
+        grid_q = db.query(TaskGrid).filter(TaskGrid.assigned_user_id == u.id)
+        if study_area_id:
+            grid_q = grid_q.filter(TaskGrid.study_area_id == study_area_id)
+
+        total_grids = grid_q.count()
+        ann_stats = db.query(
+            func.count(Annotation.id),
+            func.coalesce(func.sum(Annotation.area_sqm), 0.0)
+        ).filter(Annotation.user_id == u.id).first()
+
+        total_polygons = ann_stats[0] if ann_stats else 0
+        if total_grids == 0 and total_polygons == 0:
+            continue
+
+        approved_grids = grid_q.filter(TaskGrid.status == "APPROVED").count()
+        submitted_grids = grid_q.filter(TaskGrid.status == "SUBMITTED").count()
+        in_progress_grids = grid_q.filter(TaskGrid.status == "IN_PROGRESS").count()
+
+        total_area_ha = round((ann_stats[1] / 10000.0) if ann_stats else 0.0, 2)
+
+        # QC Approval Rate calculation
+        total_reviewed = approved_grids + grid_q.filter(TaskGrid.status == "REVISION_NEEDED").count()
+        approval_rate = round((approved_grids / total_reviewed * 100.0), 1) if total_reviewed > 0 else 100.0
+
+        # Dynamic Gamification Badge
+        if approved_grids >= 25 or total_polygons >= 4000:
+            badge = {"title": "🌟 Master Cartographer", "color": "amber", "level": 4}
+        elif approved_grids >= 10 or total_polygons >= 1500:
+            badge = {"title": "🎖️ Senior Mapper", "color": "indigo", "level": 3}
+        elif approved_grids >= 3 or total_polygons >= 400:
+            badge = {"title": "🚀 Active Contributor", "color": "emerald", "level": 2}
+        else:
+            badge = {"title": "🌱 Junior Annotator", "color": "slate", "level": 1}
+
+        # Overall Score
+        score = (approved_grids * 120) + (submitted_grids * 40) + int(total_polygons * 0.5)
+
+        leaderboard.append({
+            "user_id": u.id,
+            "full_name": u.full_name or u.username or f"User #{u.id}",
+            "role": u.role,
+            "email": u.email,
+            "total_grids": total_grids,
+            "approved_grids": approved_grids,
+            "submitted_grids": submitted_grids,
+            "in_progress_grids": in_progress_grids,
+            "total_polygons": total_polygons,
+            "total_area_ha": total_area_ha,
+            "approval_rate": approval_rate,
+            "score": score,
+            "badge": badge
+        })
+
+    # Sort by score descending
+    leaderboard.sort(key=lambda x: (x["score"], x["approved_grids"], x["total_polygons"]), reverse=True)
+
+    # Assign rank
+    for idx, item in enumerate(leaderboard, start=1):
+        item["rank"] = idx
+
+    return {
+        "leaderboard": leaderboard,
+        "total_active_mappers": len(leaderboard)
+    }
+
+
