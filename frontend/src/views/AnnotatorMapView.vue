@@ -318,26 +318,6 @@
             <span v-if="localDraftStatus" class="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 hidden lg:inline">💾 Draf Aman</span>
           </div>
 
-          <!-- Swipe Map (Bandingkan Tahun) Button -->
-          <button
-            @click="toggleSwipeMode"
-            class="px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-xs cursor-pointer"
-            :class="isSwipeMode ? 'bg-cyan-600 text-white border-cyan-600 ring-2 ring-cyan-400/30' : 'bg-white text-slate-700 hover:bg-slate-50 border-slate-300'"
-            title="Bandingkan citra satelit dua tahun berbeda dengan pembagi layar vertikal (Swipe Map)"
-          >
-            <Split :size="13" :class="isSwipeMode ? 'text-white' : 'text-cyan-600'" />
-            <span class="hidden md:inline">{{ isSwipeMode ? 'Tutup Swipe' : 'Swipe Citra' }}</span>
-          </button>
-
-          <!-- Leaderboard Button -->
-          <button
-            @click="openLeaderboardModal"
-            class="bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-300 transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
-            title="Buka Leaderboard Produktivitas Mapper & Pencapaian Tim"
-          >
-            <Trophy :size="13" class="text-amber-500" />
-            <span class="hidden lg:inline">Leaderboard</span>
-          </button>
 
           <!-- Tombol Buka Panel Citra & Spektral -->
           <button
@@ -579,20 +559,6 @@
                 <span class="text-[11px]">Pilih Poligon</span>
               </div>
               <span class="text-[9px] font-mono opacity-60 font-semibold">V</span>
-            </button>
-
-            <!-- Tool: AI Magic Wand (Click to Segment) -->
-            <button
-              @click="setDigitizeMode('ai_wand')"
-              class="px-2.5 py-1.5 rounded-md text-xs font-medium flex items-center justify-between transition-all cursor-pointer text-left"
-              :class="activeTool === 'ai_wand' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'"
-              title="AI Magic Wand: Klik objek tutupan lahan di peta untuk deteksi batas poligon otomatis (Shortcut: W)"
-            >
-              <div class="flex items-center gap-2">
-                <Wand2 :size="14" :class="activeTool === 'ai_wand' ? 'text-amber-300 animate-pulse' : 'text-indigo-600'" />
-                <span class="text-[11px] font-semibold">AI Magic Wand</span>
-              </div>
-              <span class="text-[9px] font-mono opacity-60 font-semibold">W</span>
             </button>
 
             <!-- Tool: Split with Line (Blade) -->
@@ -1342,92 +1308,6 @@
             >
               Abaikan
             </button>
-          </div>
-        </div>
-
-        <!-- Floating Banner: AI Magic Wand Pending Candidate (Poin 3) -->
-        <div
-          v-if="aiSegmentCandidate"
-          class="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 text-white px-4 py-2.5 rounded-xl shadow-xl flex items-center gap-3 text-xs border border-indigo-500 backdrop-blur-md animate-in fade-in slide-in-from-top-2"
-        >
-          <div class="w-7 h-7 rounded-lg bg-indigo-600 text-amber-300 flex items-center justify-center shrink-0">
-            <Wand2 :size="16" class="animate-pulse" />
-          </div>
-          <div>
-            <div class="font-bold text-xs text-white flex items-center gap-2">
-              <span>Hasil Segmentasi AI</span>
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-800 text-indigo-200 font-mono">
-                {{ aiSegmentCandidate.properties?.class_name || 'Tutupan Lahan' }}
-              </span>
-              <span class="text-[10px] text-slate-400">
-                {{ aiSegmentCandidate.properties?.area_ha || 0 }} ha
-              </span>
-            </div>
-            <div class="text-[10px] text-slate-300">
-              Tekan Enter untuk memasukkan poligon, atau Esc untuk membatalkan
-            </div>
-          </div>
-          <div class="flex items-center gap-1.5 ml-2">
-            <button
-              @click="acceptAiCandidate"
-              class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1"
-            >
-              <Check :size="13" />
-              <span>Terima (Enter)</span>
-            </button>
-            <button
-              @click="cancelAiCandidate"
-              class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
-            >
-              <X :size="13" />
-              <span>Batal (Esc)</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Swipe Map Overlay: Draggable Split Slider and Top Year Tags (Poin 2) -->
-        <div
-          v-if="isSwipeMode"
-          class="pointer-events-none absolute inset-0 z-20 overflow-hidden"
-        >
-          <!-- Left Side Label Tag -->
-          <div class="pointer-events-auto absolute top-3 left-4 bg-slate-900/90 text-white px-3 py-1 rounded-lg text-xs font-bold shadow-lg border border-slate-700 backdrop-blur-sm flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-            <span>Kiri (Tahun {{ swipeLeftYear }})</span>
-            <select
-              v-model.number="swipeLeftYear"
-              @change="updateSwipeLayers"
-              class="bg-slate-800 text-slate-200 text-[11px] rounded px-1.5 py-0.5 border border-slate-600 cursor-pointer"
-            >
-              <option :value="2022">2022</option>
-              <option :value="2025">2025</option>
-            </select>
-          </div>
-
-          <!-- Right Side Label Tag -->
-          <div class="pointer-events-auto absolute top-3 right-4 bg-slate-900/90 text-white px-3 py-1 rounded-lg text-xs font-bold shadow-lg border border-slate-700 backdrop-blur-sm flex items-center gap-2">
-            <span>Kanan (Tahun {{ swipeRightYear }})</span>
-            <select
-              v-model.number="swipeRightYear"
-              @change="updateSwipeLayers"
-              class="bg-slate-800 text-slate-200 text-[11px] rounded px-1.5 py-0.5 border border-slate-600 cursor-pointer"
-            >
-              <option :value="2022">2022</option>
-              <option :value="2025">2025</option>
-            </select>
-            <span class="w-2 h-2 rounded-full bg-amber-400"></span>
-          </div>
-
-          <!-- Draggable Divider Line -->
-          <div
-            class="pointer-events-auto absolute top-0 bottom-0 w-1 bg-white shadow-[0_0_12px_rgba(0,0,0,0.6)] cursor-ew-resize flex items-center justify-center select-none"
-            :style="{ left: `${swipePosition}%` }"
-            @mousedown="onSwipeMouseDown"
-          >
-            <!-- Handle Button in center -->
-            <div class="w-8 h-8 rounded-full bg-white text-slate-800 shadow-xl border-2 border-slate-700 flex items-center justify-center cursor-ew-resize hover:scale-110 active:scale-95 transition-transform">
-              <Split :size="16" class="text-slate-800" />
-            </div>
           </div>
         </div>
 
@@ -2560,98 +2440,6 @@
           <button
             @click="showHistoryModal = false"
             class="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl cursor-pointer"
-          >
-            Tutup
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════════ -->
-    <!-- LEADERBOARD & MAPPER ANALYTICS MODAL (Poin 6)                       -->
-    <!-- ═══════════════════════════════════════════════════════════════════ -->
-    <div
-      v-if="showLeaderboardModal"
-      class="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150"
-    >
-      <div class="w-full max-w-3xl bg-white border border-slate-200 rounded-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden text-slate-800">
-        <!-- Header -->
-        <div class="px-6 py-4 bg-gradient-to-r from-amber-500 to-amber-600 text-white flex items-center justify-between shrink-0">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center text-white">
-              <Trophy :size="22" />
-            </div>
-            <div>
-              <h2 class="text-lg font-black tracking-tight">Leaderboard Mapper GEOSTEVIA</h2>
-              <p class="text-xs text-amber-100">Produktivitas digitasi, luas tutupan lahan, dan approval rating tim</p>
-            </div>
-          </div>
-          <button
-            @click="showLeaderboardModal = false"
-            class="w-8 h-8 rounded-lg bg-black/10 hover:bg-black/20 flex items-center justify-center text-white cursor-pointer transition-colors"
-          >
-            <X :size="16" />
-          </button>
-        </div>
-
-        <!-- Leaderboard Table Body -->
-        <div class="p-6 overflow-y-auto flex-1">
-          <div v-if="leaderboardLoading" class="py-12 flex flex-col items-center justify-center text-slate-400 gap-2">
-            <RotateCw :size="24" class="animate-spin text-amber-500" />
-            <span class="text-xs font-medium">Memuat statistik leaderboard...</span>
-          </div>
-          <div v-else-if="leaderboardList.length === 0" class="py-12 text-center text-slate-500 text-xs">
-            Belum ada data aktivitas digitasi yang tercatat.
-          </div>
-          <div v-else class="space-y-2">
-            <div
-              v-for="(item, idx) in leaderboardList"
-              :key="item.user_id"
-              class="p-3.5 rounded-xl border flex items-center justify-between gap-4 transition-all hover:shadow-xs"
-              :class="idx === 0 ? 'bg-amber-50/70 border-amber-300 ring-1 ring-amber-300/50' : idx === 1 ? 'bg-slate-50 border-slate-300' : idx === 2 ? 'bg-orange-50/50 border-orange-200' : 'bg-white border-slate-200'"
-            >
-              <div class="flex items-center gap-3.5 min-w-0">
-                <div
-                  class="w-8 h-8 rounded-full font-black text-xs flex items-center justify-center shrink-0"
-                  :class="idx === 0 ? 'bg-amber-500 text-white shadow-xs' : idx === 1 ? 'bg-slate-400 text-white' : idx === 2 ? 'bg-orange-400 text-white' : 'bg-slate-100 text-slate-600'"
-                >
-                  {{ idx + 1 }}
-                </div>
-                <div class="min-w-0">
-                  <div class="font-bold text-sm text-slate-900 truncate flex items-center gap-2">
-                    <span>{{ item.full_name || item.username }}</span>
-                    <span v-if="idx === 0" class="text-amber-500 text-xs">👑 Juara 1</span>
-                  </div>
-                  <div class="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
-                    <span>{{ item.completed_grids }} Grid Selesai</span>
-                    <span>•</span>
-                    <span>{{ item.total_polygons }} Poligon</span>
-                    <span>•</span>
-                    <span>{{ item.total_area_ha }} Ha</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="flex items-center gap-4 shrink-0 text-right">
-                <div class="hidden sm:block">
-                  <div class="text-[10px] text-slate-400 font-medium">QC Approval</div>
-                  <div class="text-xs font-bold text-emerald-700">{{ item.approval_rate }}%</div>
-                </div>
-                <div>
-                  <div class="text-[10px] text-amber-700 font-bold uppercase tracking-wider">Skor Poin</div>
-                  <div class="text-base font-black text-amber-600 font-mono">{{ item.score.toLocaleString() }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Footer -->
-        <div class="px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 shrink-0">
-          <span>Skor dihitung dari: Grid selesai × 100 + Poligon × 1 + Luas Ha × 5</span>
-          <button
-            @click="showLeaderboardModal = false"
-            class="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-xl transition-colors cursor-pointer"
           >
             Tutup
           </button>
@@ -4082,8 +3870,6 @@ const handleKeydown = (e) => {
     const k = e.key.toLowerCase()
     if (k === 'v') {
       setDigitizeMode(null)
-    } else if (k === 'w') {
-      setDigitizeMode('ai_wand')
     } else if (k === 'c') {
       setDigitizeMode('split_line')
     } else if (k === 'x') {
