@@ -99,6 +99,16 @@
             <span>Catatan Evaluasi / QC ({{ tasksStore.currentTaskReviewPins.length }})</span>
           </span>
           <div class="flex items-center gap-1.5">
+            <button
+              @click="toggleReviewPinsVisibility"
+              class="px-2 py-0.5 rounded-lg text-[10px] font-semibold border flex items-center gap-1 transition-colors cursor-pointer"
+              :class="showReviewPins ? 'bg-white text-slate-700 border-amber-300 hover:bg-amber-100' : 'bg-slate-200 text-slate-500 border-slate-300 hover:bg-slate-300'"
+              :title="showReviewPins ? 'Sembunyikan Pin QC di Peta (Shortcut: Q)' : 'Tampilkan Pin QC di Peta (Shortcut: Q)'"
+            >
+              <Eye v-if="showReviewPins" :size="11" class="text-amber-800" />
+              <EyeOff v-else :size="11" class="text-slate-500" />
+              <span>{{ showReviewPins ? 'Pin Aktif (Q)' : 'Sembunyi (Q)' }}</span>
+            </button>
             <span
               class="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold shadow-2xs"
               :class="allPinsResolved ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-rose-100 text-rose-800 border border-rose-300 animate-pulse'"
@@ -619,6 +629,20 @@
                 <Trash2 :size="14" />
                 <span class="text-[11px]">Hapus</span>
               </div>
+            </button>
+
+            <!-- Tool: Snapping Toggle -->
+            <button
+              @click="toggleSnapping"
+              class="px-2.5 py-1.5 rounded-md text-xs font-medium flex items-center justify-between transition-all cursor-pointer text-left"
+              :class="isSnappingEnabled ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'text-slate-500 hover:bg-slate-100'"
+              :title="isSnappingEnabled ? 'Snapping Sudut Aktif (Tekan S untuk matikan)' : 'Snapping Mati / Mode Cepat (Tekan S untuk aktifkan)'"
+            >
+              <div class="flex items-center gap-2">
+                <Magnet :size="14" :class="isSnappingEnabled ? 'text-indigo-600' : 'text-slate-400'" />
+                <span class="text-[11px]">Snap Sudut: {{ isSnappingEnabled ? 'ON' : 'OFF' }}</span>
+              </div>
+              <span class="text-[9px] font-mono opacity-60 font-semibold">S</span>
             </button>
 
             <!-- Quick Undo & Redo in Toolbox -->
@@ -1542,43 +1566,77 @@
             </button>
           </div>
 
-          <!-- Polygon Cards -->
+          <!-- Search Filter for Polygons -->
+          <div class="relative">
+            <input
+              v-model="polySearchQuery"
+              type="text"
+              placeholder="Cari kelas / nomor poligon (misal: #10)..."
+              class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-indigo-400 focus:bg-white transition-all shadow-2xs font-sans"
+            />
+            <Search :size="13" class="absolute left-2.5 top-2.5 text-slate-400 pointer-events-none" />
+          </div>
+
+          <!-- Pagination Bar (if total > pageSize) -->
+          <div v-if="filteredAndPagedFeatures.totalPages > 1" class="flex items-center justify-between text-[11px] text-slate-500 bg-slate-50/80 px-2.5 py-1 rounded-xl border border-slate-200/80 font-mono">
+            <span>Hal {{ polyListPage }}/{{ filteredAndPagedFeatures.totalPages }} ({{ filteredAndPagedFeatures.total }} item)</span>
+            <div class="flex items-center gap-1">
+              <button
+                @click="polyListPage = Math.max(1, polyListPage - 1)"
+                :disabled="polyListPage <= 1"
+                class="p-1 rounded-md hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title="Halaman Sebelumnya"
+              >
+                <ChevronLeft :size="13" />
+              </button>
+              <button
+                @click="polyListPage = Math.min(filteredAndPagedFeatures.totalPages, polyListPage + 1)"
+                :disabled="polyListPage >= filteredAndPagedFeatures.totalPages"
+                class="p-1 rounded-md hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title="Halaman Berikutnya"
+              >
+                <ChevronRight :size="13" />
+              </button>
+            </div>
+          </div>
+
+          <!-- Polygon Cards (Virtualized Window) -->
           <div
-            v-for="(feat, idx) in features"
-            :key="feat._uiId || idx"
-            @mouseenter="highlightFeatureOnMap(idx, true)"
-            @mouseleave="highlightFeatureOnMap(idx, false)"
-            @click="toggleSelectPolygon(feat._uiId); flyToFeature(idx)"
+            v-for="item in filteredAndPagedFeatures.items"
+            :key="item.feat._uiId || item.originalIdx"
+            @mouseenter="highlightFeatureOnMap(item.originalIdx, true)"
+            @mouseleave="highlightFeatureOnMap(item.originalIdx, false)"
+            @click="toggleSelectPolygon(item.feat._uiId); flyToFeature(item.originalIdx)"
             class="p-2.5 bg-slate-50 border rounded-xl space-y-1 transition-all text-xs cursor-pointer select-none"
             :class="[
-              selectedPolyUiIds.has(feat._uiId)
+              selectedPolyUiIds.has(item.feat._uiId)
                 ? 'bg-cyan-50/90 border-cyan-400 shadow-xs ring-2 ring-cyan-400/40 text-cyan-950'
-                : (clickedFeatureIdx === idx ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/40' : 'border-slate-200 hover:border-slate-300 hover:bg-white')
+                : (clickedFeatureIdx === item.originalIdx ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/40' : 'border-slate-200 hover:border-slate-300 hover:bg-white')
             ]"
           >
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <input
                   type="checkbox"
-                  :checked="selectedPolyUiIds.has(feat._uiId)"
-                  @click.stop="toggleSelectPolygon(feat._uiId)"
+                  :checked="selectedPolyUiIds.has(item.feat._uiId)"
+                  @click.stop="toggleSelectPolygon(item.feat._uiId)"
                   class="w-4 h-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer shrink-0"
                 />
                 <div
                   class="w-3 h-3 rounded-sm border border-slate-300 shrink-0"
-                  :style="{ backgroundColor: feat.properties?.color || '#9CA3AF' }"
+                  :style="{ backgroundColor: item.feat.properties?.color || '#9CA3AF' }"
                 ></div>
-                <span class="font-bold text-slate-800 truncate max-w-[140px]">{{ feat.properties?.class_name || 'Belum Teridentifikasi' }}</span>
+                <span class="font-bold text-slate-800 truncate max-w-[140px]">{{ item.feat.properties?.class_name || 'Belum Teridentifikasi' }}</span>
               </div>
               <div class="flex items-center gap-1.5">
-                <span v-if="selectedPolyUiIds.has(feat._uiId)" class="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" title="Terpilih di peta"></span>
-                <span class="text-[10px] text-slate-400 font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">#{{ idx + 1 }}</span>
+                <span v-if="selectedPolyUiIds.has(item.feat._uiId)" class="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" title="Terpilih di peta"></span>
+                <span class="text-[10px] text-slate-400 font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">#{{ item.originalIdx + 1 }}</span>
               </div>
             </div>
 
             <div class="flex items-center justify-between text-[10px] text-slate-500 pt-0.5 pl-6">
-              <span class="font-mono">Luas: ~{{ Math.round((feat.properties?.area_sqm || 10000) / 10000) }} Ha</span>
-              <span v-if="feat.properties?.class_id === 0" class="text-amber-600 font-bold">⚠️ Belum di-assign</span>
+              <span class="font-mono">Luas: ~{{ Math.round((item.feat.properties?.area_sqm || 10000) / 10000) }} Ha</span>
+              <span v-if="item.feat.properties?.class_id === 0" class="text-amber-600 font-bold">⚠️ Belum di-assign</span>
             </div>
           </div>
         </div>
@@ -2904,7 +2962,8 @@ import {
   Minimize2,
   Move,
   Info,
-  Magnet
+  Magnet,
+  Search
 } from 'lucide-vue-next'
 import * as turf from '@turf/turf'
 import { useAuthStore } from '../stores/auth'
@@ -2926,6 +2985,32 @@ const availableRasterYears = ref([2025, 2022])
 const polygonOpacity = ref(0.6)
 const isToolboxCollapsed = ref(false)
 const rightTab = ref('classes') // 'classes' | 'polygons'
+const isSnappingEnabled = ref(true)
+const polyListPage = ref(1)
+const polyListPageSize = 40
+const polySearchQuery = ref('')
+
+const filteredAndPagedFeatures = computed(() => {
+  let list = (features.value || []).map((f, i) => ({ feat: f, originalIdx: i }))
+  if (polySearchQuery.value && polySearchQuery.value.trim()) {
+    const q = polySearchQuery.value.toLowerCase().trim()
+    list = list.filter(item => {
+      const cName = (item.feat.properties?.class_name || '').toLowerCase()
+      const idxStr = String(item.originalIdx + 1)
+      return cName.includes(q) || idxStr === q || `#${idxStr}` === q
+    })
+  }
+  const total = list.length
+  const totalPages = Math.max(1, Math.ceil(total / polyListPageSize))
+  const page = Math.min(Math.max(1, polyListPage.value), totalPages)
+  const start = (page - 1) * polyListPageSize
+  const items = list.slice(start, start + polyListPageSize)
+  return {
+    items,
+    total,
+    totalPages
+  }
+})
 
 // ─── IMAGERY ENHANCEMENT & SPECTRAL CONTROLS ─────────────
 const showImageryPanel = ref(false)
@@ -3647,6 +3732,10 @@ const handleKeydown = (e) => {
       setDigitizeMode('merge')
     } else if (k === 'e') {
       setDigitizeMode('edit')
+    } else if (k === 's') {
+      toggleSnapping()
+    } else if (k === 'q') {
+      toggleReviewPinsVisibility()
     }
   }
 }
@@ -3677,6 +3766,14 @@ const neighborFeaturesCount = ref(0)
 const isLoadingNeighbors = ref(false)
 
 // Review Pins (Catatan Supervisi / QC)
+const showReviewPins = ref(true)
+
+function toggleReviewPinsVisibility() {
+  showReviewPins.value = !showReviewPins.value
+  renderReviewPinsOnMap()
+  showToast(showReviewPins.value ? '📍 Pin Evaluasi QC Ditampilkan (Q)' : '👁️ Pin Evaluasi QC Disembunyikan (Q)')
+}
+
 const resolvedPinsCount = computed(() => {
   const pins = tasksStore.currentTaskReviewPins || []
   return pins.filter(p => p.status === 'RESOLVED').length
@@ -4092,13 +4189,36 @@ function updateMapScaleInfo() {
   mapScaleRatio.value = `1:${scaleDenom.toLocaleString('id-ID')}`
 }
 
+let lastCoordThrottleTime = 0
 function onMapMouseMove(e) {
+  const now = performance.now()
+  if (now - lastCoordThrottleTime < 60) return // Throttled to ~16 FPS to prevent Vue reactivity lockup
+  lastCoordThrottleTime = now
   if (e && e.latlng) {
     cursorCoords.value = {
       lat: e.latlng.lat.toFixed(5),
       lng: e.latlng.lng.toFixed(5)
     }
   }
+}
+
+function updateSnappingOptions() {
+  if (!map || !map.pm) return
+  map.pm.setGlobalOptions({
+    snappable: isSnappingEnabled.value,
+    snapDistance: 12,
+    snapSegment: isSnappingEnabled.value,
+    snapVertex: true,
+    snapMiddleMarkers: false,
+    allowSelfIntersection: true,
+    tooltips: false
+  })
+}
+
+function toggleSnapping() {
+  isSnappingEnabled.value = !isSnappingEnabled.value
+  updateSnappingOptions()
+  showToast(isSnappingEnabled.value ? '🧲 Snapping Sudut & Garis Aktif' : '⭕ Snapping Dinonaktifkan (Mode Cepat)')
 }
 
 const initMap = () => {
@@ -4126,6 +4246,9 @@ const initMap = () => {
 
   // Event Listeners for Dynamic Scale and Coordinates
   map.on('zoomend moveend', updateMapScaleInfo)
+  map.on('zoomend', () => {
+    renderReviewPinsOnMap()
+  })
   map.on('mousemove', onMapMouseMove)
   updateMapScaleInfo()
 
@@ -4144,15 +4267,7 @@ const initMap = () => {
     }
   })
 
-  map.pm.setGlobalOptions({
-    snappable: true,
-    snapDistance: 20,
-    snapSegment: true,
-    snapVertex: true,
-    snapMiddleMarkers: false,
-    allowSelfIntersection: true,
-    tooltips: false
-  })
+  updateSnappingOptions()
 
   // Freehand / Stream mode mouse bindings
   map.on('mousedown', onMapMouseDown)
@@ -4390,22 +4505,24 @@ const setDigitizeMode = (mode, force = false) => {
   }
 
   // Always close any open popup and clear selection
-  map.closePopup()
+  try { map.closePopup() } catch (_) {}
 
-  // Disable any active Geoman modes
-  map.pm.disableDraw()
-  map.pm.disableGlobalEditMode()
-  map.pm.disableGlobalRemovalMode()
-  map.pm.disableGlobalDragMode()
+  // Safely disable any active Geoman modes
+  try { if (map.pm?.globalDrawModeEnabled?.()) map.pm.disableDraw() } catch (_) {}
+  try { if (map.pm?.globalEditEnabled?.()) map.pm.disableGlobalEditMode() } catch (_) {}
+  try { if (map.pm?.globalRemovalModeEnabled?.()) map.pm.disableGlobalRemovalMode() } catch (_) {}
+  try { if (map.pm?.globalDragModeEnabled?.()) map.pm.disableGlobalDragMode() } catch (_) {}
 
   if (!force && activeTool.value === mode) {
     activeTool.value = null
+    renderReviewPinsOnMap()
     showToast('Alat Aktif: Pilih Poligon')
     return
   }
 
   activeTool.value = mode
   selectedForMerge.value = []
+  renderReviewPinsOnMap()
 
   switch (mode) {
     case null:
@@ -4419,9 +4536,10 @@ const setDigitizeMode = (mode, force = false) => {
     case 'split_line':
       showToast('Alat Aktif: Potong Garis (Split). Tarik garis melintasi poligon.')
       map.pm.enableDraw('Line', {
-        snappable: true,
-        snapDistance: 6,
-        snapSegment: true,
+        snappable: isSnappingEnabled.value,
+        snapDistance: 12,
+        snapSegment: isSnappingEnabled.value,
+        snapVertex: true,
         tooltips: false
       })
       break
@@ -4429,9 +4547,10 @@ const setDigitizeMode = (mode, force = false) => {
     case 'split_poly':
       showToast('Alat Aktif: Potong Poligon (Cookie Cutter).')
       map.pm.enableDraw('Polygon', {
-        snappable: true,
-        snapDistance: 6,
-        snapSegment: true,
+        snappable: isSnappingEnabled.value,
+        snapDistance: 12,
+        snapSegment: isSnappingEnabled.value,
+        snapVertex: true,
         tooltips: false
       })
       break
@@ -4453,9 +4572,9 @@ const setDigitizeMode = (mode, force = false) => {
             targetLyr._preEditGeom = JSON.parse(JSON.stringify(targetLyr.toGeoJSON().geometry))
           } catch (_) {}
           targetLyr.pm.enable({
-            snappable: true,
-            snapDistance: 20,
-            snapSegment: true,
+            snappable: isSnappingEnabled.value,
+            snapDistance: 15,
+            snapSegment: false,
             snapVertex: true,
             snapMiddleMarkers: false,
             allowSelfIntersection: true
@@ -4465,6 +4584,10 @@ const setDigitizeMode = (mode, force = false) => {
           break
         }
       }
+      if (features.value.length > 50) {
+        showToast('Pilih salah satu poligon di peta terlebih dahulu untuk mengedit titik simpulnya.')
+        break
+      }
       if (featureGroup) {
         featureGroup.eachLayer(l => {
           try {
@@ -4473,9 +4596,9 @@ const setDigitizeMode = (mode, force = false) => {
         })
       }
       map.pm.enableGlobalEditMode({
-        snappable: true,
-        snapDistance: 20,
-        snapSegment: true,
+        snappable: isSnappingEnabled.value,
+        snapDistance: 12,
+        snapSegment: false,
         snapVertex: true,
         snapMiddleMarkers: false,
         allowSelfIntersection: true,
@@ -4493,6 +4616,94 @@ const setDigitizeMode = (mode, force = false) => {
   }
 }
 
+// ─── HIGH-PERFORMANCE DELTA STATE UPDATER ─────────────────
+// Avoids full network re-fetch & complete DOM teardown of 800+ polygons
+const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures = []) => {
+  if (!featureGroup || !map) return false
+
+  const classesMap = {}
+  annotationsStore.classes.forEach(c => { classesMap[c.id] = c })
+
+  // 1. Remove deleted layers from Leaflet map & local features array
+  if (deletedIds && deletedIds.length > 0) {
+    const delSet = new Set(deletedIds)
+    const layersToRemove = []
+    featureGroup.eachLayer(l => {
+      const fid = l.feature?.id || l.feature?.properties?.id
+      if (fid && delSet.has(fid)) {
+        layersToRemove.push(l)
+      }
+    })
+    layersToRemove.forEach(l => featureGroup.removeLayer(l))
+
+    features.value = features.value.filter(f => {
+      const fid = f.id || f.properties?.id
+      return !fid || !delSet.has(fid)
+    })
+  }
+
+  // 2. Handle updated features (e.g. reclassified polygons)
+  if (updatedFeatures && updatedFeatures.length > 0) {
+    const upMap = new Map()
+    updatedFeatures.forEach(uf => {
+      const fid = uf.id || uf.properties?.id
+      if (fid) upMap.set(fid, uf)
+    })
+
+    featureGroup.eachLayer(l => {
+      const fid = l.feature?.id || l.feature?.properties?.id
+      if (fid && upMap.has(fid)) {
+        const uf = upMap.get(fid)
+        l.feature = uf
+        const cls = classesMap[uf.properties?.class_id]
+        const color = cls?.color || '#9CA3AF'
+        if (l.setStyle) {
+          l.setStyle({ color, fillColor: color, fillOpacity: polygonOpacity.value, weight: 2 })
+        }
+      }
+    })
+
+    features.value = features.value.map(f => {
+      const fid = f.id || f.properties?.id
+      if (fid && upMap.has(fid)) {
+        return upMap.get(fid)
+      }
+      return f
+    })
+  }
+
+  // 3. Add created features
+  if (createdFeatures && createdFeatures.length > 0) {
+    createdFeatures.forEach(feat => {
+      feat._uiId = getFeatureUiId(feat)
+      const geojsonLayer = L.geoJSON(feat, {
+        style: () => {
+          const cls = classesMap[feat.properties?.class_id]
+          const color = cls?.color || '#9CA3AF'
+          return { color, fillColor: color, fillOpacity: polygonOpacity.value, weight: 2 }
+        }
+      })
+
+      geojsonLayer.eachLayer((l) => {
+        l.feature = feat
+        l._uiId = feat._uiId
+        const cls = classesMap[feat.properties?.class_id]
+        if (cls) l.feature.properties.color = cls.color
+        else l.feature.properties.color = '#9CA3AF'
+        bindLayerEvents(l)
+        featureGroup.addLayer(l)
+      })
+
+      features.value.push(feat)
+    })
+  }
+
+  // 4. Sync store reference and update history stack
+  annotationsStore.currentFeatures = features.value
+  pushHistory()
+  return true
+}
+
 // Handle Line Split
 const handleSplitByLine = async (lineGeom) => {
   if (!selectedTaskId.value) return
@@ -4505,7 +4716,11 @@ const handleSplitByLine = async (lineGeom) => {
   try {
     const res = await api.splitByLine(selectedTaskId.value, lineGeom, null, newClass?.id || 0)
     showToast(res.data?.message || 'Poligon berhasil dipotong!')
-    await loadTaskData(selectedTaskId.value, true)
+    if (res.data?.deleted_ids || res.data?.created_features) {
+      applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
+    } else {
+      await loadTaskData(selectedTaskId.value, true)
+    }
   } catch (err) {
     alert(err.response?.data?.detail || 'Gagal memotong poligon. Pastikan garis melintasi batas poligon.')
   } finally {
@@ -4526,7 +4741,11 @@ const handleSplitByPolygon = async (cuttingGeom) => {
   try {
     const res = await api.splitByPolygon(selectedTaskId.value, cuttingGeom, null, newClass?.id || 0)
     showToast(res.data?.message || 'Poligon berhasil dipisah menjadi bagian mandiri!')
-    await loadTaskData(selectedTaskId.value, true)
+    if (res.data?.deleted_ids || res.data?.created_features) {
+      applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
+    } else {
+      await loadTaskData(selectedTaskId.value, true)
+    }
   } catch (err) {
     alert(err.response?.data?.detail || 'Gagal memotong area. Pastikan poligon pemotong beririsan dengan poligon target.')
   } finally {
@@ -4635,7 +4854,11 @@ const executeMerge = async () => {
     if (annotationIds.length === selectedForMerge.value.length) {
       const res = await api.mergePolygons(selectedTaskId.value, annotationIds, targetClassId)
       showToast(res.data?.message || `Poligon berhasil digabungkan menjadi '${targetClassName}'!`)
-      await loadTaskData(selectedTaskId.value, true)
+      if (res.data?.deleted_ids || res.data?.created_features) {
+        applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
+      } else {
+        await loadTaskData(selectedTaskId.value, true)
+      }
     } else {
       // Fallback: merge using Turf client-side union
       const validPolys = selectedForMerge.value.map(f => {
@@ -6716,8 +6939,12 @@ const executeSmartDelete = async (targetFeat, targetIdx) => {
         const res = await api.smartDeletePolygon(selectedTaskId.value, targetId, neighborId || null)
         showToast(`✨ ${res.data?.message || 'Poligon berhasil dihapus!'}`)
         backendSuccess = true
-        await loadTaskData(selectedTaskId.value, true)
-        pushHistory()
+        if (res.data?.deleted_ids || res.data?.updated_features || res.data?.created_features) {
+          applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
+        } else {
+          await loadTaskData(selectedTaskId.value, true)
+          pushHistory()
+        }
       } catch (backendErr) {
         console.warn('Backend smart delete failed, falling back to client-side turf:', backendErr)
       }
@@ -7064,7 +7291,16 @@ const renderReviewPinsOnMap = () => {
   if (!reviewPinsLayerGroup || !map) return
   reviewPinsLayerGroup.clearLayers()
 
+  if (!showReviewPins.value) return
+
   const pins = tasksStore.currentTaskReviewPins || []
+  const isDigitizingActive = activeTool.value !== null
+  const currentZoom = map.getZoom ? map.getZoom() : 16
+
+  // Scale pin according to zoom: at scale ~300m (zoom <= 16), keep it a micro-target (13px)
+  const pinSize = currentZoom >= 17 ? 16 : 13
+  const halfSize = Math.floor(pinSize / 2)
+
   pins.forEach(pin => {
     const isResolved = pin.status === 'RESOLVED'
 
@@ -7073,28 +7309,35 @@ const renderReviewPinsOnMap = () => {
     const categoryName = match ? match[1] : null
     const cleanNote = match ? match[2] : pin.note
 
+    // Micro target pin styling:
+    // When digitizing is active, pins switch to semi-transparent ghost mode and ignore pointer events
+    const ghostClass = isDigitizingActive ? 'opacity-35 pointer-events-none' : 'hover:scale-125 cursor-pointer shadow-xs'
+
     const markerHtml = isResolved
-      ? `<div class="relative flex items-center justify-center w-7 h-7 rounded-full bg-emerald-600 text-white shadow-md border-2 border-white cursor-pointer hover:scale-110 transition-transform" title="Selesai Diperbaiki">
-           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+      ? `<div class="relative flex items-center justify-center rounded-full bg-emerald-600 text-white border-[1.5px] border-white transition-all ${ghostClass}" style="width: ${pinSize}px; height: ${pinSize}px;" title="QC Selesai: ${cleanNote}">
+           <div class="w-1 h-1 bg-white rounded-full"></div>
          </div>`
-      : `<div class="relative flex items-center justify-center w-8 h-8 rounded-full bg-rose-600 text-white shadow-xl border-2 border-white cursor-pointer animate-pulse hover:scale-110 transition-transform" title="Catatan Evaluasi / QC">
-           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-           <span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border border-white"></span>
+      : `<div class="relative flex items-center justify-center rounded-full bg-rose-600 text-white border-[1.5px] border-white transition-all ${ghostClass}" style="width: ${pinSize}px; height: ${pinSize}px;" title="QC: ${cleanNote}">
+           <div class="w-1.5 h-1.5 bg-white rounded-full"></div>
+           <span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-amber-400 rounded-full border border-white"></span>
          </div>`
 
     const customIcon = L.divIcon({
       html: markerHtml,
-      className: 'annotator-review-pin-marker',
-      iconSize: [32, 32],
-      iconAnchor: [16, 16],
-      popupAnchor: [0, -18]
+      className: `annotator-review-pin-marker ${isDigitizingActive ? 'pointer-events-none' : ''}`,
+      iconSize: [pinSize, pinSize],
+      iconAnchor: [halfSize, halfSize],
+      popupAnchor: [0, -halfSize - 6]
     })
 
-    const marker = L.marker([pin.lat, pin.lon], { icon: customIcon })
+    const marker = L.marker([pin.lat, pin.lon], {
+      icon: customIcon,
+      interactive: !isDigitizingActive // During digitizing/cutting, mouse clicks pass directly to map vertices
+    })
 
     const statusBadge = isResolved
       ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-300">✓ Sudah Selesai</span>`
-      : `<span class="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-rose-300 animate-pulse">● Perlu Diperbaiki</span>`
+      : `<span class="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-rose-300">● Perlu Diperbaiki</span>`
 
     const categoryBadge = categoryName
       ? `<span class="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full">🏷️ ${categoryName}</span>`
@@ -7265,8 +7508,31 @@ const deleteEvaluationPin = async (pinId) => {
 
 const focusOnReviewPin = (pin) => {
   if (!map) return
+  if (!showReviewPins.value) {
+    showReviewPins.value = true
+    renderReviewPinsOnMap()
+  }
   map.setView([pin.lat, pin.lon], Math.max(map.getZoom(), 15), { animate: true })
+  setTimeout(() => {
+    if (reviewPinsLayerGroup) {
+      reviewPinsLayerGroup.eachLayer(layer => {
+        const latlng = layer.getLatLng?.()
+        if (latlng && Math.abs(latlng.lat - pin.lat) < 0.0001 && Math.abs(latlng.lng - pin.lon) < 0.0001) {
+          layer.openPopup?.()
+        }
+      })
+    }
+  }, 250)
 }
+
+// Automatically sync review pins when digitizing tool or store data changes
+watch(activeTool, () => {
+  renderReviewPinsOnMap()
+})
+
+watch(() => tasksStore.currentTaskReviewPins, () => {
+  renderReviewPinsOnMap()
+}, { deep: true })
 
 const bestCopyCandidate = computed(() => {
   if (features.value.length > 0) return null

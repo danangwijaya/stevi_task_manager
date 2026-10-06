@@ -1878,6 +1878,9 @@ def split_by_polygon(
 
     split_occurred = False
     new_created_count = 0
+    deleted_ids = []
+    new_annotations_list = []
+    updated_annotations_list = []
 
     # CASE 1: Grid has NO annotations yet! Slice directly from task grid polygon
     if len(annotations) == 0:
@@ -1890,53 +1893,66 @@ def split_by_polygon(
                 for ip in inter_polys:
                     ip_geojson = mapping(ip)
                     area_sqm = ip.area * (111320.0 ** 2)
-                    db.add(Annotation(
+                    ann_ip = Annotation(
                         task_grid_id=req.task_grid_id,
                         user_id=current_user.id,
                         class_id=new_class_id,
                         class_name=new_class_name,
                         geom_geojson=json.dumps(ip_geojson),
                         area_sqm=area_sqm
-                    ))
+                    )
+                    db.add(ann_ip)
+                    new_annotations_list.append(ann_ip)
                     new_created_count += 1
                 
                 # Add difference pieces (remaining area marked as unclassified 0)
                 for dp in diff_polys:
                     dp_geojson = mapping(dp)
                     area_sqm = dp.area * (111320.0 ** 2)
-                    db.add(Annotation(
+                    ann_dp = Annotation(
                         task_grid_id=req.task_grid_id,
                         user_id=current_user.id,
                         class_id=0,
                         class_name="Belum Teridentifikasi",
                         geom_geojson=json.dumps(dp_geojson),
                         area_sqm=area_sqm
-                    ))
+                    )
+                    db.add(ann_dp)
+                    new_annotations_list.append(ann_dp)
                 split_occurred = True
         else:
             cut_polys = _extract_polygons(cutter_in_grid)
             for cp in cut_polys:
                 area_sqm = cp.area * (111320.0 ** 2)
-                db.add(Annotation(
+                ann_cp = Annotation(
                     task_grid_id=req.task_grid_id,
                     user_id=current_user.id,
                     class_id=new_class_id,
                     class_name=new_class_name,
                     geom_geojson=json.dumps(mapping(cp)),
                     area_sqm=area_sqm
-                ))
+                )
+                db.add(ann_cp)
+                new_annotations_list.append(ann_cp)
                 new_created_count += 1
             if new_created_count > 0:
                 split_occurred = True
 
     # CASE 2: Grid has existing annotations
     else:
+        from shapely.geometry import box
+        cutter_box = box(*cutter.bounds)
+
         for ann in annotations:
             try:
                 poly = shape(json.loads(ann.geom_geojson))
                 if not poly.is_valid:
                     poly = poly.buffer(0)
                     
+                # Fast BBox check to skip distant polygons instantly
+                if not cutter_box.intersects(poly):
+                    continue
+
                 if not poly.intersects(cutter):
                     continue
 
@@ -1948,6 +1964,7 @@ def split_by_polygon(
 
                 if inter_polys and diff_polys:
                     split_occurred = True
+                    deleted_ids.append(ann.id)
                     # Remove original polygon record (safeguard review pins)
                     db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
                     db.delete(ann)
@@ -1965,6 +1982,7 @@ def split_by_polygon(
                             area_sqm=area_sqm
                         )
                         db.add(new_dp)
+                        new_annotations_list.append(new_dp)
 
                     # Add intersection pieces (assigned with new_class_id)
                     for ip in inter_polys:
@@ -1979,6 +1997,7 @@ def split_by_polygon(
                             area_sqm=area_sqm
                         )
                         db.add(new_ip)
+                        new_annotations_list.append(new_ip)
                         new_created_count += 1
                 elif inter_polys and not diff_polys:
                     # Polygon is completely enclosed by cutter -> reclassify
@@ -1987,6 +2006,7 @@ def split_by_polygon(
                     ann.class_name = new_class_name
                     ann.user_id = current_user.id
                     new_created_count += 1
+                    updated_annotations_list.append(ann)
             except Exception:
                 continue
 
@@ -1997,7 +2017,50 @@ def split_by_polygon(
         task.status = "IN_PROGRESS"
 
     db.commit()
-    return {"message": "Poligon berhasil dipisah menjadi bagian independen!", "split_count": new_created_count}
+
+    created_features = []
+    for na in new_annotations_list:
+        db.refresh(na)
+        created_features.append({
+            "type": "Feature",
+            "id": na.id,
+            "geometry": json.loads(na.geom_geojson),
+            "properties": {
+                "id": na.id,
+                "class_id": na.class_id,
+                "class_name": na.class_name,
+                "user_id": na.user_id,
+                "author_name": current_user.full_name or "Unknown",
+                "area_sqm": na.area_sqm,
+                "created_at": na.created_at.isoformat() if na.created_at else None
+            }
+        })
+
+    updated_features_res = []
+    for ua in updated_annotations_list:
+        db.refresh(ua)
+        updated_features_res.append({
+            "type": "Feature",
+            "id": ua.id,
+            "geometry": json.loads(ua.geom_geojson),
+            "properties": {
+                "id": ua.id,
+                "class_id": ua.class_id,
+                "class_name": ua.class_name,
+                "user_id": ua.user_id,
+                "author_name": current_user.full_name or "Unknown",
+                "area_sqm": ua.area_sqm,
+                "created_at": ua.created_at.isoformat() if ua.created_at else None
+            }
+        })
+
+    return {
+        "message": "Poligon berhasil dipisah menjadi bagian independen!",
+        "split_count": new_created_count,
+        "deleted_ids": deleted_ids,
+        "created_features": created_features,
+        "updated_features": updated_features_res
+    }
 
 
 @router.post("/split-by-line")
@@ -2043,6 +2106,8 @@ def split_by_line(
 
     split_occurred = False
     extended_blade = _extend_line(blade, factor=0.15)
+    deleted_ids = []
+    new_annotations_list = []
 
     # CASE 1: Grid has NO annotations yet! Slices task grid itself
     if len(annotations) == 0 and task_poly:
@@ -2055,35 +2120,52 @@ def split_by_line(
                     split_occurred = True
                     p0 = pieces[0]
                     area_sqm = p0.area * (111320.0 ** 2)
-                    db.add(Annotation(
+                    ann_p0 = Annotation(
                         task_grid_id=req.task_grid_id,
                         user_id=current_user.id,
                         class_id=0,
                         class_name="Belum Teridentifikasi",
                         geom_geojson=json.dumps(mapping(p0)),
                         area_sqm=area_sqm
-                    ))
+                    )
+                    db.add(ann_p0)
+                    new_annotations_list.append(ann_p0)
                     for p in pieces[1:]:
                         area_sqm = p.area * (111320.0 ** 2)
-                        db.add(Annotation(
+                        ann_pi = Annotation(
                             task_grid_id=req.task_grid_id,
                             user_id=current_user.id,
                             class_id=new_class_id,
                             class_name=new_class_name,
                             geom_geojson=json.dumps(mapping(p)),
                             area_sqm=area_sqm
-                        ))
+                        )
+                        db.add(ann_pi)
+                        new_annotations_list.append(ann_pi)
             except Exception:
                 pass
 
     # CASE 2: Grid has existing annotations
     if not split_occurred and annotations:
+        from shapely.geometry import box
+        blade_bounds = blade.bounds
+        ext_bounds = extended_blade.bounds
+        bbox_minx = min(blade_bounds[0], ext_bounds[0])
+        bbox_miny = min(blade_bounds[1], ext_bounds[1])
+        bbox_maxx = max(blade_bounds[2], ext_bounds[2])
+        bbox_maxy = max(blade_bounds[3], ext_bounds[3])
+        blade_box = box(bbox_minx, bbox_miny, bbox_maxx, bbox_maxy)
+
         for ann in annotations:
             try:
                 poly = shape(json.loads(ann.geom_geojson))
                 if not poly.is_valid:
                     poly = poly.buffer(0)
                     
+                # Fast BBox check to skip distant polygons instantly
+                if not blade_box.intersects(poly):
+                    continue
+
                 if not poly.intersects(blade) and not poly.intersects(extended_blade):
                     continue
 
@@ -2099,6 +2181,7 @@ def split_by_line(
 
                 if len(pieces) > 1:
                     split_occurred = True
+                    deleted_ids.append(ann.id)
                     # Remove original polygon record (safeguard review pins)
                     db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
                     db.delete(ann)
@@ -2106,26 +2189,30 @@ def split_by_line(
                     # Piece 0 gets original class
                     p0 = pieces[0]
                     area_sqm = p0.area * (111320.0 ** 2)
-                    db.add(Annotation(
+                    ann_p0 = Annotation(
                         task_grid_id=req.task_grid_id,
                         user_id=current_user.id,
                         class_id=ann.class_id,
                         class_name=ann.class_name,
                         geom_geojson=json.dumps(mapping(p0)),
                         area_sqm=area_sqm
-                    ))
+                    )
+                    db.add(ann_p0)
+                    new_annotations_list.append(ann_p0)
 
                     # Remaining pieces get new class
                     for p in pieces[1:]:
                         area_sqm = p.area * (111320.0 ** 2)
-                        db.add(Annotation(
+                        ann_pi = Annotation(
                             task_grid_id=req.task_grid_id,
                             user_id=current_user.id,
                             class_id=new_class_id,
                             class_name=new_class_name,
                             geom_geojson=json.dumps(mapping(p)),
                             area_sqm=area_sqm
-                        ))
+                        )
+                        db.add(ann_pi)
+                        new_annotations_list.append(ann_pi)
             except Exception:
                 continue
 
@@ -2136,7 +2223,30 @@ def split_by_line(
         task.status = "IN_PROGRESS"
 
     db.commit()
-    return {"message": "Poligon berhasil dipotong dengan garis pemisah!"}
+
+    created_features = []
+    for na in new_annotations_list:
+        db.refresh(na)
+        created_features.append({
+            "type": "Feature",
+            "id": na.id,
+            "geometry": json.loads(na.geom_geojson),
+            "properties": {
+                "id": na.id,
+                "class_id": na.class_id,
+                "class_name": na.class_name,
+                "user_id": na.user_id,
+                "author_name": current_user.full_name or "Unknown",
+                "area_sqm": na.area_sqm,
+                "created_at": na.created_at.isoformat() if na.created_at else None
+            }
+        })
+
+    return {
+        "message": "Poligon berhasil dipotong dengan garis pemisah!",
+        "deleted_ids": deleted_ids,
+        "created_features": created_features
+    }
 
 
 @router.post("/merge")
@@ -2216,20 +2326,46 @@ def merge_polygons(
     for ann in annotations:
         db.delete(ann)
 
+    new_merged_annotations = []
     # Add merged annotation(s)
     for mp in merged_polys:
         area_sqm = mp.area * (111320.0 ** 2)
-        db.add(Annotation(
+        m_ann = Annotation(
             task_grid_id=req.task_grid_id,
             user_id=current_user.id,
             class_id=target_class_id,
             class_name=target_class_name,
             geom_geojson=json.dumps(mapping(mp)),
             area_sqm=area_sqm
-        ))
+        )
+        db.add(m_ann)
+        new_merged_annotations.append(m_ann)
 
     db.commit()
-    return {"message": f"Berhasil menggabungkan {len(annotations)} poligon menjadi 1 poligon '{target_class_name}'!"}
+
+    created_features = []
+    for ma in new_merged_annotations:
+        db.refresh(ma)
+        created_features.append({
+            "type": "Feature",
+            "id": ma.id,
+            "geometry": json.loads(ma.geom_geojson),
+            "properties": {
+                "id": ma.id,
+                "class_id": ma.class_id,
+                "class_name": ma.class_name,
+                "user_id": ma.user_id,
+                "author_name": current_user.full_name or "Unknown",
+                "area_sqm": ma.area_sqm,
+                "created_at": ma.created_at.isoformat() if ma.created_at else None
+            }
+        })
+
+    return {
+        "message": f"Berhasil menggabungkan {len(annotations)} poligon menjadi 1 poligon '{target_class_name}'!",
+        "deleted_ids": ann_ids,
+        "created_features": created_features
+    }
 
 
 @router.post("/grid/{task_grid_id}/merge")
@@ -2355,22 +2491,63 @@ def smart_delete_polygon(
     target_neighbor_ann.area_sqm = area_sqm
 
     # If unary_union split into multiple distinct parts (e.g. multi-polygon), add remaining
+    extra_annotations = []
     for extra_poly in merged_polys[1:]:
         extra_area = extra_poly.area * (111320.0 ** 2)
-        db.add(Annotation(
+        ex_ann = Annotation(
             task_grid_id=task_grid_id,
             user_id=current_user.id,
             class_id=target_neighbor_ann.class_id,
             class_name=target_neighbor_ann.class_name,
             geom_geojson=json.dumps(mapping(extra_poly)),
             area_sqm=extra_area
-        ))
+        )
+        db.add(ex_ann)
+        extra_annotations.append(ex_ann)
 
     db.commit()
+    db.refresh(target_neighbor_ann)
+
+    updated_features_res = [{
+        "type": "Feature",
+        "id": target_neighbor_ann.id,
+        "geometry": json.loads(target_neighbor_ann.geom_geojson),
+        "properties": {
+            "id": target_neighbor_ann.id,
+            "class_id": target_neighbor_ann.class_id,
+            "class_name": target_neighbor_ann.class_name,
+            "user_id": target_neighbor_ann.user_id,
+            "author_name": current_user.full_name or "Unknown",
+            "area_sqm": target_neighbor_ann.area_sqm,
+            "created_at": target_neighbor_ann.created_at.isoformat() if target_neighbor_ann.created_at else None
+        }
+    }]
+
+    created_features_res = []
+    for ex_ann in extra_annotations:
+        db.refresh(ex_ann)
+        created_features_res.append({
+            "type": "Feature",
+            "id": ex_ann.id,
+            "geometry": json.loads(ex_ann.geom_geojson),
+            "properties": {
+                "id": ex_ann.id,
+                "class_id": ex_ann.class_id,
+                "class_name": ex_ann.class_name,
+                "user_id": ex_ann.user_id,
+                "author_name": current_user.full_name or "Unknown",
+                "area_sqm": ex_ann.area_sqm,
+                "created_at": ex_ann.created_at.isoformat() if ex_ann.created_at else None
+            }
+        })
+
     return {
         "message": f"Poligon berhasil dihapus dan disatukan ke '{target_neighbor_ann.class_name}'!",
         "absorbed_into_class": target_neighbor_ann.class_name,
-        "absorbed_into_id": target_neighbor_ann.id
+        "absorbed_into_id": target_neighbor_ann.id,
+        "deleted_ids": [target.id],
+        "updated_features": updated_features_res,
+        "created_features": created_features_res
     }
 
 
