@@ -1981,16 +1981,28 @@ def split_by_polygon(
     new_class_name = classes_dict.get(new_class_id, "Belum Teridentifikasi")
 
     # Fetch candidate annotations
+    target_ann = None
     if req.target_annotation_id:
         target_ann = db.query(Annotation).filter(
             Annotation.id == req.target_annotation_id,
             Annotation.task_grid_id == req.task_grid_id
         ).first()
         if not target_ann:
-            raise HTTPException(status_code=404, detail="Poligon target tidak ditemukan.")
+            target_ann = db.query(Annotation).filter(
+                Annotation.id == req.target_annotation_id
+            ).first()
+
+    if target_ann:
         annotations = [target_ann]
     else:
         annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
+        try:
+            annotations.sort(
+                key=lambda a: shape(json.loads(a.geom_geojson)).intersection(cutter).area if shape(json.loads(a.geom_geojson)).intersects(cutter) else 0,
+                reverse=True
+            )
+        except Exception:
+            pass
 
     split_occurred = False
     new_created_count = 0
@@ -2265,21 +2277,25 @@ def split_by_line(
 
     # CASE 2: Grid has existing annotations
     if not split_occurred and all_annotations:
+        candidates = None
         if req.target_annotation_id:
             target_ann = db.query(Annotation).filter(
                 Annotation.id == req.target_annotation_id,
                 Annotation.task_grid_id == req.task_grid_id
             ).first()
             if not target_ann:
-                raise HTTPException(status_code=404, detail="Poligon target tidak ditemukan.")
+                target_ann = db.query(Annotation).filter(
+                    Annotation.id == req.target_annotation_id
+                ).first()
 
-            poly = shape(json.loads(target_ann.geom_geojson))
-            if not poly.is_valid:
-                poly = poly.buffer(0)
+            if target_ann:
+                poly = shape(json.loads(target_ann.geom_geojson))
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+                # STRICT TARGET LOCK: only the user's selected polygon may be evaluated and cut!
+                candidates = [(target_ann, poly)]
 
-            # STRICT TARGET LOCK: only the user's selected polygon may be evaluated and cut!
-            candidates = [(target_ann, poly)]
-        else:
+        if candidates is None:
             # User drew line without selecting first: rank by length of blade inside each polygon
             candidates_with_len = []
             for ann in all_annotations:

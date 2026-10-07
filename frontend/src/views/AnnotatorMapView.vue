@@ -5212,6 +5212,9 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
   annotationsStore.currentFeatures = features.value
   clickedFeatureIdx.value = null
   selectedPolyUiIds.value.clear()
+  if (selectedTaskId.value) {
+    saveTaskDraft(selectedTaskId.value, features.value).catch(() => {})
+  }
   pushHistory()
   return true
 }
@@ -5232,6 +5235,26 @@ const findTargetPolygonForCut = (cutGeom) => {
           samplePoints.push(turf.along(cutFeat, (lineLen * i) / 10))
         } catch (_) {}
       }
+    }
+
+    const extractNumericId = (f) => {
+      if (!f) return null
+      const candidates = [f.properties?.id, f.id, f._uiId]
+      for (const c of candidates) {
+        if (c === null || c === undefined) continue
+        if (typeof c === 'number' && !isNaN(c) && c > 0) return c
+        const str = String(c).trim()
+        if (str.startsWith('f_tmp_')) continue
+        if (str.startsWith('f_id_')) {
+          const sub = str.slice(5).split('_')[0]
+          const n = parseInt(sub, 10)
+          if (!isNaN(n) && n > 0) return n
+        }
+        const clean = str.split('_p')[0].split('_')[0]
+        const n = parseInt(clean, 10)
+        if (!isNaN(n) && n > 0) return n
+      }
+      return null
     }
 
     const testIntersects = (feat) => {
@@ -5278,9 +5301,7 @@ const findTargetPolygonForCut = (cutGeom) => {
       }
 
       if (bestSelFeat) {
-        const rawId = bestSelFeat.properties?.id || bestSelFeat.id
-        const parsedId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
-        const annId = isNaN(parsedId) ? null : parsedId
+        const annId = extractNumericId(bestSelFeat)
         return { feat: bestSelFeat, annId }
       }
     }
@@ -5289,9 +5310,7 @@ const findTargetPolygonForCut = (cutGeom) => {
     if (clickedFeatureIdx.value !== null && features.value[clickedFeatureIdx.value]) {
       const cf = features.value[clickedFeatureIdx.value]
       if (testIntersects(cf)) {
-        const rawId = cf.properties?.id || cf.id
-        const parsedId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
-        const annId = isNaN(parsedId) ? null : parsedId
+        const annId = extractNumericId(cf)
         return { feat: cf, annId }
       }
     }
@@ -5305,9 +5324,7 @@ const findTargetPolygonForCut = (cutGeom) => {
       if (!feat || !feat.geometry) continue
       if (!testIntersects(feat)) continue
 
-      const rawId = feat.properties?.id || feat.id
-      const parsedId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
-      const annId = isNaN(parsedId) ? null : parsedId
+      const annId = extractNumericId(feat)
 
       if (cutGeom.type === 'LineString') {
         let pointsInside = 0
