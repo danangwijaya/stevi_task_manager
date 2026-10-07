@@ -4719,8 +4719,9 @@ const setDigitizeMode = (mode, force = false) => {
   activeTool.value = mode
   selectedForMerge.value = []
   if (['split_line', 'split_poly', 'freehand_cut'].includes(mode)) {
-    clickedFeatureIdx.value = null
-    if (selectedPolyUiIds.value) selectedPolyUiIds.value.clear()
+    if (selectedPolyUiIds.value && selectedPolyUiIds.value.size > 1) {
+      selectedPolyUiIds.value.clear()
+    }
   }
   renderReviewPinsOnMap()
 

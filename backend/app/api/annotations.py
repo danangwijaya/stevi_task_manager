@@ -2132,26 +2132,22 @@ def split_by_polygon(
         if target_ann:
             matched = [c for c in candidate_anns_with_area if c[0].id == target_ann.id and c[2] > 0.05 * cutter_area]
             if matched:
-                target_candidates = matched
+                target_candidates.append(matched[0])
+                for c in candidate_anns_with_area:
+                    if c[0].id != target_ann.id:
+                        target_candidates.append(c)
 
         if not target_candidates:
-            if candidate_anns_with_area[0][2] >= 0.8 * cutter_area:
-                target_candidates = [candidate_anns_with_area[0]]
-            else:
-                target_candidates = [
-                    c for c in candidate_anns_with_area
-                    if c[2] >= max(0.15 * cutter_area, 1e-8)
-                ]
-                if not target_candidates:
-                    target_candidates = [candidate_anns_with_area[0]]
+            # Sort descending by overlap area so the primary polygon is first
+            target_candidates = candidate_anns_with_area
 
         for ann, poly, inter_area in target_candidates:
             try:
                 intersection = poly.intersection(cutter)
                 difference = poly.difference(cutter)
 
-                inter_polys = _extract_polygons(intersection)
-                diff_polys = _extract_polygons(difference)
+                inter_polys = _extract_polygons(intersection, min_area_sqm=10.0)
+                diff_polys = _extract_polygons(difference, min_area_sqm=10.0)
 
                 if inter_polys and diff_polys:
                     split_occurred = True
@@ -2193,6 +2189,10 @@ def split_by_polygon(
                         db.add(new_ip)
                         new_annotations_list.append(new_ip)
                         new_created_count += 1
+
+                    # Single target cut complete: STOP cascade cutting adjacent polygons!
+                    break
+
                 elif inter_polys and not diff_polys:
                     # Polygon is completely enclosed by cutter -> reclassify
                     split_occurred = True
@@ -2202,6 +2202,7 @@ def split_by_polygon(
                     ann.user_id = current_user.id
                     new_created_count += 1
                     updated_annotations_list.append(ann)
+                    break
             except Exception:
                 continue
 
