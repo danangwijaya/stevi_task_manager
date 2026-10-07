@@ -4718,6 +4718,10 @@ const setDigitizeMode = (mode, force = false) => {
 
   activeTool.value = mode
   selectedForMerge.value = []
+  if (['split_line', 'split_poly', 'freehand_cut'].includes(mode)) {
+    clickedFeatureIdx.value = null
+    if (selectedPolyUiIds.value) selectedPolyUiIds.value.clear()
+  }
   renderReviewPinsOnMap()
 
   switch (mode) {
@@ -5318,8 +5322,26 @@ const findTargetPolygonForCut = (cutGeom) => {
     if (clickedFeatureIdx.value !== null && features.value[clickedFeatureIdx.value]) {
       const cf = features.value[clickedFeatureIdx.value]
       if (testIntersects(cf)) {
-        const annId = extractNumericId(cf)
-        return { feat: cf, annId }
+        let isRealTarget = false
+        if (cutGeom.type === 'LineString') {
+          for (const pt of samplePoints) {
+            try {
+              if (turf.booleanPointInPolygon(pt, cf)) {
+                isRealTarget = true
+                break
+              }
+            } catch (_) {}
+          }
+        } else {
+          try {
+            const inter = turf.intersect(turf.featureCollection([cutFeat, cf]))
+            if (inter && turf.area(inter) > 0.05 * turf.area(cutFeat)) isRealTarget = true
+          } catch (_) {}
+        }
+        if (isRealTarget) {
+          const annId = extractNumericId(cf)
+          return { feat: cf, annId }
+        }
       }
     }
 
@@ -5411,13 +5433,8 @@ const handleSplitByLine = async (lineGeom) => {
   // Detect target polygon under cut line
   const { feat: targetFeat, annId: targetAnnId } = findTargetPolygonForCut(lineGeom)
 
-  // If user selected a class different from the parent polygon, assign it to the new sliced piece
-  let targetClassId = 0
-  if (annotationsStore.selectedClass && annotationsStore.selectedClass.id > 0) {
-    if (targetFeat?.properties?.class_id && annotationsStore.selectedClass.id !== targetFeat.properties.class_id) {
-      targetClassId = annotationsStore.selectedClass.id
-    }
-  }
+  // If user selected an active class, pass it so the new sliced piece receives it
+  const targetClassId = annotationsStore.selectedClass?.id || 0
 
   try {
     const res = await api.splitByLine(selectedTaskId.value, lineGeom, targetAnnId, targetClassId)

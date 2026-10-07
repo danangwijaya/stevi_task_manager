@@ -1943,10 +1943,10 @@ def _extend_line(line, factor=0.25, max_ext_deg=5e-4, min_ext_deg=5e-5):
         return line
 
 
-def _extend_line_to_bounds(line, geom_bounds, multiplier=1.5):
+def _extend_line_to_bounds(line, geom_bounds, multiplier=0.5):
     """
-    Extends a line's endpoints along its true stable trajectory enough to exit
-    the given polygon boundary and guarantee clean bisection.
+    Extends a line's endpoints along its true stable trajectory just enough to exit
+    the given polygon boundary cleanly without shooting across the entire map.
     """
     import math
     from shapely.geometry import LineString
@@ -1960,8 +1960,8 @@ def _extend_line_to_bounds(line, geom_bounds, multiplier=1.5):
 
         minx, miny, maxx, maxy = geom_bounds
         bbox_diag = math.hypot(maxx - minx, maxy - miny)
-        # Extend beyond the bounding box diagonal so the blade cleanly exits both sides
-        ext_dist = max(bbox_diag * multiplier, 0.01)
+        # Moderate extension: capped to at most ~200 meters to prevent shooting into distant polygons
+        ext_dist = min(max(bbox_diag * multiplier, 5e-5), 0.002)
 
         # Direction 0: backward from start
         u_back_x, u_back_y = _get_stable_direction(coords, from_end=False)
@@ -2021,7 +2021,9 @@ def split_by_polygon(
     new_class_id = req.new_class_id if req.new_class_id in classes_dict else 0
     new_class_name = classes_dict.get(new_class_id, "Belum Teridentifikasi")
 
-    # Fetch candidate annotations
+    # Fetch all annotations for this task grid
+    all_anns = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
+
     target_ann = None
     if req.target_annotation_id:
         target_ann = db.query(Annotation).filter(
@@ -2033,18 +2035,26 @@ def split_by_polygon(
                 Annotation.id == req.target_annotation_id
             ).first()
 
-    all_anns = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
-    if target_ann:
-        annotations = [target_ann] + [a for a in all_anns if a.id != target_ann.id]
-    else:
-        annotations = all_anns
+    cutter_box = box(*cutter.bounds)
+    candidate_anns_with_area = []
+    for ann in all_anns:
         try:
-            annotations.sort(
-                key=lambda a: shape(json.loads(a.geom_geojson)).intersection(cutter).area if shape(json.loads(a.geom_geojson)).intersects(cutter) else 0,
-                reverse=True
-            )
+            poly = shape(json.loads(ann.geom_geojson))
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+
+            if not cutter_box.intersects(poly):
+                continue
+
+            if not poly.intersects(cutter):
+                continue
+
+            inter = poly.intersection(cutter)
+            inter_area = inter.area if inter and not inter.is_empty else 0
+            if inter_area > 1e-10:
+                candidate_anns_with_area.append((ann, poly, inter_area))
         except Exception:
-            pass
+            continue
 
     split_occurred = False
     new_created_count = 0
@@ -2053,7 +2063,7 @@ def split_by_polygon(
     updated_annotations_list = []
 
     # CASE 1: Grid has NO annotations yet! Slice directly from task grid polygon
-    if len(annotations) == 0:
+    if len(all_anns) == 0:
         if task_poly:
             inter_polys = _extract_polygons(cutter_in_grid)
             diff_polys = _extract_polygons(task_poly.difference(cutter_in_grid))
@@ -2110,22 +2120,33 @@ def split_by_polygon(
 
     # CASE 2: Grid has existing annotations
     else:
-        from shapely.geometry import box
-        cutter_box = box(*cutter.bounds)
+        if not candidate_anns_with_area:
+            raise HTTPException(status_code=400, detail="Area pemotong tidak membelah poligon manapun. Pastikan melintasi batas poligon target.")
 
-        for ann in annotations:
+        candidate_anns_with_area.sort(key=lambda x: x[2], reverse=True)
+        cutter_area = cutter.area
+
+        # Determine target polygons:
+        # If user explicitly requested target_ann AND it has significant overlap (> 5% of cutter), prioritize it
+        target_candidates = []
+        if target_ann:
+            matched = [c for c in candidate_anns_with_area if c[0].id == target_ann.id and c[2] > 0.05 * cutter_area]
+            if matched:
+                target_candidates = matched
+
+        if not target_candidates:
+            if candidate_anns_with_area[0][2] >= 0.8 * cutter_area:
+                target_candidates = [candidate_anns_with_area[0]]
+            else:
+                target_candidates = [
+                    c for c in candidate_anns_with_area
+                    if c[2] >= max(0.15 * cutter_area, 1e-8)
+                ]
+                if not target_candidates:
+                    target_candidates = [candidate_anns_with_area[0]]
+
+        for ann, poly, inter_area in target_candidates:
             try:
-                poly = shape(json.loads(ann.geom_geojson))
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
-                    
-                # Fast BBox check to skip distant polygons instantly
-                if not cutter_box.intersects(poly):
-                    continue
-
-                if not poly.intersects(cutter):
-                    continue
-
                 intersection = poly.intersection(cutter)
                 difference = poly.difference(cutter)
 
@@ -2175,8 +2196,9 @@ def split_by_polygon(
                 elif inter_polys and not diff_polys:
                     # Polygon is completely enclosed by cutter -> reclassify
                     split_occurred = True
-                    ann.class_id = new_class_id
-                    ann.class_name = new_class_name
+                    target_cut_cid = new_class_id if (new_class_id and new_class_id in classes_dict and new_class_id > 0) else ann.class_id
+                    ann.class_id = target_cut_cid
+                    ann.class_name = classes_dict.get(target_cut_cid, ann.class_name)
                     ann.user_id = current_user.id
                     new_created_count += 1
                     updated_annotations_list.append(ann)
@@ -2319,7 +2341,30 @@ def split_by_line(
 
     # CASE 2: Grid has existing annotations
     if not split_occurred and all_annotations:
-        candidates = []
+        test_ext_blade = _extend_line(blade, factor=0.3, max_ext_deg=1e-3, min_ext_deg=5e-5)
+        candidate_anns_with_len = []
+        for ann in all_annotations:
+            try:
+                poly = shape(json.loads(ann.geom_geojson))
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+
+                if not poly.intersects(blade) and not poly.intersects(test_ext_blade):
+                    continue
+
+                inter = poly.intersection(blade)
+                i_len = inter.length if inter and not inter.is_empty else 0
+                candidate_anns_with_len.append((ann, poly, i_len))
+            except Exception:
+                continue
+
+        if not candidate_anns_with_len:
+            raise HTTPException(status_code=400, detail="Garis pemotong harus melintasi batas poligon dari ujung ke ujung.")
+
+        # Sort strictly descending by intersection length so the polygon containing the body of the blade is evaluated first
+        candidate_anns_with_len.sort(key=lambda x: x[2], reverse=True)
+
+        target_ann = None
         if req.target_annotation_id:
             target_ann = db.query(Annotation).filter(
                 Annotation.id == req.target_annotation_id,
@@ -2330,54 +2375,34 @@ def split_by_line(
                     Annotation.id == req.target_annotation_id
                 ).first()
 
-            if target_ann:
-                poly = shape(json.loads(target_ann.geom_geojson))
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
-                candidates.append((target_ann, poly))
-
-        # Always add intersecting candidate polygons as fallback, ranked by intersection length:
-        target_ann_id = candidates[0][0].id if candidates else None
-        other_candidates_with_len = []
-        for ann in all_annotations:
-            if target_ann_id and ann.id == target_ann_id:
-                continue
-            try:
-                poly = shape(json.loads(ann.geom_geojson))
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
-
-                ext_blade_poly = _extend_line_to_bounds(blade, poly.bounds)
-                if not poly.intersects(blade) and not poly.intersects(ext_blade_poly):
-                    continue
-
-                inter = poly.intersection(blade)
-                i_len = inter.length if inter and not inter.is_empty else 0
-                other_candidates_with_len.append((ann, poly, i_len))
-            except Exception:
-                continue
-
-        other_candidates_with_len.sort(key=lambda x: x[2], reverse=True)
-        candidates.extend([(c[0], c[1]) for c in other_candidates_with_len])
+        candidates = []
+        if target_ann:
+            matched = [c for c in candidate_anns_with_len if c[0].id == target_ann.id and c[2] > 1e-6]
+            if matched:
+                candidates.append((matched[0][0], matched[0][1]))
+                for c in candidate_anns_with_len:
+                    if c[0].id != target_ann.id:
+                        candidates.append((c[0], c[1]))
+            else:
+                candidates = [(c[0], c[1]) for c in candidate_anns_with_len]
+        else:
+            candidates = [(c[0], c[1]) for c in candidate_anns_with_len]
 
         for ann, poly in candidates:
-            ext_blade_snap = _extend_line(blade, factor=0.25, max_ext_deg=5e-4, min_ext_deg=5e-5)
-            ext_blade_bounds = _extend_line_to_bounds(blade, poly.bounds)
-
-            # Case A: Polygon is a MultiPolygon (handle sub-parts independently)
+            # Case A: MultiPolygon
             if poly.geom_type == 'MultiPolygon':
-                sub_candidates = [
-                    (idx, g) for idx, g in enumerate(poly.geoms)
-                    if g.intersects(blade) or g.intersects(ext_blade_bounds)
-                ]
-                if not sub_candidates:
-                    continue
+                sub_cands = []
+                for idx, g in enumerate(poly.geoms):
+                    inter = g.intersection(blade)
+                    i_len = inter.length if inter and not inter.is_empty else 0
+                    if g.intersects(blade) or g.intersects(test_ext_blade):
+                        sub_cands.append((idx, g, i_len))
+                sub_cands.sort(key=lambda x: x[2], reverse=True)
 
                 target_sub_idx = None
                 sub_pieces = []
-                for idx, g in sub_candidates:
-                    ext_sub_bounds = _extend_line_to_bounds(blade, g.bounds)
-                    for test_blade in [blade, ext_blade_snap, ext_sub_bounds]:
+                for idx, g, _ in sub_cands:
+                    for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5)]:
                         try:
                             if g.intersects(test_blade):
                                 sub_res = split(g, test_blade)
@@ -2445,7 +2470,7 @@ def split_by_line(
             # Case B: Standard singlepart Polygon
             else:
                 pieces = []
-                for test_blade in [blade, ext_blade_snap, ext_blade_bounds]:
+                for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5)]:
                     try:
                         if poly.intersects(test_blade):
                             res = split(poly, test_blade)
