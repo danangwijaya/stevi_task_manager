@@ -4468,10 +4468,18 @@ const initMap = () => {
     const layer = e.layer
     const layerGeoJSON = layer.toGeoJSON()
 
+    // Immediately disable draw mode to avoid lingering double-click vertices
+    try {
+      if (map.pm?.globalDrawModeEnabled?.()) {
+        map.pm.disableDraw()
+      }
+    } catch (_) {}
+
     // 1. If in split_line mode (LineString drawn)
     if (activeTool.value === 'split_line') {
       map.removeLayer(layer)
-      await handleSplitByLine(layerGeoJSON.geometry)
+      const cleanGeom = cleanLineCoordinates(layerGeoJSON.geometry)
+      await handleSplitByLine(cleanGeom)
       return
     }
 
@@ -5373,10 +5381,31 @@ const findTargetPolygonForCut = (cutGeom) => {
   return { feat: null, annId: null }
 }
 
+// Clean duplicate or micro-jitter coordinates from LineString (e.g. from mouse double-clicks)
+const cleanLineCoordinates = (lineGeom) => {
+  if (!lineGeom || !lineGeom.coordinates || lineGeom.coordinates.length < 2) return lineGeom
+  const raw = lineGeom.coordinates
+  const cleaned = [raw[0]]
+  for (let i = 1; i < raw.length; i++) {
+    const prev = cleaned[cleaned.length - 1]
+    const curr = raw[i]
+    const dist = Math.hypot(curr[0] - prev[0], curr[1] - prev[1])
+    if (dist > 1e-6) {
+      cleaned.push(curr)
+    }
+  }
+  if (cleaned.length < 2 && raw.length >= 2) {
+    cleaned.push(raw[raw.length - 1])
+  }
+  return {
+    ...lineGeom,
+    coordinates: cleaned
+  }
+}
+
 // Handle Line Split
 const handleSplitByLine = async (lineGeom) => {
   if (!selectedTaskId.value) return
-  const previousTool = activeTool.value
   showToast('Memproses pemotongan garis...')
 
   // Detect target polygon under cut line
@@ -5390,22 +5419,28 @@ const handleSplitByLine = async (lineGeom) => {
     showToast(res.data?.message || 'Poligon berhasil dipotong!')
     if (res.data?.deleted_ids || res.data?.created_features) {
       applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
+      // Auto-select the newly created cut piece so user can see it and edit its class immediately
+      if (res.data.created_features && res.data.created_features.length > 1) {
+        const newSlice = res.data.created_features[1]
+        const newSliceId = newSlice.id ?? newSlice.properties?.id
+        const foundIdx = features.value.findIndex(f => (f.id ?? f.properties?.id) === newSliceId)
+        if (foundIdx !== -1) {
+          clickedFeatureIdx.value = foundIdx
+        }
+      }
     } else {
       await loadTaskData(selectedTaskId.value, true)
     }
   } catch (err) {
     alert(err.response?.data?.detail || 'Gagal memotong poligon. Pastikan garis melintasi batas poligon.')
   } finally {
-    if (previousTool) {
-      setDigitizeMode(previousTool, true)
-    }
+    setDigitizeMode(null)
   }
 }
 
 // Handle Polygon Cut / Split
 const handleSplitByPolygon = async (cuttingGeom) => {
   if (!selectedTaskId.value) return
-  const previousTool = activeTool.value
   showToast('Memproses pemisahan area poligon...')
 
   const { feat: targetFeat, annId: targetAnnId } = findTargetPolygonForCut(cuttingGeom)
@@ -5416,15 +5451,22 @@ const handleSplitByPolygon = async (cuttingGeom) => {
     showToast(res.data?.message || 'Poligon berhasil dipisah menjadi bagian mandiri!')
     if (res.data?.deleted_ids || res.data?.created_features) {
       applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
+      // Auto-select the newly cut area piece
+      if (res.data.created_features && res.data.created_features.length > 0) {
+        const newFeat = res.data.created_features[res.data.created_features.length - 1]
+        const newFeatId = newFeat.id ?? newFeat.properties?.id
+        const foundIdx = features.value.findIndex(f => (f.id ?? f.properties?.id) === newFeatId)
+        if (foundIdx !== -1) {
+          clickedFeatureIdx.value = foundIdx
+        }
+      }
     } else {
       await loadTaskData(selectedTaskId.value, true)
     }
   } catch (err) {
     alert(err.response?.data?.detail || 'Gagal memotong area. Pastikan poligon pemotong beririsan dengan poligon target.')
   } finally {
-    if (previousTool) {
-      setDigitizeMode(previousTool, true)
-    }
+    setDigitizeMode(null)
   }
 }
 

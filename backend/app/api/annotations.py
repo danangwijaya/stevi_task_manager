@@ -1,6 +1,7 @@
 from typing import Any, List, Dict, Optional
 import json
 import os
+import math
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -1865,70 +1866,110 @@ def update_annotation_class(
     }
 
 
-def _extend_line(line, factor=0.15, max_ext_deg=4.5e-5, min_ext_deg=1.5e-5, **kwargs):
+def _clean_line_coords(line, min_dist=1e-5):
+    raw = list(line.coords)
+    if len(raw) < 2:
+        return raw
+    cleaned = [raw[0]]
+    for p in raw[1:]:
+        prev = cleaned[-1]
+        dist = math.hypot(p[0] - prev[0], p[1] - prev[1])
+        if dist > min_dist:
+            cleaned.append(p)
+    if len(cleaned) < 2 and len(raw) >= 2:
+        cleaned = [raw[0], raw[-1]]
+    return cleaned
+
+
+def _get_stable_direction(coords, from_end=True, min_dist=2e-5):
     """
-    Extends line slightly at both ends by ~1.5 to 4.5 meters so split() cuts across polygon boundaries reliably,
-    even when snapping starts or ends directly on the boundary or slightly inside due to precision.
+    Finds the true stable direction vector of a line's endpoint,
+    filtering out any microscopic mouse double-click jitter.
+    """
+    if from_end:
+        p_ref = coords[-1]
+        for i in range(len(coords) - 2, -1, -1):
+            dx = p_ref[0] - coords[i][0]
+            dy = p_ref[1] - coords[i][1]
+            dist = math.hypot(dx, dy)
+            if dist >= min_dist:
+                return dx / dist, dy / dist
+        dx = coords[-1][0] - coords[0][0]
+        dy = coords[-1][1] - coords[0][1]
+        dist = math.hypot(dx, dy)
+        return (dx / dist, dy / dist) if dist > 0 else (1.0, 0.0)
+    else:
+        p_ref = coords[0]
+        for i in range(1, len(coords)):
+            dx = p_ref[0] - coords[i][0]
+            dy = p_ref[1] - coords[i][1]
+            dist = math.hypot(dx, dy)
+            if dist >= min_dist:
+                return dx / dist, dy / dist
+        dx = coords[0][0] - coords[-1][0]
+        dy = coords[0][1] - coords[-1][1]
+        dist = math.hypot(dx, dy)
+        return (dx / dist, dy / dist) if dist > 0 else (-1.0, 0.0)
+
+
+def _extend_line(line, factor=0.25, max_ext_deg=5e-4, min_ext_deg=5e-5):
+    """
+    Extends line slightly at both ends by ~5 to 30 meters along its true direction so split()
+    cuts cleanly across polygon boundaries, even when vertices snap directly on the boundary.
     """
     import math
     from shapely.geometry import LineString
     try:
-        coords = list(line.coords)
+        raw_coords = list(line.coords)
+        if len(raw_coords) < 2:
+            return line
+        coords = _clean_line_coords(line)
         if len(coords) < 2:
             return line
-            
-        # Direction 0: from coords[1] towards coords[0]
-        dx0 = coords[0][0] - coords[1][0]
-        dy0 = coords[0][1] - coords[1][1]
-        len0 = math.hypot(dx0, dy0)
-        if len0 > 1e-12:
-            ext0 = min(max_ext_deg, max(min_ext_deg, len0 * factor))
-            p0_ext = (coords[0][0] + (dx0 / len0) * ext0, coords[0][1] + (dy0 / len0) * ext0)
-        else:
-            p0_ext = coords[0]
 
-        # Direction 1: from coords[-2] towards coords[-1]
-        dx1 = coords[-1][0] - coords[-2][0]
-        dy1 = coords[-1][1] - coords[-2][1]
-        len1 = math.hypot(dx1, dy1)
-        if len1 > 1e-12:
-            ext1 = min(max_ext_deg, max(min_ext_deg, len1 * factor))
-            p1_ext = (coords[-1][0] + (dx1 / len1) * ext1, coords[-1][1] + (dy1 / len1) * ext1)
-        else:
-            p1_ext = coords[-1]
+        total_len = line.length
+        ext_len = min(max_ext_deg, max(min_ext_deg, total_len * factor))
+
+        # Backward ray from start
+        u_back_x, u_back_y = _get_stable_direction(coords, from_end=False)
+        p0_ext = (coords[0][0] + u_back_x * ext_len, coords[0][1] + u_back_y * ext_len)
+
+        # Forward ray from end
+        u_fwd_x, u_fwd_y = _get_stable_direction(coords, from_end=True)
+        p1_ext = (coords[-1][0] + u_fwd_x * ext_len, coords[-1][1] + u_fwd_y * ext_len)
 
         return LineString([p0_ext] + coords[1:-1] + [p1_ext])
     except Exception:
         return line
 
 
-def _extend_line_to_bounds(line, geom_bounds, multiplier=2.0):
+def _extend_line_to_bounds(line, geom_bounds, multiplier=1.2):
     """
-    Extends a line's endpoints along the ray of its first and last segments
-    all the way beyond the given bounding box diagonal.
-    This guarantees that the line crosses the exterior boundary of the geometry
-    from outside to outside, which is required by Shapely's split operation.
+    Extends a line's endpoints along its true stable trajectory just enough to exit
+    the local boundary without slicing unintended concave arms across the landscape.
     """
     import math
     from shapely.geometry import LineString
     try:
-        coords = list(line.coords)
+        raw_coords = list(line.coords)
+        if len(raw_coords) < 2:
+            return line
+        coords = _clean_line_coords(line)
         if len(coords) < 2:
             return line
+
         minx, miny, maxx, maxy = geom_bounds
-        diag = max(math.hypot(maxx - minx, maxy - miny) * multiplier, 0.005)
+        bbox_diag = math.hypot(maxx - minx, maxy - miny)
+        # Moderate extension: enough to exit local geometry, capped to avoid distant overshooting
+        ext_dist = min(max(bbox_diag * multiplier, 0.0005), 0.003)
 
-        # Direction 0: from coords[1] towards coords[0] (backward)
-        dx0 = coords[0][0] - coords[1][0]
-        dy0 = coords[0][1] - coords[1][1]
-        len0 = math.hypot(dx0, dy0)
-        p0_ext = (coords[0][0] + (dx0 / len0) * diag, coords[0][1] + (dy0 / len0) * diag) if len0 > 1e-12 else coords[0]
+        # Direction 0: backward from start
+        u_back_x, u_back_y = _get_stable_direction(coords, from_end=False)
+        p0_ext = (coords[0][0] + u_back_x * ext_dist, coords[0][1] + u_back_y * ext_dist)
 
-        # Direction 1: from coords[-2] towards coords[-1] (forward)
-        dx1 = coords[-1][0] - coords[-2][0]
-        dy1 = coords[-1][1] - coords[-2][1]
-        len1 = math.hypot(dx1, dy1)
-        p1_ext = (coords[-1][0] + (dx1 / len1) * diag, coords[-1][1] + (dy1 / len1) * diag) if len1 > 1e-12 else coords[-1]
+        # Direction 1: forward from end
+        u_fwd_x, u_fwd_y = _get_stable_direction(coords, from_end=True)
+        p1_ext = (coords[-1][0] + u_fwd_x * ext_dist, coords[-1][1] + u_fwd_y * ext_dist)
 
         return LineString([p0_ext] + coords[1:-1] + [p1_ext])
     except Exception:
