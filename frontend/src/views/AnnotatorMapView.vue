@@ -5099,15 +5099,17 @@ const openLeaderboardModal = async () => {
 
 // ─── HIGH-PERFORMANCE DELTA STATE UPDATER ─────────────────
 // Avoids full network re-fetch & complete DOM teardown of 800+ polygons
-const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures = []) => {
+const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures = [], deletedUiIds = []) => {
   if (!featureGroup || !map) return false
 
   const classesMap = {}
   annotationsStore.classes.forEach(c => { classesMap[c.id] = c })
 
   // 1. Remove deleted layers from Leaflet map & local features array
-  if (deletedIds && deletedIds.length > 0) {
-    const delStrSet = new Set(deletedIds.map(id => String(id)))
+  const delStrSet = new Set((deletedIds || []).filter(Boolean).map(id => String(id)))
+  const delUiSet = new Set((Array.isArray(deletedUiIds) ? deletedUiIds : [deletedUiIds]).filter(Boolean).map(u => String(u)))
+
+  if (delStrSet.size > 0 || delUiSet.size > 0) {
     const getBaseId = (str) => {
       if (!str) return str
       const s = String(str)
@@ -5126,11 +5128,16 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
           return
         }
       }
-      if (l._uiId) {
+      const lUiId = l._uiId || l.feature?._uiId
+      if (lUiId) {
+        if (delUiSet.has(lUiId)) {
+          layersToRemove.push(l)
+          return
+        }
         for (const delId of delStrSet) {
-          if (l._uiId === `f_id_${delId}` || l._uiId.startsWith(`f_id_${delId}_`)) {
+          if (lUiId === `f_id_${delId}` || lUiId.startsWith(`f_id_${delId}_`)) {
             layersToRemove.push(l)
-            break
+            return
           }
         }
       }
@@ -5151,9 +5158,11 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
         const baseId = getBaseId(fidStr)
         if (delStrSet.has(fidStr) || delStrSet.has(baseId)) return false
       }
-      if (f._uiId) {
+      const fUiId = f._uiId || f.properties?._uiId
+      if (fUiId) {
+        if (delUiSet.has(fUiId)) return false
         for (const delId of delStrSet) {
-          if (f._uiId === `f_id_${delId}` || f._uiId.startsWith(`f_id_${delId}_`)) return false
+          if (fUiId === `f_id_${delId}` || fUiId.startsWith(`f_id_${delId}_`)) return false
         }
       }
       return true
@@ -5438,15 +5447,17 @@ const handleSplitByLine = async (lineGeom) => {
   const targetClassId = annotationsStore.selectedClass?.id || 0
 
   try {
-    const res = await api.splitByLine(selectedTaskId.value, lineGeom, targetAnnId, targetClassId)
+    const res = await api.splitByLine(selectedTaskId.value, lineGeom, targetAnnId, targetClassId, targetFeat, false)
     showToast(res.data?.message || 'Poligon berhasil dipotong!')
     if (res.data?.deleted_ids || res.data?.created_features) {
-      applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
+      const delUis = res.data.deleted_ui_id ? [res.data.deleted_ui_id] : (targetFeat?._uiId ? [targetFeat._uiId] : [])
+      applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [], delUis)
       // Auto-select the newly created cut piece so user can see it and edit its class immediately
       if (res.data.created_features && res.data.created_features.length > 1) {
         const newSlice = res.data.created_features[1]
+        const newSliceUiId = newSlice._uiId
         const newSliceId = newSlice.id ?? newSlice.properties?.id
-        const foundIdx = features.value.findIndex(f => (f.id ?? f.properties?.id) === newSliceId)
+        const foundIdx = features.value.findIndex(f => (newSliceUiId && f._uiId === newSliceUiId) || (newSliceId && (f.id ?? f.properties?.id) === newSliceId))
         if (foundIdx !== -1) {
           clickedFeatureIdx.value = foundIdx
         }
@@ -5471,15 +5482,17 @@ const handleSplitByPolygon = async (cuttingGeom) => {
   const targetClassId = annotationsStore.selectedClass?.id || 0
 
   try {
-    const res = await api.splitByPolygon(selectedTaskId.value, cuttingGeom, targetAnnId, targetClassId)
+    const res = await api.splitByPolygon(selectedTaskId.value, cuttingGeom, targetAnnId, targetClassId, targetFeat, false)
     showToast(res.data?.message || 'Poligon berhasil dipisah menjadi bagian mandiri!')
     if (res.data?.deleted_ids || res.data?.created_features) {
-      applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
+      const delUis = res.data.deleted_ui_id ? [res.data.deleted_ui_id] : (targetFeat?._uiId ? [targetFeat._uiId] : [])
+      applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [], delUis)
       // Auto-select the newly cut area piece
       if (res.data.created_features && res.data.created_features.length > 0) {
         const newFeat = res.data.created_features[res.data.created_features.length - 1]
+        const newFeatUiId = newFeat._uiId
         const newFeatId = newFeat.id ?? newFeat.properties?.id
-        const foundIdx = features.value.findIndex(f => (f.id ?? f.properties?.id) === newFeatId)
+        const foundIdx = features.value.findIndex(f => (newFeatUiId && f._uiId === newFeatUiId) || (newFeatId && (f.id ?? f.properties?.id) === newFeatId))
         if (foundIdx !== -1) {
           clickedFeatureIdx.value = foundIdx
         }
@@ -5584,77 +5597,29 @@ const executeMerge = async () => {
   const targetClass = annotationsStore.classes.find(c => c.id === chosenClassId)
   const targetClassId = targetClass?.id || chosenClassId
   const targetClassName = targetClass?.name || 'Tutupan Lahan'
-  const targetColor = targetClass?.color || '#006400'
 
   const annotationIds = selectedForMerge.value.map(f => f.id || f.properties?.id).filter(Boolean)
   const selectedUiIds = new Set(selectedForMerge.value.map(f => f._uiId).filter(Boolean))
-  const allAreDbIntegers = annotationIds.length === selectedForMerge.value.length &&
-    annotationIds.every(id => Number.isInteger(Number(id)) && !String(id).includes('_'))
 
   try {
-    // If backend integer IDs exist for all selected polygons, use backend merge API
-    if (allAreDbIntegers) {
-      const res = await api.mergePolygons(selectedTaskId.value, annotationIds.map(Number), targetClassId)
-      showToast(res.data?.message || `Poligon berhasil digabungkan menjadi '${targetClassName}'!`)
+    const res = await api.mergePolygons(
+      selectedTaskId.value,
+      annotationIds.map(Number),
+      targetClassId,
+      selectedForMerge.value,
+      false // persist = false: 100% draft-mode and undoable!
+    )
+    showToast(res.data?.message || `Poligon berhasil digabungkan menjadi '${targetClassName}'!`)
 
-      // Explicitly purge selected layers immediately from Leaflet map & memory
-      featureGroup.eachLayer(l => {
-        const lUiId = l._uiId || l.feature?._uiId
-        const lId = l.feature?.id || l.feature?.properties?.id
-        if ((lUiId && selectedUiIds.has(lUiId)) || (lId && annotationIds.map(String).includes(String(lId)))) {
-          try {
-            featureGroup.removeLayer(l)
-            if (map && map.hasLayer(l)) map.removeLayer(l)
-          } catch (_) {}
-        }
-      })
-
-      if (res.data?.deleted_ids || res.data?.created_features) {
-        applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [])
-      } else {
-        await loadTaskData(selectedTaskId.value, true)
-      }
+    if (res.data?.deleted_ids || res.data?.created_features) {
+      const delUis = res.data.deleted_ui_ids || Array.from(selectedUiIds)
+      applyDeltaUpdate(
+        res.data.deleted_ids || [],
+        res.data.created_features || [],
+        res.data.updated_features || [],
+        delUis
+      )
     } else {
-      // Fallback: merge using Turf client-side union
-      const validPolys = selectedForMerge.value.map(f => {
-        let p = f.type === 'Feature' ? f : turf.feature(f.geometry || f)
-        return p
-      })
-      const fc = turf.featureCollection(validPolys)
-      let unioned = turf.union(fc)
-
-      // If union resulted in MultiPolygon, try micro-buffer bridge (~1.5 meters)
-      if (unioned && unioned.geometry?.type === 'MultiPolygon') {
-        try {
-          const bufferedFc = turf.featureCollection(validPolys.map(p => turf.buffer(p, 0.0015, { units: 'kilometers' })))
-          const bUnion = turf.union(bufferedFc)
-          if (bUnion) {
-            const deflated = turf.buffer(bUnion, -0.0015, { units: 'kilometers' })
-            if (deflated && deflated.geometry?.type === 'Polygon') {
-              unioned = deflated
-            }
-          }
-        } catch (_) {}
-      }
-
-      if (!unioned || unioned.geometry?.type === 'MultiPolygon') {
-        throw new Error('Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bersentuhan yang dapat digabungkan.')
-      }
-      unioned = cleanPolygonSpikesAndRings(unioned)
-
-      unioned.properties = {
-        class_id: targetClassId,
-        class_name: targetClassName,
-        color: targetColor
-      }
-
-      // Remove merged polygons from current features list
-      const mergeUiIds = new Set(selectedForMerge.value.map(f => f._uiId || f.id || f.properties?.id))
-      const remaining = features.value.filter(f => !mergeUiIds.has(f._uiId || f.id || f.properties?.id))
-      
-      const newFeaturesList = [...remaining, unioned]
-      await annotationsStore.saveGridAnnotations(selectedTaskId.value, newFeaturesList)
-      showToast(`Poligon berhasil digabungkan menjadi '${targetClassName}'!`)
       await loadTaskData(selectedTaskId.value, true)
     }
     selectedForMerge.value = []
@@ -8532,6 +8497,8 @@ const saveAnnotations = async () => {
     } catch (reloadErr) {
       console.warn('Could not reload features after save:', reloadErr)
     }
+  } else {
+    alert(`⚠️ Gagal Menyimpan Anotasi:\n${annotationsStore.lastSaveError || 'Terjadi kesalahan saat menyimpan ke server. Silakan periksa kembali koneksi atau izin akun.'}`)
   }
 }
 

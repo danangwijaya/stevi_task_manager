@@ -17,7 +17,12 @@ except ImportError:
 class GEEService:
     def __init__(self):
         self.initialized = False
-        self._init_gee()
+        self._init_attempted = False
+
+    def _ensure_init(self):
+        if not self._init_attempted:
+            self._init_attempted = True
+            self._init_gee()
 
     def _init_gee(self):
         if not GEE_AVAILABLE:
@@ -44,6 +49,7 @@ class GEEService:
             self.initialized = False
 
     def is_active(self) -> bool:
+        self._ensure_init()
         return self.initialized
 
     def _mask_s2_clouds(self, image):
@@ -126,6 +132,7 @@ class GEEService:
         If GEE is authenticated, generates dynamic GEE composite tiles.
         Otherwise, delivers real Sentinel-2 Cloudless mosaic tiles (EOX/Copernicus).
         """
+        self._ensure_init()
         if not self.initialized:
             # Real Sentinel-2 Cloudless Mosaic from EOX per year
             if year == 2017:

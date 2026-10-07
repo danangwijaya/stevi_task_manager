@@ -383,7 +383,8 @@ def save_grid_annotations(
     if not task:
         raise HTTPException(status_code=404, detail="Task grid not found")
 
-    if task.assigned_user_id is not None and current_user.role != "admin" and task.assigned_user_id != current_user.id:
+    user_role = (current_user.role or "").strip().lower()
+    if task.assigned_user_id is not None and user_role not in ["admin", "dosen"] and task.assigned_user_id != current_user.id:
         raise HTTPException(
             status_code=403,
             detail=f"Grid ini telah ditugaskan ke {task.assignee.full_name if task.assignee else 'pengguna lain'}. Anda tidak dapat mengubah data pada grid ini."
@@ -564,8 +565,9 @@ def restore_snapshot_endpoint(
     if not task:
         raise HTTPException(status_code=404, detail="Task grid not found")
 
-    if task.assigned_user_id is not None and current_user.role != "admin" and task.assigned_user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Hanya penanggung jawab grid atau admin yang dapat memulihkan versi.")
+    user_role = (current_user.role or "").strip().lower()
+    if task.assigned_user_id is not None and user_role not in ["admin", "dosen"] and task.assigned_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Hanya penanggung jawab grid, dosen, atau admin yang dapat memulihkan versi.")
 
     try:
         result = restore_grid_snapshot(
@@ -631,7 +633,8 @@ def copy_annotations_from_task(
     if not source_task:
         raise HTTPException(status_code=404, detail="Source task grid not found")
         
-    if current_user.role != "admin" and target_task.assigned_user_id != current_user.id:
+    user_role = (current_user.role or "").strip().lower()
+    if user_role not in ["admin", "dosen"] and target_task.assigned_user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to edit this task")
 
     source_annotations = db.query(Annotation).filter(Annotation.task_grid_id == source_task_id).all()
@@ -680,7 +683,8 @@ def init_base_polygon(
     if not task:
         raise HTTPException(status_code=404, detail="Task grid not found")
     
-    if current_user.role != "admin" and task.assigned_user_id != current_user.id:
+    user_role = (current_user.role or "").strip().lower()
+    if user_role not in ["admin", "dosen"] and task.assigned_user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Grid ini bukan milik Anda")
 
     existing_count = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).count()
@@ -1705,18 +1709,24 @@ class SplitByPolygonRequest(BaseModel):
     task_grid_id: int
     cutting_geom: Dict[str, Any]
     target_annotation_id: Optional[int] = None
+    target_feature: Optional[Dict[str, Any]] = None
     new_class_id: Optional[int] = 0
+    persist: Optional[bool] = False
 
 class SplitByLineRequest(BaseModel):
     task_grid_id: int
     line_geom: Dict[str, Any]
     target_annotation_id: Optional[int] = None
+    target_feature: Optional[Dict[str, Any]] = None
     new_class_id: Optional[int] = 0
+    persist: Optional[bool] = False
 
 class MergePolygonsRequest(BaseModel):
     task_grid_id: int
-    annotation_ids: List[int]
+    annotation_ids: Optional[List[int]] = None
+    features: Optional[List[Dict[str, Any]]] = None
     target_class_id: Optional[int] = None
+    persist: Optional[bool] = False
 
 class GridMergePolygonsRequest(BaseModel):
     annotation_ids: List[int]
@@ -2021,6 +2031,63 @@ def split_by_polygon(
     new_class_id = req.new_class_id if req.new_class_id in classes_dict else 0
     new_class_name = classes_dict.get(new_class_id, "Belum Teridentifikasi")
 
+    # CASE 0: target_feature provided directly from frontend (Draft-Mode friendly & 100% Undoable)
+    if req.target_feature and "geometry" in req.target_feature:
+        target_f = req.target_feature
+        try:
+            poly = shape(target_f["geometry"])
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Geometri poligon target tidak valid: {str(e)}")
+
+        target_ui_id = target_f.get("_uiId") or target_f.get("properties", {}).get("_uiId")
+        target_id = target_f.get("id") or target_f.get("properties", {}).get("id")
+        parent_class_id = int(target_f.get("properties", {}).get("class_id", 0))
+        parent_class_name = target_f.get("properties", {}).get("class_name", classes_dict.get(parent_class_id, "Belum Teridentifikasi"))
+
+        inter_polys = _extract_polygons(poly.intersection(cutter_in_grid), min_area_sqm=0.1)
+        diff_polys = _extract_polygons(poly.difference(cutter_in_grid), min_area_sqm=0.1)
+
+        if not inter_polys:
+            raise HTTPException(status_code=400, detail="Area pemotong tidak beririsan dengan poligon target.")
+
+        target_cut_cid = new_class_id if (new_class_id and new_class_id in classes_dict and new_class_id > 0) else parent_class_id
+        target_cut_cname = classes_dict.get(target_cut_cid, parent_class_name)
+
+        if not req.persist:
+            created_features = []
+            for dp in diff_polys:
+                created_features.append({
+                    "type": "Feature",
+                    "geometry": mapping(dp),
+                    "properties": {
+                        "class_id": parent_class_id,
+                        "class_name": parent_class_name,
+                        "area_sqm": dp.area * (111320.0 ** 2),
+                        "author_name": current_user.full_name or "Unknown",
+                    }
+                })
+            for ip in inter_polys:
+                created_features.append({
+                    "type": "Feature",
+                    "geometry": mapping(ip),
+                    "properties": {
+                        "class_id": target_cut_cid,
+                        "class_name": target_cut_cname,
+                        "area_sqm": ip.area * (111320.0 ** 2),
+                        "author_name": current_user.full_name or "Unknown",
+                    }
+                })
+            return {
+                "message": "Poligon berhasil dipisah menjadi bagian independen!",
+                "split_count": len(inter_polys),
+                "deleted_ids": [target_id] if (target_id and isinstance(target_id, int)) else [],
+                "deleted_ui_id": target_ui_id,
+                "created_features": created_features,
+                "updated_features": []
+            }
+
     # Fetch all annotations for this task grid
     all_anns = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
 
@@ -2065,9 +2132,42 @@ def split_by_polygon(
     # CASE 1: Grid has NO annotations yet! Slice directly from task grid polygon
     if len(all_anns) == 0:
         if task_poly:
-            inter_polys = _extract_polygons(cutter_in_grid)
-            diff_polys = _extract_polygons(task_poly.difference(cutter_in_grid))
+            inter_polys = _extract_polygons(cutter_in_grid, min_area_sqm=0.1)
+            diff_polys = _extract_polygons(task_poly.difference(cutter_in_grid), min_area_sqm=0.1)
             
+            if not req.persist and inter_polys:
+                created_features = []
+                for dp in diff_polys:
+                    created_features.append({
+                        "type": "Feature",
+                        "geometry": mapping(dp),
+                        "properties": {
+                            "class_id": 0,
+                            "class_name": "Belum Teridentifikasi",
+                            "area_sqm": dp.area * (111320.0 ** 2),
+                            "author_name": current_user.full_name or "Unknown",
+                        }
+                    })
+                for ip in inter_polys:
+                    created_features.append({
+                        "type": "Feature",
+                        "geometry": mapping(ip),
+                        "properties": {
+                            "class_id": new_class_id,
+                            "class_name": new_class_name,
+                            "area_sqm": ip.area * (111320.0 ** 2),
+                            "author_name": current_user.full_name or "Unknown",
+                        }
+                    })
+                return {
+                    "message": "Poligon berhasil dipisah menjadi bagian independen!",
+                    "split_count": len(inter_polys),
+                    "deleted_ids": [],
+                    "deleted_ui_id": None,
+                    "created_features": created_features,
+                    "updated_features": []
+                }
+
             if inter_polys:
                 # Add intersection pieces (assigned with new_class_id)
                 for ip in inter_polys:
@@ -2101,7 +2201,7 @@ def split_by_polygon(
                     new_annotations_list.append(ann_dp)
                 split_occurred = True
         else:
-            cut_polys = _extract_polygons(cutter_in_grid)
+            cut_polys = _extract_polygons(cutter_in_grid, min_area_sqm=0.1)
             for cp in cut_polys:
                 area_sqm = cp.area * (111320.0 ** 2)
                 ann_cp = Annotation(
@@ -2151,6 +2251,40 @@ def split_by_polygon(
 
                 if inter_polys and diff_polys:
                     split_occurred = True
+                    target_cut_cid = new_class_id if (new_class_id and new_class_id in classes_dict and new_class_id > 0) else ann.class_id
+                    target_cut_cname = classes_dict.get(target_cut_cid, ann.class_name)
+
+                    if not req.persist:
+                        created_features = []
+                        for dp in diff_polys:
+                            created_features.append({
+                                "type": "Feature",
+                                "geometry": mapping(dp),
+                                "properties": {
+                                    "class_id": ann.class_id,
+                                    "class_name": ann.class_name,
+                                    "area_sqm": dp.area * (111320.0 ** 2),
+                                    "author_name": current_user.full_name or "Unknown",
+                                }
+                            })
+                        for ip in inter_polys:
+                            created_features.append({
+                                "type": "Feature",
+                                "geometry": mapping(ip),
+                                "properties": {
+                                    "class_id": target_cut_cid,
+                                    "class_name": target_cut_cname,
+                                    "area_sqm": ip.area * (111320.0 ** 2),
+                                    "author_name": current_user.full_name or "Unknown",
+                                }
+                            })
+                        return {
+                            "message": "Poligon berhasil dipisah menjadi bagian independen!",
+                            "split_count": len(inter_polys),
+                            "deleted_ids": [ann.id],
+                            "created_features": created_features,
+                            "updated_features": []
+                        }
                     deleted_ids.append(ann.id)
                     # Remove original polygon record (safeguard review pins)
                     db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
@@ -2295,6 +2429,71 @@ def split_by_line(
     new_class_id = req.new_class_id if req.new_class_id in classes_dict else 0
     new_class_name = classes_dict.get(new_class_id, "Belum Teridentifikasi")
 
+    # CASE 0: target_feature provided directly from frontend (Draft-Mode friendly & 100% Undoable)
+    if req.target_feature and "geometry" in req.target_feature:
+        target_f = req.target_feature
+        try:
+            poly = shape(target_f["geometry"])
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Geometri poligon target tidak valid: {str(e)}")
+
+        target_ui_id = target_f.get("_uiId") or target_f.get("properties", {}).get("_uiId")
+        target_id = target_f.get("id") or target_f.get("properties", {}).get("id")
+        parent_class_id = int(target_f.get("properties", {}).get("class_id", 0))
+        parent_class_name = target_f.get("properties", {}).get("class_name", classes_dict.get(parent_class_id, "Belum Teridentifikasi"))
+
+        pieces = []
+        for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5)]:
+            try:
+                if poly.intersects(test_blade):
+                    res = split(poly, test_blade)
+                    p_list = _extract_polygons(res, min_area_sqm=0.1)
+                    if len(p_list) > 1:
+                        pieces = p_list
+                        break
+            except Exception:
+                continue
+
+        if len(pieces) <= 1:
+            raise HTTPException(status_code=400, detail="Garis pemotong harus melintasi batas poligon dari ujung ke ujung.")
+
+        pieces.sort(key=lambda p: p.area, reverse=True)
+        p0 = pieces[0]
+        target_slice_cid = new_class_id if (new_class_id and new_class_id > 0 and new_class_id != parent_class_id) else parent_class_id
+        target_slice_cname = classes_dict.get(target_slice_cid, parent_class_name)
+
+        if not req.persist:
+            created_features = []
+            created_features.append({
+                "type": "Feature",
+                "geometry": mapping(p0),
+                "properties": {
+                    "class_id": parent_class_id,
+                    "class_name": parent_class_name,
+                    "area_sqm": p0.area * (111320.0 ** 2),
+                    "author_name": current_user.full_name or "Unknown",
+                }
+            })
+            for p in pieces[1:]:
+                created_features.append({
+                    "type": "Feature",
+                    "geometry": mapping(p),
+                    "properties": {
+                        "class_id": target_slice_cid,
+                        "class_name": target_slice_cname,
+                        "area_sqm": p.area * (111320.0 ** 2),
+                        "author_name": current_user.full_name or "Unknown",
+                    }
+                })
+            return {
+                "message": "Poligon berhasil dipotong dengan garis pemisah!",
+                "deleted_ids": [target_id] if (target_id and isinstance(target_id, int)) else [],
+                "deleted_ui_id": target_ui_id,
+                "created_features": created_features
+            }
+
     # Fetch all annotations for this task grid
     all_annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
 
@@ -2309,8 +2508,37 @@ def split_by_line(
             if task_poly.intersects(cut_blade):
                 try:
                     res = split(task_poly, cut_blade)
-                    pieces = _extract_polygons(res)
+                    pieces = _extract_polygons(res, min_area_sqm=0.1)
                     if len(pieces) > 1:
+                        if not req.persist:
+                            created_features = []
+                            created_features.append({
+                                "type": "Feature",
+                                "geometry": mapping(pieces[0]),
+                                "properties": {
+                                    "class_id": 0,
+                                    "class_name": "Belum Teridentifikasi",
+                                    "area_sqm": pieces[0].area * (111320.0 ** 2),
+                                    "author_name": current_user.full_name or "Unknown",
+                                }
+                            })
+                            for p in pieces[1:]:
+                                created_features.append({
+                                    "type": "Feature",
+                                    "geometry": mapping(p),
+                                    "properties": {
+                                        "class_id": new_class_id,
+                                        "class_name": new_class_name,
+                                        "area_sqm": p.area * (111320.0 ** 2),
+                                        "author_name": current_user.full_name or "Unknown",
+                                    }
+                                })
+                            return {
+                                "message": "Poligon berhasil dipotong dengan garis pemisah!",
+                                "deleted_ids": [],
+                                "deleted_ui_id": None,
+                                "created_features": created_features
+                            }
                         split_occurred = True
                         p0 = pieces[0]
                         area_sqm = p0.area * (111320.0 ** 2)
@@ -2483,18 +2711,46 @@ def split_by_line(
                         continue
 
                 if len(pieces) > 1:
+                    target_slice_cid = new_class_id if (new_class_id and new_class_id > 0 and new_class_id != ann.class_id) else ann.class_id
+                    target_slice_cname = classes_dict.get(target_slice_cid, ann.class_name)
+                    pieces.sort(key=lambda p: p.area, reverse=True)
+                    p0 = pieces[0]
+
+                    if not req.persist:
+                        created_features = []
+                        created_features.append({
+                            "type": "Feature",
+                            "geometry": mapping(p0),
+                            "properties": {
+                                "class_id": ann.class_id,
+                                "class_name": ann.class_name,
+                                "area_sqm": p0.area * (111320.0 ** 2),
+                                "author_name": current_user.full_name or "Unknown",
+                            }
+                        })
+                        for p in pieces[1:]:
+                            created_features.append({
+                                "type": "Feature",
+                                "geometry": mapping(p),
+                                "properties": {
+                                    "class_id": target_slice_cid,
+                                    "class_name": target_slice_cname,
+                                    "area_sqm": p.area * (111320.0 ** 2),
+                                    "author_name": current_user.full_name or "Unknown",
+                                }
+                            })
+                        return {
+                            "message": "Poligon berhasil dipotong dengan garis pemisah!",
+                            "deleted_ids": [ann.id],
+                            "created_features": created_features
+                        }
+
                     split_occurred = True
                     deleted_ids.append(ann.id)
                     db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update(
                         {"annotation_id": None}, synchronize_session=False
                     )
                     db.delete(ann)
-
-                    target_slice_cid = new_class_id if (new_class_id and new_class_id > 0 and new_class_id != ann.class_id) else ann.class_id
-                    target_slice_cname = classes_dict.get(target_slice_cid, ann.class_name)
-
-                    pieces.sort(key=lambda p: p.area, reverse=True)
-                    p0 = pieces[0]
                     ann_p0 = Annotation(
                         task_grid_id=req.task_grid_id,
                         user_id=current_user.id,
@@ -2565,7 +2821,81 @@ def merge_polygons(
     from shapely.geometry import shape, mapping
     from shapely.ops import unary_union
     
-    if len(req.annotation_ids) < 2:
+    classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
+
+    if req.features and len(req.features) >= 2:
+        geoms = []
+        for f in req.features:
+            try:
+                g = shape(f["geometry"])
+                if not g.is_valid:
+                    g = g.buffer(0)
+                geoms.append(g)
+            except Exception:
+                pass
+
+        if not geoms:
+            raise HTTPException(status_code=400, detail="Geometri poligon tidak valid.")
+
+        if req.target_class_id and req.target_class_id in classes_dict:
+            target_class_id = req.target_class_id
+            target_class_name = classes_dict[target_class_id]
+        else:
+            target_class_id = req.features[0].get("properties", {}).get("class_id", 1)
+            target_class_name = classes_dict.get(target_class_id, "Tutupan Lahan")
+
+        merged_geom = unary_union(geoms)
+        try:
+            from shapely import set_precision
+            merged_geom = set_precision(merged_geom, grid_size=1e-7)
+        except Exception:
+            pass
+
+        merged_polys = _extract_polygons(merged_geom, min_area_sqm=0.1)
+        if len(merged_polys) > 1:
+            try:
+                buffered_union = unary_union([g.buffer(1.5e-5) for g in geoms]).buffer(-1.5e-5)
+                bridged_polys = _extract_polygons(buffered_union, min_area_sqm=0.1)
+                if len(bridged_polys) == 1:
+                    merged_polys = bridged_polys
+            except Exception:
+                pass
+
+        cleaned_merged_polys = []
+        for mp in merged_polys:
+            cleaned_p = _clean_spikes_and_holes(mp)
+            if cleaned_p and not cleaned_p.is_empty and cleaned_p.area > 1e-12:
+                cleaned_merged_polys.append(cleaned_p)
+        merged_polys = cleaned_merged_polys or merged_polys
+
+        if not merged_polys or len(merged_polys) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bersentuhan yang dapat digabungkan."
+            )
+
+        final_merged = merged_polys[0]
+        created_feat = {
+            "type": "Feature",
+            "geometry": mapping(final_merged),
+            "properties": {
+                "class_id": target_class_id,
+                "class_name": target_class_name,
+                "area_sqm": final_merged.area * (111320.0 ** 2),
+                "author_name": current_user.full_name or "Unknown",
+            }
+        }
+        if not req.persist:
+            del_ids = [f.get("id") for f in req.features if f.get("id") and isinstance(f.get("id"), int)]
+            del_ui_ids = [f.get("_uiId") for f in req.features if f.get("_uiId")]
+            return {
+                "message": f"Berhasil menggabungkan {len(req.features)} poligon menjadi 1 poligon '{target_class_name}'!",
+                "deleted_ids": del_ids,
+                "deleted_ui_ids": del_ui_ids,
+                "created_features": [created_feat]
+            }
+
+    if not req.annotation_ids or len(req.annotation_ids) < 2:
         raise HTTPException(status_code=400, detail="Pilih minimal 2 poligon untuk digabungkan.")
         
     annotations = db.query(Annotation).filter(
@@ -2575,8 +2905,6 @@ def merge_polygons(
     
     if len(annotations) < 2:
         raise HTTPException(status_code=404, detail="Poligon yang dipilih tidak ditemukan.")
-
-    classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
     if req.target_class_id and req.target_class_id in classes_dict:
         target_class_id = req.target_class_id
         target_class_name = classes_dict[target_class_id]
@@ -2645,8 +2973,25 @@ def merge_polygons(
     # Strictly 1 singlepart merged polygon
     final_merged_poly = merged_polys[0]
 
-    # Delete old annotations (safeguard review pins)
     ann_ids = [ann.id for ann in annotations]
+    if not req.persist:
+        created_feat = {
+            "type": "Feature",
+            "geometry": mapping(final_merged_poly),
+            "properties": {
+                "class_id": target_class_id,
+                "class_name": target_class_name,
+                "area_sqm": final_merged_poly.area * (111320.0 ** 2),
+                "author_name": current_user.full_name or "Unknown",
+            }
+        }
+        return {
+            "message": f"Berhasil menggabungkan {len(annotations)} poligon menjadi 1 poligon '{target_class_name}'!",
+            "deleted_ids": ann_ids,
+            "created_features": [created_feat]
+        }
+
+    # Delete old annotations (safeguard review pins)
     db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(ann_ids)).update({"annotation_id": None}, synchronize_session=False)
     for ann in annotations:
         db.delete(ann)

@@ -112,25 +112,31 @@ export default {
   fillGridGaps: (taskGridId, classId = 0, minArea = 1.0) =>
     api.post(`/annotations/grid/${taskGridId}/fill-gaps`, { class_id: classId, min_gap_area_sqm: minArea }),
   copyAnnotations: (targetId, sourceId) => api.post(`/annotations/grid/${targetId}/copy-from/${sourceId}`),
-  splitByPolygon: (taskGridId, cuttingGeom, targetAnnId = null, newClassId = 0) =>
+  splitByPolygon: (taskGridId, cuttingGeom, targetAnnId = null, newClassId = 0, targetFeature = null, persist = false) =>
     api.post('/annotations/split-by-polygon', {
       task_grid_id: taskGridId,
       cutting_geom: cuttingGeom,
       target_annotation_id: targetAnnId,
-      new_class_id: newClassId
+      target_feature: targetFeature,
+      new_class_id: newClassId,
+      persist: persist
     }),
-  splitByLine: (taskGridId, lineGeom, targetAnnId = null, newClassId = 0) =>
+  splitByLine: (taskGridId, lineGeom, targetAnnId = null, newClassId = 0, targetFeature = null, persist = false) =>
     api.post('/annotations/split-by-line', {
       task_grid_id: taskGridId,
       line_geom: lineGeom,
       target_annotation_id: targetAnnId,
-      new_class_id: newClassId
+      target_feature: targetFeature,
+      new_class_id: newClassId,
+      persist: persist
     }),
-  mergePolygons: (taskGridId, annotationIds, targetClassId) =>
+  mergePolygons: (taskGridId, annotationIds = [], targetClassId = 0, features = null, persist = false) =>
     api.post('/annotations/merge', {
       task_grid_id: taskGridId,
       annotation_ids: annotationIds,
-      target_class_id: targetClassId
+      target_class_id: targetClassId,
+      features: features,
+      persist: persist
     }),
   smartDeletePolygon: (taskGridId, annotationId, absorbIntoId = null) =>
     api.post(`/annotations/grid/${taskGridId}/smart-delete`, {

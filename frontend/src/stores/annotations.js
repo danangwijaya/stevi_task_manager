@@ -8,7 +8,8 @@ export const useAnnotationsStore = defineStore('annotations', {
     currentFeatures: [],
     loading: false,
     saving: false,
-    dirty: false
+    dirty: false,
+    lastSaveError: null
   }),
 
   actions: {
@@ -46,6 +47,7 @@ export const useAnnotationsStore = defineStore('annotations', {
 
     async saveGridAnnotations(taskGridId, features) {
       this.saving = true
+      this.lastSaveError = null
       try {
         const response = await api.saveGridAnnotations(taskGridId, features)
         this.currentFeatures = response.data?.saved_features || features
@@ -53,6 +55,7 @@ export const useAnnotationsStore = defineStore('annotations', {
         return true
       } catch (err) {
         console.error('Failed to save annotations:', err)
+        this.lastSaveError = err.response?.data?.detail || err.message || 'Gagal menyimpan anotasi ke server.'
         return false
       } finally {
         this.saving = false
