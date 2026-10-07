@@ -47,8 +47,8 @@ export const useAnnotationsStore = defineStore('annotations', {
     async saveGridAnnotations(taskGridId, features) {
       this.saving = true
       try {
-        await api.saveGridAnnotations(taskGridId, features)
-        this.currentFeatures = features
+        const response = await api.saveGridAnnotations(taskGridId, features)
+        this.currentFeatures = response.data?.saved_features || features
         this.dirty = false
         return true
       } catch (err) {

@@ -3530,6 +3530,7 @@ const batchDeleteSelectedPolygons = async () => {
   try {
     await annotationsStore.saveGridAnnotations(selectedTaskId.value, remaining)
     showToast(`🗑️ ${count} poligon berhasil dihapus & diserap ke tetangga!`)
+    try { await loadTaskData(selectedTaskId.value, true) } catch (_) {}
   } catch (err) {
     alert(err.response?.data?.detail || 'Gagal menyimpan perubahan hapus poligon')
   }
@@ -3590,6 +3591,7 @@ const batchMergeSelectedPolygons = async () => {
 
     await annotationsStore.saveGridAnnotations(selectedTaskId.value, remaining)
     showToast(`🧩 ${toMerge.length} poligon berhasil digabung menjadi [${targetClassName}]!`)
+    try { await loadTaskData(selectedTaskId.value, true) } catch (_) {}
   } catch (err) {
     console.error('Batch merge error:', err)
     alert('Gagal menggabungkan poligon terpilih.')
@@ -3678,11 +3680,7 @@ const undo = async () => {
   const snapshot = JSON.parse(JSON.stringify(history.value[historyIndex.value]))
   restoreFeaturesToMap(snapshot)
   showToast('Undo: Perubahan dibatalkan')
-  if (selectedTaskId.value) {
-    try {
-      await annotationsStore.saveGridAnnotations(selectedTaskId.value, snapshot)
-    } catch {}
-  }
+  queueOfflineDraftSave()
 }
 
 const redo = async () => {
@@ -3691,11 +3689,7 @@ const redo = async () => {
   const snapshot = JSON.parse(JSON.stringify(history.value[historyIndex.value]))
   restoreFeaturesToMap(snapshot)
   showToast('Redo: Perubahan diterapkan kembali')
-  if (selectedTaskId.value) {
-    try {
-      await annotationsStore.saveGridAnnotations(selectedTaskId.value, snapshot)
-    } catch {}
-  }
+  queueOfflineDraftSave()
 }
 
 const restoreFeaturesToMap = (snapshotFeatures) => {
@@ -5101,12 +5095,19 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
   // 1. Remove deleted layers from Leaflet map & local features array
   if (deletedIds && deletedIds.length > 0) {
     const delStrSet = new Set(deletedIds.map(id => String(id)))
+    const getBaseId = (str) => {
+      if (!str) return str
+      const s = String(str)
+      if (s.includes('_p')) return s.split('_p')[0]
+      if (s.includes('_')) return s.split('_')[0]
+      return s
+    }
     const layersToRemove = []
     featureGroup.eachLayer(l => {
       const fid = l.feature?.id ?? l.feature?.properties?.id
       if (fid !== undefined && fid !== null) {
         const fidStr = String(fid)
-        const baseId = fidStr.includes('_p') ? fidStr.split('_p')[0] : fidStr
+        const baseId = getBaseId(fidStr)
         if (delStrSet.has(fidStr) || delStrSet.has(baseId)) {
           layersToRemove.push(l)
           return
@@ -5134,7 +5135,7 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
       const fid = f.id ?? f.properties?.id
       if (fid !== undefined && fid !== null) {
         const fidStr = String(fid)
-        const baseId = fidStr.includes('_p') ? fidStr.split('_p')[0] : fidStr
+        const baseId = getBaseId(fidStr)
         if (delStrSet.has(fidStr) || delStrSet.has(baseId)) return false
       }
       if (f._uiId) {
@@ -5209,34 +5210,60 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
 
   // 4. Sync store reference and update history stack
   annotationsStore.currentFeatures = features.value
+  clickedFeatureIdx.value = null
   pushHistory()
   return true
 }
 
 // Helper to find target polygon for line/polygon split
 const findTargetPolygonForCut = (cutGeom) => {
-  if (clickedFeatureIdx.value !== null && features.value[clickedFeatureIdx.value]) {
-    const cf = features.value[clickedFeatureIdx.value]
-    const rawId = cf.properties?.id || cf.id
-    const annId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
-    return { feat: cf, annId }
-  }
-
   if (!features.value || features.value.length === 0 || !cutGeom) return { feat: null, annId: null }
 
   try {
     const cutFeat = cutGeom.type === 'LineString' ? turf.lineString(cutGeom.coordinates) : turf.polygon(cutGeom.coordinates)
+
+    // 1. If user selected a polygon, verify it actually intersects cutGeom
+    if (clickedFeatureIdx.value !== null && features.value[clickedFeatureIdx.value]) {
+      const cf = features.value[clickedFeatureIdx.value]
+      try {
+        if (turf.booleanIntersects(cutFeat, cf)) {
+          const rawId = cf.properties?.id || cf.id
+          const annId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
+          return { feat: cf, annId: isNaN(annId) ? null : annId }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Search all features for intersecting candidate
+    let bestFeat = null
+    let bestAnnId = null
+    let maxIntersectionScore = -1
+
     for (const feat of features.value) {
       if (!feat || !feat.geometry) continue
       try {
         if (turf.booleanIntersects(cutFeat, feat)) {
           const rawId = feat.properties?.id || feat.id
-          const annId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
-          if (annId) {
+          const parsedId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
+          const annId = isNaN(parsedId) ? null : parsedId
+
+          if (cutGeom.type === 'LineString') {
+            const inter = turf.lineIntersect(cutFeat, feat)
+            const count = inter?.features?.length || 1
+            if (count > maxIntersectionScore) {
+              maxIntersectionScore = count
+              bestFeat = feat
+              bestAnnId = annId
+            }
+          } else {
             return { feat, annId }
           }
         }
       } catch (_) {}
+    }
+
+    if (bestFeat) {
+      return { feat: bestFeat, annId: bestAnnId }
     }
   } catch (_) {}
 
@@ -8310,6 +8337,7 @@ const syncFeaturesFromMap = () => {
 
 const saveAnnotations = async () => {
   if (!selectedTaskId.value) return
+  if (annotationsStore.saving) return
   syncFeaturesFromMap()
 
   if (features.value.length === 0) {
@@ -8328,6 +8356,12 @@ const saveAnnotations = async () => {
       await clearTaskDraft(selectedTaskId.value)
       localDraftStatus.value = null
       showDraftRestorePrompt.value = false
+    }
+    // Reload features to ensure local Leaflet layers possess fresh DB IDs
+    try {
+      await loadTaskData(selectedTaskId.value, true)
+    } catch (reloadErr) {
+      console.warn('Could not reload features after save:', reloadErr)
     }
   }
 }

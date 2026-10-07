@@ -377,6 +377,11 @@ def save_grid_annotations(
     if not task:
         raise HTTPException(status_code=404, detail="Task grid not found")
 
+    # Lock task row with row-level lock to prevent concurrent save race condition inflation
+    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).with_for_update().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task grid not found")
+
     if task.assigned_user_id is not None and current_user.role != "admin" and task.assigned_user_id != current_user.id:
         raise HTTPException(
             status_code=403,
@@ -402,6 +407,8 @@ def save_grid_annotations(
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
 
     new_annotations = []
+    seen_geom_keys = set()
+
     for f in data.features:
         class_id = int(f.properties.get("class_id", 1))
         class_name = f.properties.get("class_name", classes_dict.get(class_id, "Unknown"))
@@ -416,13 +423,20 @@ def save_grid_annotations(
                 continue
 
             for poly_part in extracted_polys:
+                part_geojson = mapping(poly_part)
+                # Deduplication key based on normalized coordinate structure
+                geom_key = json.dumps(part_geojson, sort_keys=True)
+                if geom_key in seen_geom_keys:
+                    continue
+                seen_geom_keys.add(geom_key)
+
                 area_sqm = poly_part.area * (111320.0 ** 2)
                 ann = Annotation(
                     task_grid_id=task_grid_id,
                     user_id=current_user.id,
                     class_id=class_id,
                     class_name=class_name,
-                    geom_geojson=json.dumps(mapping(poly_part)),
+                    geom_geojson=json.dumps(part_geojson),
                     area_sqm=area_sqm
                 )
                 db.add(ann)
@@ -453,10 +467,28 @@ def save_grid_annotations(
             entity_type="task_grid",
             entity_id=task_grid_id,
             task_grid_id=task_grid_id,
-            details=json.dumps({"count": len(new_annotations)})
         )
 
-    return {"message": f"Successfully saved {len(new_annotations)} annotation polygons", "count": len(new_annotations)}
+    saved_features = []
+    for ann in new_annotations:
+        saved_features.append({
+            "type": "Feature",
+            "id": ann.id,
+            "geometry": json.loads(ann.geom_geojson),
+            "properties": {
+                "id": ann.id,
+                "class_id": ann.class_id,
+                "class_name": ann.class_name,
+                "user_id": ann.user_id,
+                "area_sqm": ann.area_sqm
+            }
+        })
+
+    return {
+        "message": f"Successfully saved {len(new_annotations)} annotation polygons",
+        "count": len(new_annotations),
+        "saved_features": saved_features
+    }
 
 @router.get("/grid/{task_grid_id}/snapshots")
 def get_grid_snapshots(
@@ -1833,10 +1865,10 @@ def update_annotation_class(
     }
 
 
-def _extend_line(line, factor=0.05, max_ext_deg=1.5e-5, **kwargs):
+def _extend_line(line, factor=0.15, max_ext_deg=4.5e-5, min_ext_deg=1.5e-5, **kwargs):
     """
-    Extends line slightly at both ends by at most ~1.5 meters so split() cuts across polygon boundaries reliably,
-    WITHOUT overshooting into neighboring polygons.
+    Extends line slightly at both ends by ~1.5 to 4.5 meters so split() cuts across polygon boundaries reliably,
+    even when snapping starts or ends directly on the boundary or slightly inside due to precision.
     """
     import math
     from shapely.geometry import LineString
@@ -1850,7 +1882,7 @@ def _extend_line(line, factor=0.05, max_ext_deg=1.5e-5, **kwargs):
         dy0 = coords[0][1] - coords[1][1]
         len0 = math.hypot(dx0, dy0)
         if len0 > 1e-12:
-            ext0 = min(max_ext_deg, len0 * factor)
+            ext0 = min(max_ext_deg, max(min_ext_deg, len0 * factor))
             p0_ext = (coords[0][0] + (dx0 / len0) * ext0, coords[0][1] + (dy0 / len0) * ext0)
         else:
             p0_ext = coords[0]
@@ -1860,7 +1892,7 @@ def _extend_line(line, factor=0.05, max_ext_deg=1.5e-5, **kwargs):
         dy1 = coords[-1][1] - coords[-2][1]
         len1 = math.hypot(dx1, dy1)
         if len1 > 1e-12:
-            ext1 = min(max_ext_deg, len1 * factor)
+            ext1 = min(max_ext_deg, max(min_ext_deg, len1 * factor))
             p1_ext = (coords[-1][0] + (dx1 / len1) * ext1, coords[-1][1] + (dy1 / len1) * ext1)
         else:
             p1_ext = coords[-1]
@@ -1918,8 +1950,22 @@ def split_by_polygon(
     # Fetch candidate annotations
     query = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id)
     if req.target_annotation_id:
-        query = query.filter(Annotation.id == req.target_annotation_id)
-    annotations = query.all()
+        target_ann = query.filter(Annotation.id == req.target_annotation_id).first()
+        if target_ann:
+            try:
+                t_poly = shape(json.loads(target_ann.geom_geojson))
+                if t_poly.intersects(cutter):
+                    annotations = [target_ann]
+                else:
+                    # Target didn't intersect cutter (user likely clicked another polygon), search all!
+                    annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
+            except Exception:
+                annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
+        else:
+            # Stale ID from prior save/re-sequence, search all!
+            annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
+    else:
+        annotations = query.all()
 
     split_occurred = False
     new_created_count = 0
@@ -2147,13 +2193,31 @@ def split_by_line(
     new_class_id = req.new_class_id if req.new_class_id in classes_dict else 0
     new_class_name = classes_dict.get(new_class_id, "Belum Teridentifikasi")
 
+    # Fetch candidate annotations with spatial fallback
     query = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id)
+    extended_blade = _extend_line(blade, factor=0.15, max_ext_deg=4.5e-5, min_ext_deg=1.5e-5)
+
     if req.target_annotation_id:
-        query = query.filter(Annotation.id == req.target_annotation_id)
-    annotations = query.all()
+        target_ann = query.filter(Annotation.id == req.target_annotation_id).first()
+        if target_ann:
+            try:
+                t_poly = shape(json.loads(target_ann.geom_geojson))
+                if not t_poly.is_valid:
+                    t_poly = t_poly.buffer(0)
+                if t_poly.intersects(blade) or t_poly.intersects(extended_blade):
+                    annotations = [target_ann]
+                else:
+                    # Target didn't intersect blade (user likely clicked another polygon), search all!
+                    annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
+            except Exception:
+                annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
+        else:
+            # Stale ID from prior save/re-sequence, search all!
+            annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
+    else:
+        annotations = query.all()
 
     split_occurred = False
-    extended_blade = _extend_line(blade, factor=0.05, max_ext_deg=1.5e-5)
     deleted_ids = []
     new_annotations_list = []
 
