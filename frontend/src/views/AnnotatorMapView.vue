@@ -5211,6 +5211,7 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
   // 4. Sync store reference and update history stack
   annotationsStore.currentFeatures = features.value
   clickedFeatureIdx.value = null
+  selectedPolyUiIds.value.clear()
   pushHistory()
   return true
 }
@@ -5221,45 +5222,130 @@ const findTargetPolygonForCut = (cutGeom) => {
 
   try {
     const cutFeat = cutGeom.type === 'LineString' ? turf.lineString(cutGeom.coordinates) : turf.polygon(cutGeom.coordinates)
+    const lineLen = cutGeom.type === 'LineString' ? turf.length(cutFeat) : 0
 
-    // 1. If user selected a polygon, verify it actually intersects cutGeom
-    if (clickedFeatureIdx.value !== null && features.value[clickedFeatureIdx.value]) {
-      const cf = features.value[clickedFeatureIdx.value]
-      try {
-        if (turf.booleanIntersects(cutFeat, cf)) {
-          const rawId = cf.properties?.id || cf.id
-          const annId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
-          return { feat: cf, annId: isNaN(annId) ? null : annId }
-        }
-      } catch (_) {}
+    // Sample interior points along the cut line (10%, 20%, ..., 90%)
+    const samplePoints = []
+    if (cutGeom.type === 'LineString' && lineLen > 0) {
+      for (let i = 1; i <= 9; i++) {
+        try {
+          samplePoints.push(turf.along(cutFeat, (lineLen * i) / 10))
+        } catch (_) {}
+      }
     }
 
-    // 2. Search all features for intersecting candidate
+    const testIntersects = (feat) => {
+      if (!feat || !feat.geometry) return false
+      try {
+        if (turf.booleanIntersects(cutFeat, feat)) return true
+      } catch (_) {}
+      try {
+        const buff = turf.buffer(feat, 0.0005, { units: 'kilometers' })
+        if (turf.booleanIntersects(cutFeat, buff)) return true
+      } catch (_) {}
+      return false
+    }
+
+    // 1. Priority 1: User explicitly selected polygon(s) in multi-selection or sidebar list
+    if (selectedPolyUiIds.value && selectedPolyUiIds.value.size > 0) {
+      const selectedFeatures = features.value.filter(f => f && (selectedPolyUiIds.value.has(f._uiId) || selectedPolyUiIds.value.has(getFeatureUiId(f))))
+
+      let bestSelFeat = null
+      let bestSelScore = -1
+
+      for (const sf of selectedFeatures) {
+        if (testIntersects(sf)) {
+          let score = 1
+          if (cutGeom.type === 'LineString') {
+            for (const pt of samplePoints) {
+              try {
+                if (turf.booleanPointInPolygon(pt, sf)) score += 10
+              } catch (_) {}
+            }
+          } else {
+            try {
+              const inter = turf.intersect(turf.featureCollection([cutFeat, sf]))
+              score = inter ? turf.area(inter) : 1
+            } catch (_) {
+              score = 1
+            }
+          }
+          if (score > bestSelScore) {
+            bestSelScore = score
+            bestSelFeat = sf
+          }
+        }
+      }
+
+      if (bestSelFeat) {
+        const rawId = bestSelFeat.properties?.id || bestSelFeat.id
+        const parsedId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
+        const annId = isNaN(parsedId) ? null : parsedId
+        return { feat: bestSelFeat, annId }
+      }
+    }
+
+    // 2. Priority 2: User clicked a polygon on the map (clickedFeatureIdx)
+    if (clickedFeatureIdx.value !== null && features.value[clickedFeatureIdx.value]) {
+      const cf = features.value[clickedFeatureIdx.value]
+      if (testIntersects(cf)) {
+        const rawId = cf.properties?.id || cf.id
+        const parsedId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
+        const annId = isNaN(parsedId) ? null : parsedId
+        return { feat: cf, annId }
+      }
+    }
+
+    // 3. Priority 3: Search all features, prioritizing polygon containing the body/interior of the blade
     let bestFeat = null
     let bestAnnId = null
     let maxIntersectionScore = -1
 
     for (const feat of features.value) {
       if (!feat || !feat.geometry) continue
-      try {
-        if (turf.booleanIntersects(cutFeat, feat)) {
-          const rawId = feat.properties?.id || feat.id
-          const parsedId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
-          const annId = isNaN(parsedId) ? null : parsedId
+      if (!testIntersects(feat)) continue
 
-          if (cutGeom.type === 'LineString') {
-            const inter = turf.lineIntersect(cutFeat, feat)
-            const count = inter?.features?.length || 1
-            if (count > maxIntersectionScore) {
-              maxIntersectionScore = count
-              bestFeat = feat
-              bestAnnId = annId
+      const rawId = feat.properties?.id || feat.id
+      const parsedId = rawId ? parseInt(String(rawId).split('_')[0], 10) : null
+      const annId = isNaN(parsedId) ? null : parsedId
+
+      if (cutGeom.type === 'LineString') {
+        let pointsInside = 0
+        for (const pt of samplePoints) {
+          try {
+            if (turf.booleanPointInPolygon(pt, feat)) {
+              pointsInside++
             }
-          } else {
-            return { feat, annId }
-          }
+          } catch (_) {}
         }
-      } catch (_) {}
+        let count = 0
+        try {
+          const inter = turf.lineIntersect(cutFeat, feat)
+          count = inter?.features?.length || 0
+        } catch (_) {}
+
+        // Heavily weight interior sample points (100x) over boundary intersections
+        const score = (pointsInside * 100) + count
+
+        if (score > maxIntersectionScore) {
+          maxIntersectionScore = score
+          bestFeat = feat
+          bestAnnId = annId
+        }
+      } else {
+        let score = 0
+        try {
+          const inter = turf.intersect(turf.featureCollection([cutFeat, feat]))
+          score = inter ? turf.area(inter) : 0
+        } catch (_) {
+          score = 1
+        }
+        if (score > maxIntersectionScore) {
+          maxIntersectionScore = score
+          bestFeat = feat
+          bestAnnId = annId
+        }
+      }
     }
 
     if (bestFeat) {

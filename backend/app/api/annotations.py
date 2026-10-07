@@ -1981,9 +1981,16 @@ def split_by_polygon(
     new_class_name = classes_dict.get(new_class_id, "Belum Teridentifikasi")
 
     # Fetch candidate annotations
-    annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
-    if req.target_annotation_id and annotations:
-        annotations.sort(key=lambda a: 1 if a.id == req.target_annotation_id else 0, reverse=True)
+    if req.target_annotation_id:
+        target_ann = db.query(Annotation).filter(
+            Annotation.id == req.target_annotation_id,
+            Annotation.task_grid_id == req.task_grid_id
+        ).first()
+        if not target_ann:
+            raise HTTPException(status_code=404, detail="Poligon target tidak ditemukan.")
+        annotations = [target_ann]
+    else:
+        annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
 
     split_occurred = False
     new_created_count = 0
@@ -2258,28 +2265,44 @@ def split_by_line(
 
     # CASE 2: Grid has existing annotations
     if not split_occurred and all_annotations:
-        candidates = []
-        for ann in all_annotations:
-            try:
-                poly = shape(json.loads(ann.geom_geojson))
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
+        if req.target_annotation_id:
+            target_ann = db.query(Annotation).filter(
+                Annotation.id == req.target_annotation_id,
+                Annotation.task_grid_id == req.task_grid_id
+            ).first()
+            if not target_ann:
+                raise HTTPException(status_code=404, detail="Poligon target tidak ditemukan.")
 
-                ext_blade_poly = _extend_line_to_bounds(blade, poly.bounds)
-                if not poly.intersects(blade) and not poly.intersects(ext_blade_poly):
+            poly = shape(json.loads(target_ann.geom_geojson))
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+
+            # STRICT TARGET LOCK: only the user's selected polygon may be evaluated and cut!
+            candidates = [(target_ann, poly)]
+        else:
+            # User drew line without selecting first: rank by length of blade inside each polygon
+            candidates_with_len = []
+            for ann in all_annotations:
+                try:
+                    poly = shape(json.loads(ann.geom_geojson))
+                    if not poly.is_valid:
+                        poly = poly.buffer(0)
+
+                    ext_blade_poly = _extend_line_to_bounds(blade, poly.bounds)
+                    if not poly.intersects(blade) and not poly.intersects(ext_blade_poly):
+                        continue
+
+                    inter = poly.intersection(blade)
+                    i_len = inter.length if inter and not inter.is_empty else 0
+                    candidates_with_len.append((ann, poly, i_len))
+                except Exception:
                     continue
 
-                inter = poly.intersection(blade)
-                i_len = inter.length if inter and not inter.is_empty else 0
-                is_target = (ann.id == req.target_annotation_id) if req.target_annotation_id else False
-                candidates.append((ann, poly, is_target, i_len))
-            except Exception:
-                continue
+            # Sort strictly descending by intersection length so the polygon containing the body of the blade is cut
+            candidates_with_len.sort(key=lambda x: x[2], reverse=True)
+            candidates = [(c[0], c[1]) for c in candidates_with_len]
 
-        # Prioritize: 1st is target_annotation_id, 2nd is longest intersection length with drawn blade
-        candidates.sort(key=lambda x: (1 if x[2] else 0, x[3]), reverse=True)
-
-        for ann, poly, is_target, _ in candidates:
+        for ann, poly in candidates:
             ext_blade_snap = _extend_line(blade, factor=0.25, max_ext_deg=5e-4, min_ext_deg=5e-5)
             ext_blade_bounds = _extend_line_to_bounds(blade, poly.bounds)
 
