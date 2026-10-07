@@ -13,6 +13,16 @@
     <!-- Font Awesome 6 & Font-GIS Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <link rel="stylesheet" href="https://viglino.github.io/font-gis/css/font-gis.css" />
+    <!-- Suppress Tailwind CDN production warning in console -->
+    <script>
+      (function() {
+        const _origWarn = console.warn;
+        console.warn = function(...args) {
+          if (typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com')) return;
+          _origWarn.apply(console, args);
+        };
+      })();
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
