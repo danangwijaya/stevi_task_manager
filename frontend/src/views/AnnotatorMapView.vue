@@ -5411,8 +5411,13 @@ const handleSplitByLine = async (lineGeom) => {
   // Detect target polygon under cut line
   const { feat: targetFeat, annId: targetAnnId } = findTargetPolygonForCut(lineGeom)
 
-  // Default to 0 so backend preserves the parent polygon's original class (prevents unexpected Bangunan class)
-  const targetClassId = 0
+  // If user selected a class different from the parent polygon, assign it to the new sliced piece
+  let targetClassId = 0
+  if (annotationsStore.selectedClass && annotationsStore.selectedClass.id > 0) {
+    if (targetFeat?.properties?.class_id && annotationsStore.selectedClass.id !== targetFeat.properties.class_id) {
+      targetClassId = annotationsStore.selectedClass.id
+    }
+  }
 
   try {
     const res = await api.splitByLine(selectedTaskId.value, lineGeom, targetAnnId, targetClassId)
@@ -5444,7 +5449,8 @@ const handleSplitByPolygon = async (cuttingGeom) => {
   showToast('Memproses pemisahan area poligon...')
 
   const { feat: targetFeat, annId: targetAnnId } = findTargetPolygonForCut(cuttingGeom)
-  const targetClassId = 0
+  // Use user's active class if selected (e.g. Semak & Belukar), so the cut cookie area is immediately assigned
+  const targetClassId = annotationsStore.selectedClass?.id || 0
 
   try {
     const res = await api.splitByPolygon(selectedTaskId.value, cuttingGeom, targetAnnId, targetClassId)
