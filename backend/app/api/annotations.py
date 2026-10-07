@@ -1943,10 +1943,10 @@ def _extend_line(line, factor=0.25, max_ext_deg=5e-4, min_ext_deg=5e-5):
         return line
 
 
-def _extend_line_to_bounds(line, geom_bounds, multiplier=1.2):
+def _extend_line_to_bounds(line, geom_bounds, multiplier=1.5):
     """
-    Extends a line's endpoints along its true stable trajectory just enough to exit
-    the local boundary without slicing unintended concave arms across the landscape.
+    Extends a line's endpoints along its true stable trajectory enough to exit
+    the given polygon boundary and guarantee clean bisection.
     """
     import math
     from shapely.geometry import LineString
@@ -1960,8 +1960,8 @@ def _extend_line_to_bounds(line, geom_bounds, multiplier=1.2):
 
         minx, miny, maxx, maxy = geom_bounds
         bbox_diag = math.hypot(maxx - minx, maxy - miny)
-        # Moderate extension: enough to exit local geometry, capped to avoid distant overshooting
-        ext_dist = min(max(bbox_diag * multiplier, 0.0005), 0.003)
+        # Extend beyond the bounding box diagonal so the blade cleanly exits both sides
+        ext_dist = max(bbox_diag * multiplier, 0.01)
 
         # Direction 0: backward from start
         u_back_x, u_back_y = _get_stable_direction(coords, from_end=False)
@@ -2033,10 +2033,11 @@ def split_by_polygon(
                 Annotation.id == req.target_annotation_id
             ).first()
 
+    all_anns = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
     if target_ann:
-        annotations = [target_ann]
+        annotations = [target_ann] + [a for a in all_anns if a.id != target_ann.id]
     else:
-        annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
+        annotations = all_anns
         try:
             annotations.sort(
                 key=lambda a: shape(json.loads(a.geom_geojson)).intersection(cutter).area if shape(json.loads(a.geom_geojson)).intersects(cutter) else 0,
@@ -2318,7 +2319,7 @@ def split_by_line(
 
     # CASE 2: Grid has existing annotations
     if not split_occurred and all_annotations:
-        candidates = None
+        candidates = []
         if req.target_annotation_id:
             target_ann = db.query(Annotation).filter(
                 Annotation.id == req.target_annotation_id,
@@ -2333,31 +2334,31 @@ def split_by_line(
                 poly = shape(json.loads(target_ann.geom_geojson))
                 if not poly.is_valid:
                     poly = poly.buffer(0)
-                # STRICT TARGET LOCK: only the user's selected polygon may be evaluated and cut!
-                candidates = [(target_ann, poly)]
+                candidates.append((target_ann, poly))
 
-        if candidates is None:
-            # User drew line without selecting first: rank by length of blade inside each polygon
-            candidates_with_len = []
-            for ann in all_annotations:
-                try:
-                    poly = shape(json.loads(ann.geom_geojson))
-                    if not poly.is_valid:
-                        poly = poly.buffer(0)
+        # Always add intersecting candidate polygons as fallback, ranked by intersection length:
+        target_ann_id = candidates[0][0].id if candidates else None
+        other_candidates_with_len = []
+        for ann in all_annotations:
+            if target_ann_id and ann.id == target_ann_id:
+                continue
+            try:
+                poly = shape(json.loads(ann.geom_geojson))
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
 
-                    ext_blade_poly = _extend_line_to_bounds(blade, poly.bounds)
-                    if not poly.intersects(blade) and not poly.intersects(ext_blade_poly):
-                        continue
-
-                    inter = poly.intersection(blade)
-                    i_len = inter.length if inter and not inter.is_empty else 0
-                    candidates_with_len.append((ann, poly, i_len))
-                except Exception:
+                ext_blade_poly = _extend_line_to_bounds(blade, poly.bounds)
+                if not poly.intersects(blade) and not poly.intersects(ext_blade_poly):
                     continue
 
-            # Sort strictly descending by intersection length so the polygon containing the body of the blade is cut
-            candidates_with_len.sort(key=lambda x: x[2], reverse=True)
-            candidates = [(c[0], c[1]) for c in candidates_with_len]
+                inter = poly.intersection(blade)
+                i_len = inter.length if inter and not inter.is_empty else 0
+                other_candidates_with_len.append((ann, poly, i_len))
+            except Exception:
+                continue
+
+        other_candidates_with_len.sort(key=lambda x: x[2], reverse=True)
+        candidates.extend([(c[0], c[1]) for c in other_candidates_with_len])
 
         for ann, poly in candidates:
             ext_blade_snap = _extend_line(blade, factor=0.25, max_ext_deg=5e-4, min_ext_deg=5e-5)
