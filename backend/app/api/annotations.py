@@ -2049,44 +2049,42 @@ def split_by_polygon(
         inter_polys = _extract_polygons(poly.intersection(cutter_in_grid), min_area_sqm=0.1)
         diff_polys = _extract_polygons(poly.difference(cutter_in_grid), min_area_sqm=0.1)
 
-        if not inter_polys:
-            raise HTTPException(status_code=400, detail="Area pemotong tidak beririsan dengan poligon target.")
+        if inter_polys:
+            target_cut_cid = new_class_id if (new_class_id and new_class_id in classes_dict and new_class_id > 0) else parent_class_id
+            target_cut_cname = classes_dict.get(target_cut_cid, parent_class_name)
 
-        target_cut_cid = new_class_id if (new_class_id and new_class_id in classes_dict and new_class_id > 0) else parent_class_id
-        target_cut_cname = classes_dict.get(target_cut_cid, parent_class_name)
-
-        if not req.persist:
-            created_features = []
-            for dp in diff_polys:
-                created_features.append({
-                    "type": "Feature",
-                    "geometry": mapping(dp),
-                    "properties": {
-                        "class_id": parent_class_id,
-                        "class_name": parent_class_name,
-                        "area_sqm": dp.area * (111320.0 ** 2),
-                        "author_name": current_user.full_name or "Unknown",
-                    }
-                })
-            for ip in inter_polys:
-                created_features.append({
-                    "type": "Feature",
-                    "geometry": mapping(ip),
-                    "properties": {
-                        "class_id": target_cut_cid,
-                        "class_name": target_cut_cname,
-                        "area_sqm": ip.area * (111320.0 ** 2),
-                        "author_name": current_user.full_name or "Unknown",
-                    }
-                })
-            return {
-                "message": "Poligon berhasil dipisah menjadi bagian independen!",
-                "split_count": len(inter_polys),
-                "deleted_ids": [target_id] if (target_id and isinstance(target_id, int)) else [],
-                "deleted_ui_id": target_ui_id,
-                "created_features": created_features,
-                "updated_features": []
-            }
+            if not req.persist:
+                created_features = []
+                for dp in diff_polys:
+                    created_features.append({
+                        "type": "Feature",
+                        "geometry": mapping(dp),
+                        "properties": {
+                            "class_id": parent_class_id,
+                            "class_name": parent_class_name,
+                            "area_sqm": dp.area * (111320.0 ** 2),
+                            "author_name": current_user.full_name or "Unknown",
+                        }
+                    })
+                for ip in inter_polys:
+                    created_features.append({
+                        "type": "Feature",
+                        "geometry": mapping(ip),
+                        "properties": {
+                            "class_id": target_cut_cid,
+                            "class_name": target_cut_cname,
+                            "area_sqm": ip.area * (111320.0 ** 2),
+                            "author_name": current_user.full_name or "Unknown",
+                        }
+                    })
+                return {
+                    "message": "Poligon berhasil dipisah menjadi bagian independen!",
+                    "split_count": len(inter_polys),
+                    "deleted_ids": [target_id] if (target_id and isinstance(target_id, int)) else [],
+                    "deleted_ui_id": target_ui_id,
+                    "created_features": created_features,
+                    "updated_features": []
+                }
 
     # Fetch all annotations for this task grid
     all_anns = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
@@ -2445,54 +2443,77 @@ def split_by_line(
         parent_class_name = target_f.get("properties", {}).get("class_name", classes_dict.get(parent_class_id, "Belum Teridentifikasi"))
 
         pieces = []
-        for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5)]:
-            try:
-                if poly.intersects(test_blade):
-                    res = split(poly, test_blade)
-                    p_list = _extract_polygons(res, min_area_sqm=0.1)
-                    if len(p_list) > 1:
-                        pieces = p_list
-                        break
-            except Exception:
-                continue
+        if poly.geom_type == 'MultiPolygon':
+            target_sub_idx = None
+            sub_pieces = []
+            for idx, g in enumerate(poly.geoms):
+                ext_bounds_1 = _extend_line_to_bounds(blade, g.bounds, multiplier=1.5)
+                ext_bounds_2 = _extend_line_to_bounds(blade, g.bounds, multiplier=2.5)
+                for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5), ext_bounds_1, ext_bounds_2]:
+                    try:
+                        if g.intersects(test_blade):
+                            sub_res = split(g, test_blade)
+                            p_list = _extract_polygons(sub_res, min_area_sqm=0.1)
+                            if len(p_list) > 1:
+                                target_sub_idx = idx
+                                sub_pieces = p_list
+                                break
+                    except Exception:
+                        continue
+                if len(sub_pieces) > 1:
+                    break
+            if len(sub_pieces) > 1:
+                other_geoms = [g for idx, g in enumerate(poly.geoms) if idx != target_sub_idx]
+                pieces = sub_pieces + other_geoms
+        else:
+            ext_bounds_1 = _extend_line_to_bounds(blade, poly.bounds, multiplier=1.5)
+            ext_bounds_2 = _extend_line_to_bounds(blade, poly.bounds, multiplier=2.5)
+            for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5), ext_bounds_1, ext_bounds_2]:
+                try:
+                    if poly.intersects(test_blade):
+                        res = split(poly, test_blade)
+                        p_list = _extract_polygons(res, min_area_sqm=0.1)
+                        if len(p_list) > 1:
+                            pieces = p_list
+                            break
+                except Exception:
+                    continue
 
-        if len(pieces) <= 1:
-            raise HTTPException(status_code=400, detail="Garis pemotong harus melintasi batas poligon dari ujung ke ujung.")
+        if len(pieces) > 1:
+            pieces.sort(key=lambda p: p.area, reverse=True)
+            p0 = pieces[0]
+            target_slice_cid = new_class_id if (new_class_id and new_class_id > 0 and new_class_id != parent_class_id) else parent_class_id
+            target_slice_cname = classes_dict.get(target_slice_cid, parent_class_name)
 
-        pieces.sort(key=lambda p: p.area, reverse=True)
-        p0 = pieces[0]
-        target_slice_cid = new_class_id if (new_class_id and new_class_id > 0 and new_class_id != parent_class_id) else parent_class_id
-        target_slice_cname = classes_dict.get(target_slice_cid, parent_class_name)
-
-        if not req.persist:
-            created_features = []
-            created_features.append({
-                "type": "Feature",
-                "geometry": mapping(p0),
-                "properties": {
-                    "class_id": parent_class_id,
-                    "class_name": parent_class_name,
-                    "area_sqm": p0.area * (111320.0 ** 2),
-                    "author_name": current_user.full_name or "Unknown",
-                }
-            })
-            for p in pieces[1:]:
+            if not req.persist:
+                created_features = []
                 created_features.append({
                     "type": "Feature",
-                    "geometry": mapping(p),
+                    "geometry": mapping(p0),
                     "properties": {
-                        "class_id": target_slice_cid,
-                        "class_name": target_slice_cname,
-                        "area_sqm": p.area * (111320.0 ** 2),
+                        "class_id": parent_class_id,
+                        "class_name": parent_class_name,
+                        "area_sqm": p0.area * (111320.0 ** 2),
                         "author_name": current_user.full_name or "Unknown",
                     }
                 })
-            return {
-                "message": "Poligon berhasil dipotong dengan garis pemisah!",
-                "deleted_ids": [target_id] if (target_id and isinstance(target_id, int)) else [],
-                "deleted_ui_id": target_ui_id,
-                "created_features": created_features
-            }
+                for p in pieces[1:]:
+                    created_features.append({
+                        "type": "Feature",
+                        "geometry": mapping(p),
+                        "properties": {
+                            "class_id": target_slice_cid,
+                            "class_name": target_slice_cname,
+                            "area_sqm": p.area * (111320.0 ** 2),
+                            "author_name": current_user.full_name or "Unknown",
+                        }
+                    })
+                return {
+                    "message": "Poligon berhasil dipotong dengan garis pemisah!",
+                    "deleted_ids": [target_id] if (target_id and isinstance(target_id, int)) else [],
+                    "deleted_ui_id": target_ui_id,
+                    "created_features": created_features
+                }
 
     # Fetch all annotations for this task grid
     all_annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
@@ -2631,7 +2652,8 @@ def split_by_line(
                 target_sub_idx = None
                 sub_pieces = []
                 for idx, g, _ in sub_cands:
-                    for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5)]:
+                    ext_sub_bounds = _extend_line_to_bounds(blade, g.bounds, multiplier=1.5)
+                    for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5), ext_sub_bounds]:
                         try:
                             if g.intersects(test_blade):
                                 sub_res = split(g, test_blade)
@@ -2699,7 +2721,9 @@ def split_by_line(
             # Case B: Standard singlepart Polygon
             else:
                 pieces = []
-                for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5)]:
+                ext_bounds_1 = _extend_line_to_bounds(blade, poly.bounds, multiplier=1.5)
+                ext_bounds_2 = _extend_line_to_bounds(blade, poly.bounds, multiplier=2.5)
+                for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5), ext_bounds_1, ext_bounds_2]:
                     try:
                         if poly.intersects(test_blade):
                             res = split(poly, test_blade)

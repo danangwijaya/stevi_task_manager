@@ -4719,6 +4719,7 @@ const setDigitizeMode = (mode, force = false) => {
   activeTool.value = mode
   selectedForMerge.value = []
   if (['split_line', 'split_poly', 'freehand_cut'].includes(mode)) {
+    clickedFeatureIdx.value = null
     if (selectedPolyUiIds.value && selectedPolyUiIds.value.size > 1) {
       selectedPolyUiIds.value.clear()
     }
@@ -5328,39 +5329,13 @@ const findTargetPolygonForCut = (cutGeom) => {
       }
     }
 
-    // 2. Priority 2: User clicked a polygon on the map (clickedFeatureIdx)
-    if (clickedFeatureIdx.value !== null && features.value[clickedFeatureIdx.value]) {
-      const cf = features.value[clickedFeatureIdx.value]
-      if (testIntersects(cf)) {
-        let isRealTarget = false
-        if (cutGeom.type === 'LineString') {
-          for (const pt of samplePoints) {
-            try {
-              if (turf.booleanPointInPolygon(pt, cf)) {
-                isRealTarget = true
-                break
-              }
-            } catch (_) {}
-          }
-        } else {
-          try {
-            const inter = turf.intersect(turf.featureCollection([cutFeat, cf]))
-            if (inter && turf.area(inter) > 0.05 * turf.area(cutFeat)) isRealTarget = true
-          } catch (_) {}
-        }
-        if (isRealTarget) {
-          const annId = extractNumericId(cf)
-          return { feat: cf, annId }
-        }
-      }
-    }
-
-    // 3. Priority 3: Search all features, prioritizing polygon containing the body/interior of the blade
+    // 2. Priority 2: Search all features, prioritizing polygon containing the body/interior of the blade/cutter
     let bestFeat = null
     let bestAnnId = null
     let maxIntersectionScore = -1
 
-    for (const feat of features.value) {
+    for (let i = 0; i < features.value.length; i++) {
+      const feat = features.value[i]
       if (!feat || !feat.geometry) continue
       if (!testIntersects(feat)) continue
 
@@ -5381,8 +5356,11 @@ const findTargetPolygonForCut = (cutGeom) => {
           count = inter?.features?.length || 0
         } catch (_) {}
 
-        // Heavily weight interior sample points (100x) over boundary intersections
-        const score = (pointsInside * 100) + count
+        // Heavily weight interior sample points (100x) over boundary touches
+        let score = (pointsInside * 100) + count
+        if (clickedFeatureIdx.value !== null && clickedFeatureIdx.value === i && pointsInside > 0) {
+          score += 50
+        }
 
         if (score > maxIntersectionScore) {
           maxIntersectionScore = score
@@ -5396,6 +5374,9 @@ const findTargetPolygonForCut = (cutGeom) => {
           score = inter ? turf.area(inter) : 0
         } catch (_) {
           score = 1
+        }
+        if (clickedFeatureIdx.value !== null && clickedFeatureIdx.value === i && score > 0) {
+          score *= 1.2
         }
         if (score > maxIntersectionScore) {
           maxIntersectionScore = score
