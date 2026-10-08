@@ -2085,6 +2085,11 @@ def split_by_polygon(
                     "created_features": created_features,
                     "updated_features": []
                 }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Area pemotong tidak beririsan dengan poligon target."
+            )
 
     # Fetch all annotations for this task grid
     all_anns = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
@@ -2221,7 +2226,8 @@ def split_by_polygon(
         if not candidate_anns_with_area:
             raise HTTPException(status_code=400, detail="Area pemotong tidak membelah poligon manapun. Pastikan melintasi batas poligon target.")
 
-        candidate_anns_with_area.sort(key=lambda x: x[2], reverse=True)
+        # Sort candidates by coverage ratio (inter_area / poly.area) descending so foreground polygons take priority over giant background polygons
+        candidate_anns_with_area.sort(key=lambda x: (x[2] / (x[1].area + 1e-12), -x[1].area), reverse=True)
         cutter_area = cutter.area
 
         # Determine target polygons:
@@ -2514,6 +2520,11 @@ def split_by_line(
                     "deleted_ui_id": target_ui_id,
                     "created_features": created_features
                 }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Garis pemotong harus melintasi kedua ujung batas poligon target."
+            )
 
     # Fetch all annotations for this task grid
     all_annotations = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
@@ -2611,8 +2622,8 @@ def split_by_line(
         if not candidate_anns_with_len:
             raise HTTPException(status_code=400, detail="Garis pemotong harus melintasi batas poligon dari ujung ke ujung.")
 
-        # Sort strictly descending by intersection length so the polygon containing the body of the blade is evaluated first
-        candidate_anns_with_len.sort(key=lambda x: x[2], reverse=True)
+        # Sort strictly by smallest polygon area first (foreground objects) so giant background polygons are never prioritized
+        candidate_anns_with_len.sort(key=lambda x: (x[1].area, -x[2]))
 
         target_ann = None
         if req.target_annotation_id:
@@ -2647,13 +2658,12 @@ def split_by_line(
                     i_len = inter.length if inter and not inter.is_empty else 0
                     if g.intersects(blade) or g.intersects(test_ext_blade):
                         sub_cands.append((idx, g, i_len))
-                sub_cands.sort(key=lambda x: x[2], reverse=True)
+                sub_cands.sort(key=lambda x: (x[1].area, -x[2]))
 
                 target_sub_idx = None
                 sub_pieces = []
                 for idx, g, _ in sub_cands:
-                    ext_sub_bounds = _extend_line_to_bounds(blade, g.bounds, multiplier=1.5)
-                    for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5), ext_sub_bounds]:
+                    for test_blade in [blade, _extend_line(blade, factor=0.25, max_ext_deg=5e-4), _extend_line(blade, factor=0.5, max_ext_deg=1e-3)]:
                         try:
                             if g.intersects(test_blade):
                                 sub_res = split(g, test_blade)
@@ -2721,9 +2731,7 @@ def split_by_line(
             # Case B: Standard singlepart Polygon
             else:
                 pieces = []
-                ext_bounds_1 = _extend_line_to_bounds(blade, poly.bounds, multiplier=1.5)
-                ext_bounds_2 = _extend_line_to_bounds(blade, poly.bounds, multiplier=2.5)
-                for test_blade in [blade, _extend_line(blade, factor=0.25), _extend_line(blade, factor=0.5), ext_bounds_1, ext_bounds_2]:
+                for test_blade in [blade, _extend_line(blade, factor=0.25, max_ext_deg=5e-4), _extend_line(blade, factor=0.5, max_ext_deg=1e-3)]:
                     try:
                         if poly.intersects(test_blade):
                             res = split(poly, test_blade)

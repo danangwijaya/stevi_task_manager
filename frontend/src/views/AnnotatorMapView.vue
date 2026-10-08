@@ -4719,7 +4719,6 @@ const setDigitizeMode = (mode, force = false) => {
   activeTool.value = mode
   selectedForMerge.value = []
   if (['split_line', 'split_poly', 'freehand_cut'].includes(mode)) {
-    clickedFeatureIdx.value = null
     if (selectedPolyUiIds.value && selectedPolyUiIds.value.size > 1) {
       selectedPolyUiIds.value.clear()
     }
@@ -5329,65 +5328,143 @@ const findTargetPolygonForCut = (cutGeom) => {
       }
     }
 
-    // 2. Priority 2: Search all features, prioritizing polygon containing the body/interior of the blade/cutter
-    let bestFeat = null
-    let bestAnnId = null
-    let maxIntersectionScore = -1
-
-    for (let i = 0; i < features.value.length; i++) {
-      const feat = features.value[i]
-      if (!feat || !feat.geometry) continue
-      if (!testIntersects(feat)) continue
-
-      const annId = extractNumericId(feat)
-
-      if (cutGeom.type === 'LineString') {
-        let pointsInside = 0
-        for (const pt of samplePoints) {
+    // 2. Priority 2: User explicitly clicked/selected a polygon on the map (clickedFeatureIdx)
+    if (clickedFeatureIdx.value !== null && features.value[clickedFeatureIdx.value]) {
+      const cf = features.value[clickedFeatureIdx.value]
+      if (testIntersects(cf)) {
+        let isRealTarget = false
+        if (cutGeom.type === 'LineString') {
+          for (const pt of samplePoints) {
+            try {
+              if (turf.booleanPointInPolygon(pt, cf)) {
+                isRealTarget = true
+                break
+              }
+            } catch (_) {}
+          }
+          if (!isRealTarget) {
+            try {
+              const inter = turf.lineIntersect(cutFeat, cf)
+              if (inter?.features?.length > 0) isRealTarget = true
+            } catch (_) {}
+          }
+        } else {
           try {
-            if (turf.booleanPointInPolygon(pt, feat)) {
-              pointsInside++
-            }
+            const inter = turf.intersect(turf.featureCollection([cutFeat, cf]))
+            if (inter && turf.area(inter) > 0) isRealTarget = true
           } catch (_) {}
         }
-        let count = 0
-        try {
-          const inter = turf.lineIntersect(cutFeat, feat)
-          count = inter?.features?.length || 0
-        } catch (_) {}
-
-        // Heavily weight interior sample points (100x) over boundary touches
-        let score = (pointsInside * 100) + count
-        if (clickedFeatureIdx.value !== null && clickedFeatureIdx.value === i && pointsInside > 0) {
-          score += 50
-        }
-
-        if (score > maxIntersectionScore) {
-          maxIntersectionScore = score
-          bestFeat = feat
-          bestAnnId = annId
-        }
-      } else {
-        let score = 0
-        try {
-          const inter = turf.intersect(turf.featureCollection([cutFeat, feat]))
-          score = inter ? turf.area(inter) : 0
-        } catch (_) {
-          score = 1
-        }
-        if (clickedFeatureIdx.value !== null && clickedFeatureIdx.value === i && score > 0) {
-          score *= 1.2
-        }
-        if (score > maxIntersectionScore) {
-          maxIntersectionScore = score
-          bestFeat = feat
-          bestAnnId = annId
+        if (isRealTarget) {
+          const annId = extractNumericId(cf)
+          return { feat: cf, annId }
         }
       }
     }
 
-    if (bestFeat) {
-      return { feat: bestFeat, annId: bestAnnId }
+    // 3. Priority 3: Search all features when no polygon was pre-selected
+    if (cutGeom.type === 'LineString') {
+      const candidates = []
+      for (let i = 0; i < features.value.length; i++) {
+        const feat = features.value[i]
+        if (!feat || !feat.geometry) continue
+        if (!testIntersects(feat)) continue
+
+        let pointsInside = 0
+        for (const pt of samplePoints) {
+          try {
+            if (turf.booleanPointInPolygon(pt, feat)) pointsInside++
+          } catch (_) {}
+        }
+
+        let crossings = 0
+        try {
+          const inter = turf.lineIntersect(cutFeat, feat)
+          crossings = inter?.features?.length || 0
+        } catch (_) {}
+
+        if (pointsInside === 0 && crossings === 0) continue
+
+        let featArea = 0
+        try {
+          featArea = turf.area(feat)
+        } catch (_) {
+          featArea = 9999999
+        }
+
+        candidates.push({
+          feat,
+          annId: extractNumericId(feat),
+          pointsInside,
+          crossings,
+          featArea,
+          hasFullBisect: crossings >= 2 && pointsInside >= 1
+        })
+      }
+
+      if (candidates.length > 0) {
+        // Sort candidates:
+        // 1. Polygons with full bisect (crossings >= 2 and pointsInside >= 1) take priority
+        // 2. Smallest area first (foreground objects always take priority over giant background polygons!)
+        // 3. pointsInside descending
+        candidates.sort((a, b) => {
+          if (a.hasFullBisect !== b.hasFullBisect) {
+            return a.hasFullBisect ? -1 : 1
+          }
+          if (a.pointsInside > 0 && b.pointsInside > 0) {
+            if (a.featArea < b.featArea * 0.5) return -1
+            if (b.featArea < a.featArea * 0.5) return 1
+            return b.pointsInside - a.pointsInside
+          }
+          if (a.pointsInside !== b.pointsInside) {
+            return b.pointsInside - a.pointsInside
+          }
+          return a.featArea - b.featArea
+        })
+
+        return { feat: candidates[0].feat, annId: candidates[0].annId }
+      }
+    } else {
+      // Polygon / Cookie cutter:
+      const candidates = []
+      for (let i = 0; i < features.value.length; i++) {
+        const feat = features.value[i]
+        if (!feat || !feat.geometry) continue
+        if (!testIntersects(feat)) continue
+
+        let interArea = 0
+        try {
+          const inter = turf.intersect(turf.featureCollection([cutFeat, feat]))
+          interArea = inter ? turf.area(inter) : 0
+        } catch (_) {}
+
+        if (interArea <= 0) continue
+
+        let featArea = 0
+        try {
+          featArea = turf.area(feat)
+        } catch (_) {
+          featArea = 9999999
+        }
+
+        const coverageRatio = interArea / (featArea + 1e-6)
+        candidates.push({
+          feat,
+          annId: extractNumericId(feat),
+          interArea,
+          featArea,
+          coverageRatio
+        })
+      }
+
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => {
+          if (Math.abs(a.coverageRatio - b.coverageRatio) > 0.05) {
+            return b.coverageRatio - a.coverageRatio
+          }
+          return a.featArea - b.featArea
+        })
+        return { feat: candidates[0].feat, annId: candidates[0].annId }
+      }
     }
   } catch (_) {}
 
@@ -5419,10 +5496,17 @@ const cleanLineCoordinates = (lineGeom) => {
 // Handle Line Split
 const handleSplitByLine = async (lineGeom) => {
   if (!selectedTaskId.value) return
-  showToast('Memproses pemotongan garis...')
 
   // Detect target polygon under cut line
   const { feat: targetFeat, annId: targetAnnId } = findTargetPolygonForCut(lineGeom)
+
+  if (features.value && features.value.length > 0 && !targetFeat && !targetAnnId) {
+    showToast('Garis pemotong harus melintasi poligon yang ingin dipotong.')
+    setDigitizeMode(null)
+    return
+  }
+
+  showToast('Memproses pemotongan garis...')
 
   // If user selected an active class, pass it so the new sliced piece receives it
   const targetClassId = annotationsStore.selectedClass?.id || 0
@@ -5456,9 +5540,15 @@ const handleSplitByLine = async (lineGeom) => {
 // Handle Polygon Cut / Split
 const handleSplitByPolygon = async (cuttingGeom) => {
   if (!selectedTaskId.value) return
-  showToast('Memproses pemisahan area poligon...')
 
   const { feat: targetFeat, annId: targetAnnId } = findTargetPolygonForCut(cuttingGeom)
+
+  if (features.value && features.value.length > 0 && !targetFeat && !targetAnnId) {
+    showToast('Area pemotong harus menumpuk pada poligon yang ingin dipotong.')
+    setDigitizeMode(null)
+    return
+  }
+
   // Use user's active class if selected (e.g. Semak & Belukar), so the cut cookie area is immediately assigned
   const targetClassId = annotationsStore.selectedClass?.id || 0
 
