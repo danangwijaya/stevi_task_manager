@@ -5669,15 +5669,26 @@ const executeMerge = async () => {
   const targetClassId = targetClass?.id || chosenClassId
   const targetClassName = targetClass?.name || 'Tutupan Lahan'
 
-  const annotationIds = selectedForMerge.value.map(f => f.id || f.properties?.id).filter(Boolean)
+  const annotationIds = selectedForMerge.value
+    .map(f => f.id || f.properties?.id)
+    .filter(id => id !== undefined && id !== null)
+    .map(id => (typeof id === 'number' && !isNaN(id)) ? id : (parseInt(id, 10) || id))
   const selectedUiIds = new Set(selectedForMerge.value.map(f => f._uiId).filter(Boolean))
+
+  const cleanFeatures = selectedForMerge.value.map(f => ({
+    type: 'Feature',
+    id: f.id || f.properties?.id,
+    _uiId: f._uiId,
+    geometry: f.geometry,
+    properties: f.properties || {}
+  }))
 
   try {
     const res = await api.mergePolygons(
       selectedTaskId.value,
-      annotationIds.map(Number),
+      annotationIds,
       targetClassId,
-      selectedForMerge.value,
+      cleanFeatures,
       false // persist = false: 100% draft-mode and undoable!
     )
     showToast(res.data?.message || `Poligon berhasil digabungkan menjadi '${targetClassName}'!`)

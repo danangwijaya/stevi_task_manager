@@ -1722,14 +1722,14 @@ class SplitByLineRequest(BaseModel):
     persist: Optional[bool] = False
 
 class MergePolygonsRequest(BaseModel):
-    task_grid_id: int
-    annotation_ids: Optional[List[int]] = None
+    task_grid_id: Optional[int] = None
+    annotation_ids: Optional[List[Any]] = None
     features: Optional[List[Dict[str, Any]]] = None
     target_class_id: Optional[int] = None
     persist: Optional[bool] = False
 
 class GridMergePolygonsRequest(BaseModel):
-    annotation_ids: List[int]
+    annotation_ids: List[Any]
     target_class_id: Optional[int] = None
 
 class UpdateAnnotationClassRequest(BaseModel):
@@ -2918,7 +2918,7 @@ def merge_polygons(
             }
         }
         if not req.persist:
-            del_ids = [f.get("id") for f in req.features if f.get("id") and isinstance(f.get("id"), int)]
+            del_ids = [f.get("id") for f in req.features if f.get("id") and (isinstance(f.get("id"), int) or (isinstance(f.get("id"), str) and str(f.get("id")).isdigit()))]
             del_ui_ids = [f.get("_uiId") for f in req.features if f.get("_uiId")]
             return {
                 "message": f"Berhasil menggabungkan {len(req.features)} poligon menjadi 1 poligon '{target_class_name}'!",
@@ -2927,13 +2927,21 @@ def merge_polygons(
                 "created_features": [created_feat]
             }
 
-    if not req.annotation_ids or len(req.annotation_ids) < 2:
+    valid_int_ids = []
+    if req.annotation_ids:
+        for aid in req.annotation_ids:
+            if isinstance(aid, int):
+                valid_int_ids.append(aid)
+            elif isinstance(aid, str) and aid.isdigit():
+                valid_int_ids.append(int(aid))
+
+    if not valid_int_ids or len(valid_int_ids) < 2:
         raise HTTPException(status_code=400, detail="Pilih minimal 2 poligon untuk digabungkan.")
         
-    annotations = db.query(Annotation).filter(
-        Annotation.task_grid_id == req.task_grid_id,
-        Annotation.id.in_(req.annotation_ids)
-    ).all()
+    query = db.query(Annotation).filter(Annotation.id.in_(valid_int_ids))
+    if req.task_grid_id:
+        query = query.filter(Annotation.task_grid_id == req.task_grid_id)
+    annotations = query.all()
     
     if len(annotations) < 2:
         raise HTTPException(status_code=404, detail="Poligon yang dipilih tidak ditemukan.")
