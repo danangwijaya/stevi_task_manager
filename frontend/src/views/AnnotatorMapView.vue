@@ -2747,7 +2747,7 @@
                 </span>
 
                 <!-- Overlap Actions -->
-                <template v-if="surgeryCurrentError?.type === 'OVERLAP' && surgeryInvolvedPolygons.length >= 2">
+                <template v-if="surgeryCurrentError?.type === 'OVERLAP' && (surgeryInvolvedPolygons.length >= 2 || surgeryCurrentError?.annotation_ids?.length >= 2)">
                   <button
                     @click="executeSurgeryClip('clip_b_by_a')"
                     :disabled="surgeryIsProcessing"
@@ -2756,12 +2756,12 @@
                     <div class="flex items-center justify-between text-xs font-semibold text-slate-900">
                       <span class="flex items-center gap-1.5">
                         <Scissors :size="14" class="text-amber-600" />
-                        <span>Potong Poligon B (#{{ surgeryInvolvedPolygons[1]?.id }})</span>
+                        <span>Potong Poligon B (#{{ surgeryInvolvedPolygons[1]?.id || surgeryCurrentError?.annotation_ids?.[1] }})</span>
                       </span>
                       <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Pertahankan A</span>
                     </div>
                     <p class="text-[11px] text-slate-500 mt-1 leading-normal">
-                      Pangkas bagian tumpang tindih dari Poligon B sehingga bentuk Poligon A (#{{ surgeryInvolvedPolygons[0]?.id }}) tetap utuh.
+                      Pangkas bagian tumpang tindih dari Poligon B sehingga bentuk Poligon A (#{{ surgeryInvolvedPolygons[0]?.id || surgeryCurrentError?.annotation_ids?.[0] }}) tetap utuh.
                     </p>
                   </button>
 
@@ -2773,12 +2773,12 @@
                     <div class="flex items-center justify-between text-xs font-semibold text-slate-900">
                       <span class="flex items-center gap-1.5">
                         <Scissors :size="14" class="text-cyan-600" />
-                        <span>Potong Poligon A (#{{ surgeryInvolvedPolygons[0]?.id }})</span>
+                        <span>Potong Poligon A (#{{ surgeryInvolvedPolygons[0]?.id || surgeryCurrentError?.annotation_ids?.[0] }})</span>
                       </span>
                       <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Pertahankan B</span>
                     </div>
                     <p class="text-[11px] text-slate-500 mt-1 leading-normal">
-                      Pangkas bagian tumpang tindih dari Poligon A sehingga bentuk Poligon B (#{{ surgeryInvolvedPolygons[1]?.id }}) tetap utuh.
+                      Pangkas bagian tumpang tindih dari Poligon A sehingga bentuk Poligon B (#{{ surgeryInvolvedPolygons[1]?.id || surgeryCurrentError?.annotation_ids?.[1] }}) tetap utuh.
                     </p>
                   </button>
 
@@ -2795,7 +2795,7 @@
                       <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Merge</span>
                     </div>
                     <p class="text-[11px] text-slate-500 mt-1 leading-normal">
-                      Satukan Poligon #{{ surgeryInvolvedPolygons[0]?.id }} dan #{{ surgeryInvolvedPolygons[1]?.id }} menjadi satu bidang utuh.
+                      Satukan Poligon #{{ surgeryInvolvedPolygons[0]?.id || surgeryCurrentError?.annotation_ids?.[0] }} dan #{{ surgeryInvolvedPolygons[1]?.id || surgeryCurrentError?.annotation_ids?.[1] }} menjadi satu bidang utuh.
                     </p>
                   </button>
                 </template>
@@ -4887,11 +4887,14 @@ const handleBeforeUnload = (e) => {
 }
 
 const queueServerAutoSave = () => {
+  // Never auto-save whole grid while user is inside topology surgery studio
+  if (showTopologySurgeryModal.value) return
   hasUnsavedChanges.value = true
   if (serverAutoSaveTimer) clearTimeout(serverAutoSaveTimer)
   // Auto-save to cloud server after 20 seconds of user idle time
   serverAutoSaveTimer = setTimeout(async () => {
     if (!selectedTaskId.value || !features.value || features.value.length === 0) return
+    if (showTopologySurgeryModal.value) return
     if (annotationsStore.saving || isCloudSaving.value) return
     isCloudSaving.value = true
     try {
@@ -6396,6 +6399,15 @@ const loadSurgeryError = (idx) => {
       }
     }
 
+    // 3. Fallback: try finding in annotationsStore.currentFeatures
+    if (!geojson && annotationsStore.currentFeatures) {
+      const feat = annotationsStore.currentFeatures.find(f => String(f.id ?? f.properties?.id) === String(polyId))
+      if (feat) {
+        geojson = JSON.parse(JSON.stringify(feat))
+        cId = geojson.properties?.class_id
+      }
+    }
+
     if (geojson) {
       const cls = annotationsStore.classes.find(c => c.id === cId)
       const color = pIndex === 0 ? '#F59E0B' : '#06B6D4'
@@ -7043,10 +7055,24 @@ const saveSurgeryVertexEdits = async () => {
 }
 
 const executeSurgeryClip = async (action) => {
-  if (!selectedTaskId.value || surgeryInvolvedPolygons.value.length < 2) return
+  if (!selectedTaskId.value) return
   surgeryIsProcessing.value = true
-  const idA = surgeryInvolvedPolygons.value[0].id
-  const idB = surgeryInvolvedPolygons.value[1].id
+  const err = surgeryCurrentError.value
+  let idA = surgeryInvolvedPolygons.value[0]?.id
+  let idB = surgeryInvolvedPolygons.value[1]?.id
+
+  // Fallback to error annotation_ids if surgeryInvolvedPolygons was not fully populated
+  if ((!idA || !idB) && err?.annotation_ids?.length >= 2) {
+    idA = err.annotation_ids[0]
+    idB = err.annotation_ids[1]
+  }
+
+  if (!idA || !idB) {
+    showToast('⚠️ Data poligon tidak lengkap untuk dipotong, melewati...')
+    nextSurgeryError()
+    surgeryIsProcessing.value = false
+    return
+  }
 
   try {
     const res = await api.resolveOverlap({
@@ -7062,17 +7088,32 @@ const executeSurgeryClip = async (action) => {
     refreshSurgeryState()
   } catch (err) {
     console.error('Surgery clip error:', err)
-    alert(err.response?.data?.detail || 'Gagal memotong overlap.')
+    // Synchronize gracefully instead of halting user
+    await loadTaskData(selectedTaskId.value, true)
+    await runTopologyCheck(false)
+    refreshSurgeryState()
+    showToast(err.response?.data?.detail || 'Sinkronisasi topologi diperbarui.')
   } finally {
     surgeryIsProcessing.value = false
   }
 }
 
 const executeSurgeryMerge = async () => {
-  if (!selectedTaskId.value || surgeryInvolvedPolygons.value.length < 2) return
+  if (!selectedTaskId.value) return
   surgeryIsProcessing.value = true
-  const ids = surgeryInvolvedPolygons.value.map(p => p.id)
-  const targetClassId = surgeryInvolvedPolygons.value[0].geojson?.properties?.class_id || annotationsStore.classes[0]?.id
+  const err = surgeryCurrentError.value
+  let ids = surgeryInvolvedPolygons.value.map(p => p.id).filter(Boolean)
+  if (ids.length < 2 && err?.annotation_ids?.length >= 2) {
+    ids = [...err.annotation_ids]
+  }
+
+  if (ids.length < 2) {
+    showToast('⚠️ Data poligon tidak lengkap untuk digabung.')
+    surgeryIsProcessing.value = false
+    return
+  }
+
+  const targetClassId = surgeryInvolvedPolygons.value[0]?.geojson?.properties?.class_id || annotationsStore.classes[0]?.id
 
   try {
     // CRITICAL: persist = true so the merged polygon is saved into database!
@@ -7084,7 +7125,10 @@ const executeSurgeryMerge = async () => {
     refreshSurgeryState()
   } catch (err) {
     console.error('Surgery merge error:', err)
-    alert(err.response?.data?.detail || 'Gagal menggabungkan poligon.')
+    await loadTaskData(selectedTaskId.value, true)
+    await runTopologyCheck(false)
+    refreshSurgeryState()
+    showToast(err.response?.data?.detail || 'Sinkronisasi topologi diperbarui.')
   } finally {
     surgeryIsProcessing.value = false
   }

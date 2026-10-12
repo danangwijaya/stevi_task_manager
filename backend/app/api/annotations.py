@@ -436,13 +436,14 @@ def save_grid_annotations(
             detail=f"Ditolak: Permintaan simpan kosong (0 fitur) sementara grid memiliki {existing_count} poligon tersimpan di server. Aksi dibatalkan untuk mencegah kehilangan data."
         )
 
-    # Clear previous annotations for this grid to sync cleanly (safeguard review pins)
-    db.query(TaskReviewPin).filter(TaskReviewPin.task_grid_id == task_grid_id).update({"annotation_id": None}, synchronize_session=False)
-    db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).delete()
-    
+    # Fetch existing annotations to preserve their IDs during saves/auto-saves
+    existing_anns = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
+    existing_map = {ann.id: ann for ann in existing_anns}
+    retained_ids = set()
+
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
 
-    new_annotations = []
+    saved_annotations = []
     seen_geom_keys = set()
 
     for f in data.features:
@@ -458,7 +459,15 @@ def save_grid_annotations(
             if not extracted_polys:
                 continue
 
-            for poly_part in extracted_polys:
+            # Check if this feature has an existing integer database ID
+            raw_fid = f.id or f.properties.get("id")
+            fid = None
+            if isinstance(raw_fid, int):
+                fid = raw_fid
+            elif isinstance(raw_fid, str) and raw_fid.isdigit():
+                fid = int(raw_fid)
+
+            for poly_idx, poly_part in enumerate(extracted_polys):
                 part_geojson = mapping(poly_part)
                 # Deduplication key based on normalized coordinate structure
                 geom_key = json.dumps(part_geojson, sort_keys=True)
@@ -467,29 +476,48 @@ def save_grid_annotations(
                 seen_geom_keys.add(geom_key)
 
                 area_sqm = poly_part.area * (111320.0 ** 2)
-                ann = Annotation(
-                    task_grid_id=task_grid_id,
-                    user_id=current_user.id,
-                    class_id=class_id,
-                    class_name=class_name,
-                    geom_geojson=json.dumps(part_geojson),
-                    area_sqm=area_sqm
-                )
-                db.add(ann)
-                new_annotations.append(ann)
+
+                # If first piece matches an existing ID and hasn't been claimed yet, update in-place to KEEP STABLE ID!
+                if poly_idx == 0 and fid is not None and fid in existing_map and fid not in retained_ids:
+                    ann = existing_map[fid]
+                    ann.class_id = class_id
+                    ann.class_name = class_name
+                    ann.geom_geojson = json.dumps(part_geojson)
+                    ann.area_sqm = area_sqm
+                    ann.user_id = current_user.id
+                    retained_ids.add(fid)
+                    saved_annotations.append(ann)
+                else:
+                    ann = Annotation(
+                        task_grid_id=task_grid_id,
+                        user_id=current_user.id,
+                        class_id=class_id,
+                        class_name=class_name,
+                        geom_geojson=json.dumps(part_geojson),
+                        area_sqm=area_sqm
+                    )
+                    db.add(ann)
+                    saved_annotations.append(ann)
         except Exception:
             continue
-        
+
+    # Clean up annotations that were genuinely deleted by the user
+    to_delete_ids = set(existing_map.keys()) - retained_ids
+    if to_delete_ids:
+        db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(to_delete_ids)).update({"annotation_id": None}, synchronize_session=False)
+        db.query(Annotation).filter(Annotation.id.in_(to_delete_ids)).delete(synchronize_session=False)
+
     # Auto mark task as IN_PROGRESS if it was ASSIGNED or UNASSIGNED
     if task.status in ["ASSIGNED", "REVISION_NEEDED", "UNASSIGNED"]:
         task.status = "IN_PROGRESS"
         if task.assigned_user_id is None:
             task.assigned_user_id = current_user.id
         
+    db.flush()
     db.commit()
 
     # Automatically record version snapshot & audit log
-    if len(new_annotations) > 0:
+    if len(saved_annotations) > 0:
         create_grid_snapshot_from_db(
             db=db,
             task_grid_id=task_grid_id,
@@ -506,7 +534,7 @@ def save_grid_annotations(
         )
 
     saved_features = []
-    for ann in new_annotations:
+    for ann in saved_annotations:
         saved_features.append({
             "type": "Feature",
             "id": ann.id,
@@ -521,8 +549,8 @@ def save_grid_annotations(
         })
 
     return {
-        "message": f"Successfully saved {len(new_annotations)} annotation polygons",
-        "count": len(new_annotations),
+        "message": f"Successfully saved {len(saved_annotations)} annotation polygons",
+        "count": len(saved_annotations),
         "saved_features": saved_features
     }
 
@@ -1474,7 +1502,10 @@ def resolve_overlap(
     ann_b = db.query(Annotation).filter(Annotation.id == req.ann_id_b, Annotation.task_grid_id == req.task_grid_id).first()
     
     if not ann_a or not ann_b:
-        raise HTTPException(status_code=404, detail="Salah satu atau kedua poligon tidak ditemukan pada grid ini")
+        return {
+            "status": "already_resolved",
+            "message": "Salah satu poligon telah terhapus atau diperbarui sebelumnya. Topologi telah disinkronkan."
+        }
         
     try:
         geom_a = shape(json.loads(ann_a.geom_geojson))
@@ -1488,11 +1519,17 @@ def resolve_overlap(
         geom_b = make_valid(geom_b)
         
     if not geom_a.intersects(geom_b):
-        return {"message": f"Poligon #{ann_a.id} dan #{ann_b.id} tidak tumpang tindih."}
+        return {
+            "status": "already_resolved",
+            "message": f"Poligon #{ann_a.id} dan #{ann_b.id} sudah tidak tumpang tindih."
+        }
 
     inter = geom_a.intersection(geom_b)
     if inter.is_empty or inter.area <= 0:
-        return {"message": f"Poligon #{ann_a.id} dan #{ann_b.id} hanya bersentuhan di garis batas (tidak bertumpuk)."}
+        return {
+            "status": "already_resolved",
+            "message": f"Poligon #{ann_a.id} dan #{ann_b.id} hanya bersentuhan di garis batas (tidak bertumpuk)."
+        }
         
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
     
