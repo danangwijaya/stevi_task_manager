@@ -364,11 +364,34 @@
             <span class="hidden sm:inline">Riwayat Versi</span>
           </button>
 
+          <!-- Cloud Auto-Save Status Badge -->
+          <div
+            v-if="selectedTaskId"
+            class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono border transition-colors"
+            :class="hasUnsavedChanges
+              ? 'bg-amber-50 text-amber-800 border-amber-200'
+              : 'bg-emerald-50 text-emerald-800 border-emerald-200'"
+            :title="hasUnsavedChanges ? 'Ada perubahan yang belum tersimpan ke server. Auto-save berjalan otomatis.' : `Tersimpan aman di cloud ${cloudSavedAt ? '(' + cloudSavedAt + ')' : ''}`"
+          >
+            <span v-if="isCloudSaving || annotationsStore.saving" class="flex items-center gap-1 text-indigo-600 font-sans font-medium">
+              <RotateCw :size="11" class="animate-spin text-indigo-600" />
+              <span>Menyimpan ke Cloud...</span>
+            </span>
+            <span v-else-if="hasUnsavedChanges" class="flex items-center gap-1.5 text-amber-700 font-sans font-medium">
+              <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+              <span>Draf Belum Disimpan</span>
+            </span>
+            <span v-else class="flex items-center gap-1 text-emerald-700 font-sans font-medium">
+              <Check :size="11" class="text-emerald-600" />
+              <span>Tersimpan di Cloud {{ cloudSavedAt ? `(${cloudSavedAt})` : '' }}</span>
+            </span>
+          </div>
+
           <button
             @click="saveAnnotations"
             :disabled="annotationsStore.saving"
             class="bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-3.5 py-1.5 rounded-md border border-slate-300 transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
-            title="Simpan perubahan poligon (Ctrl+S)"
+            title="Simpan perubahan poligon ke server (Ctrl+S)"
           >
             <RotateCw v-if="annotationsStore.saving" :size="13" class="animate-spin text-slate-500" />
             <Save v-else :size="13" class="text-slate-500" />
@@ -1662,8 +1685,8 @@
             :key="item.feat._uiId || item.originalIdx"
             @mouseenter="highlightFeatureOnMap(item.originalIdx, true)"
             @mouseleave="highlightFeatureOnMap(item.originalIdx, false)"
-            @click="toggleSelectPolygon(item.feat._uiId); flyToFeature(item.originalIdx)"
-            class="p-2.5 bg-slate-50 border rounded-xl space-y-1 transition-all text-xs cursor-pointer select-none"
+            @click="selectPolygonForClassEdit(item.originalIdx, item.feat)"
+            class="p-2.5 bg-slate-50 border rounded-xl space-y-1.5 transition-all text-xs cursor-pointer select-none"
             :class="[
               selectedPolyUiIds.has(item.feat._uiId)
                 ? 'bg-cyan-50/90 border-cyan-400 shadow-xs ring-2 ring-cyan-400/40 text-cyan-950'
@@ -1671,28 +1694,47 @@
             ]"
           >
             <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 min-w-0">
                 <input
                   type="checkbox"
                   :checked="selectedPolyUiIds.has(item.feat._uiId)"
                   @click.stop="toggleSelectPolygon(item.feat._uiId)"
                   class="w-4 h-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer shrink-0"
+                  title="Pilih untuk operasi batch (hapus/gabung)"
                 />
                 <div
-                  class="w-3 h-3 rounded-sm border border-slate-300 shrink-0"
+                  class="w-3.5 h-3.5 rounded-xs border border-slate-300 shrink-0 shadow-2xs"
                   :style="{ backgroundColor: item.feat.properties?.color || '#9CA3AF' }"
                 ></div>
-                <span class="font-bold text-slate-800 truncate max-w-[140px]">{{ item.feat.properties?.class_name || 'Belum Teridentifikasi' }}</span>
+                <span class="font-bold text-slate-800 truncate">{{ item.feat.properties?.class_name || 'Belum Teridentifikasi' }}</span>
               </div>
-              <div class="flex items-center gap-1.5">
+              <div class="flex items-center gap-1.5 shrink-0">
                 <span v-if="selectedPolyUiIds.has(item.feat._uiId)" class="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" title="Terpilih di peta"></span>
-                <span class="text-[10px] text-slate-400 font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">#{{ item.originalIdx + 1 }}</span>
+                <span class="text-[10px] text-slate-500 font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">#{{ item.originalIdx + 1 }}</span>
               </div>
             </div>
 
-            <div class="flex items-center justify-between text-[10px] text-slate-500 pt-0.5 pl-6">
-              <span class="font-mono">Luas: ~{{ Math.round((item.feat.properties?.area_sqm || 10000) / 10000) }} Ha</span>
-              <span v-if="item.feat.properties?.class_id === 0" class="text-amber-600 font-bold">⚠️ Belum di-assign</span>
+            <div class="flex items-center justify-between text-[10px] text-slate-500 pt-1 pl-6 border-t border-slate-200/50">
+              <div class="flex items-center gap-1.5">
+                <span class="font-mono">~{{ Math.round((item.feat.properties?.area_sqm || 10000) / 10000) }} Ha</span>
+                <span v-if="item.feat.properties?.class_id === 0" class="text-amber-600 font-bold bg-amber-50 px-1 py-0.2 rounded border border-amber-200">⚠️ Perlu Kelas</span>
+              </div>
+              <div class="flex items-center gap-1">
+                <button
+                  @click.stop="selectPolygonForClassEdit(item.originalIdx, item.feat)"
+                  class="px-2 py-0.5 rounded-md font-bold text-[10px] bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200 hover:border-indigo-600 transition-colors cursor-pointer"
+                  title="Pilih poligon ini dan buka pengganti kelas"
+                >
+                  Ganti Kelas
+                </button>
+                <button
+                  @click.stop="flyToFeature(item.originalIdx)"
+                  class="p-0.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+                  title="Pusatkan peta ke poligon ini"
+                >
+                  <Crosshair :size="12" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2475,7 +2517,10 @@
             <div class="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 gap-1.5 text-xs text-slate-600">
               <span class="text-[11px] hidden sm:inline">Masalah</span>
               <span class="font-mono font-bold text-slate-900">
-                {{ (surgeryErrorIndex + 1) }} / {{ topologyResult?.errors?.length || 0 }}
+                {{ (surgeryErrorIndex + 1) }} / {{ topologyResult?.total_errors || topologyResult?.errors?.length || 0 }}
+              </span>
+              <span v-if="topologyResult?.total_errors && topologyResult.total_errors > (topologyResult?.errors?.length || 0)" class="text-[10px] text-slate-400 font-mono">
+                ({{ topologyResult.errors.length }} dimuat)
               </span>
             </div>
 
@@ -4292,6 +4337,7 @@ onMounted(async () => {
   window.addEventListener('keyup', handleKeyup)
   window.addEventListener('online', onNetworkOnline)
   window.addEventListener('offline', onNetworkOffline)
+  window.addEventListener('beforeunload', handleBeforeUnload)
   
   // Fetch available dynamic raster years (2025, 2022, 2018+)
   try {
@@ -4346,10 +4392,12 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', onMapMouseUp)
   window.removeEventListener('online', onNetworkOnline)
   window.removeEventListener('offline', onNetworkOffline)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('mousemove', onSwipeMouseMove)
   window.removeEventListener('mouseup', onSwipeMouseUp)
   destroySwipeLayers()
   if (draftAutoSaveTimer) clearTimeout(draftAutoSaveTimer)
+  if (serverAutoSaveTimer) clearTimeout(serverAutoSaveTimer)
   if (map) {
     map.remove()
     map = null
@@ -4824,9 +4872,45 @@ const setDigitizeMode = (mode, force = false) => {
   }
 }
 
-// ─── OFFLINE DRAFT & INDEXEDDB AUTO-SAVE (POIN 1) ─────────────
+// ─── OFFLINE DRAFT & BACKGROUND CLOUD AUTO-SAVE ─────────────
+let serverAutoSaveTimer = null
+const isCloudSaving = ref(false)
+const cloudSavedAt = ref(null)
+const hasUnsavedChanges = ref(false)
+
+const handleBeforeUnload = (e) => {
+  if (hasUnsavedChanges.value) {
+    e.preventDefault()
+    e.returnValue = 'Terdapat draf poligon yang belum disimpan ke server. Yakin ingin keluar?'
+    return e.returnValue
+  }
+}
+
+const queueServerAutoSave = () => {
+  hasUnsavedChanges.value = true
+  if (serverAutoSaveTimer) clearTimeout(serverAutoSaveTimer)
+  // Auto-save to cloud server after 20 seconds of user idle time
+  serverAutoSaveTimer = setTimeout(async () => {
+    if (!selectedTaskId.value || !features.value || features.value.length === 0) return
+    if (annotationsStore.saving || isCloudSaving.value) return
+    isCloudSaving.value = true
+    try {
+      const ok = await annotationsStore.saveGridAnnotations(selectedTaskId.value, features.value)
+      if (ok) {
+        cloudSavedAt.value = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        hasUnsavedChanges.value = false
+      }
+    } catch (err) {
+      console.warn('Gagal background auto-save ke cloud:', err)
+    } finally {
+      isCloudSaving.value = false
+    }
+  }, 20000)
+}
+
 const queueOfflineDraftSave = () => {
   if (!selectedTaskId.value || !features.value) return
+  hasUnsavedChanges.value = true
   if (draftAutoSaveTimer) clearTimeout(draftAutoSaveTimer)
   draftAutoSaveTimer = setTimeout(async () => {
     try {
@@ -4839,6 +4923,7 @@ const queueOfflineDraftSave = () => {
       console.warn('Gagal auto-save draf lokal ke IndexedDB:', err)
     }
   }, 1000)
+  queueServerAutoSave()
 }
 
 const restoreOfflineDraft = () => {
@@ -5694,6 +5779,21 @@ const executeMerge = async () => {
     showToast(res.data?.message || `Poligon berhasil digabungkan menjadi '${targetClassName}'!`)
 
     if (res.data?.deleted_ids || res.data?.created_features) {
+      // Explicitly purge old Leaflet layers matching any item in selectedForMerge
+      const toRemoveLayers = []
+      featureGroup.eachLayer(l => {
+        if (selectedForMerge.value.some(m => m === l.feature || (m._uiId && m._uiId === l._uiId) || (m.id != null && (String(m.id) === String(l.feature?.id) || String(m.id) === String(l.feature?.properties?.id))))) {
+          toRemoveLayers.push(l)
+        }
+      })
+      toRemoveLayers.forEach(l => {
+        try {
+          if (map && map.pm) l.pm?.disable()
+          featureGroup.removeLayer(l)
+          if (map.hasLayer(l)) map.removeLayer(l)
+        } catch (_) {}
+      })
+
       const delUis = res.data.deleted_ui_ids || Array.from(selectedUiIds)
       applyDeltaUpdate(
         res.data.deleted_ids || [],
@@ -6955,9 +7055,10 @@ const executeSurgeryClip = async (action) => {
       ann_id_b: idB,
       action: action
     })
-    showToast(res.data?.message || 'Overlap berhasil dipotong!')
     await loadTaskData(selectedTaskId.value, true)
     await runTopologyCheck(false)
+    const remaining = topologyResult.value?.total_errors ?? topologyResult.value?.errors?.length ?? 0
+    showToast(res.data?.message || `Overlap berhasil dipotong! (Sisa ${remaining} masalah)`)
     refreshSurgeryState()
   } catch (err) {
     console.error('Surgery clip error:', err)
@@ -6974,10 +7075,12 @@ const executeSurgeryMerge = async () => {
   const targetClassId = surgeryInvolvedPolygons.value[0].geojson?.properties?.class_id || annotationsStore.classes[0]?.id
 
   try {
-    const res = await api.mergePolygons(selectedTaskId.value, ids, targetClassId)
-    showToast(res.data?.message || 'Poligon berhasil digabungkan!')
+    // CRITICAL: persist = true so the merged polygon is saved into database!
+    const res = await api.mergePolygons(selectedTaskId.value, ids, targetClassId, null, true)
     await loadTaskData(selectedTaskId.value, true)
     await runTopologyCheck(false)
+    const remaining = topologyResult.value?.total_errors ?? topologyResult.value?.errors?.length ?? 0
+    showToast(res.data?.message || `Poligon berhasil digabungkan! (Sisa ${remaining} masalah)`)
     refreshSurgeryState()
   } catch (err) {
     console.error('Surgery merge error:', err)
@@ -7465,12 +7568,44 @@ const bindLayerEvents = (layer) => {
       return
     }
 
-    clickedFeatureIdx.value = idx
+    // Overlap handling: find all polygon features containing clicked latlng
+    const overlappingIndices = []
+    if (e.latlng) {
+      const clickPt = [e.latlng.lng, e.latlng.lat]
+      features.value.forEach((f, fIdx) => {
+        if (f && f.geometry && isPointInPolygonGeom(clickPt, f.geometry)) {
+          overlappingIndices.push(fIdx)
+        }
+      })
+    }
+
+    let targetIdx = idx
+    if (overlappingIndices.length > 1) {
+      // Cycle through overlapping polygons on successive clicks!
+      const currentPos = overlappingIndices.indexOf(clickedFeatureIdx.value)
+      if (currentPos >= 0) {
+        targetIdx = overlappingIndices[(currentPos + 1) % overlappingIndices.length]
+      } else if (!overlappingIndices.includes(targetIdx)) {
+        targetIdx = overlappingIndices[0]
+      }
+    }
+
+    const targetFeat = features.value[targetIdx] || feat
+    let targetLayer = layer
+    if (targetIdx !== idx && featureGroup) {
+      featureGroup.eachLayer(l => {
+        if (l.feature === targetFeat || l._uiId === targetFeat?._uiId || (l.feature?.id && l.feature.id === targetFeat?.id)) {
+          targetLayer = l
+        }
+      })
+    }
+
+    clickedFeatureIdx.value = targetIdx
     rightTab.value = 'classes'
     refreshMapStyles()
 
-    // Open Interactive Popup on Polygon
-    openClassPickerPopup(layer, feat, idx, e.latlng)
+    // Open Interactive Popup on Polygon with overlap switcher
+    openClassPickerPopup(targetLayer, targetFeat, targetIdx, e.latlng, overlappingIndices)
   })
 
   // Layer-level edit and marker drag hooks for Topological Editing and fast closure
@@ -7575,7 +7710,65 @@ const bindLayerEvents = (layer) => {
   layer.on('pm:vertexremoved', handleVertexChangeFast)
 }
 
-const openClassPickerPopup = (layer, feat, idx, latlng) => {
+const isPointInPolygonGeom = (point, geom) => {
+  if (!geom || !geom.coordinates) return false
+  const [x, y] = point
+
+  const checkRing = (ring) => {
+    let inside = false
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1]
+      const xj = ring[j][0], yj = ring[j][1]
+      const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+      if (intersect) inside = !inside
+    }
+    return inside
+  }
+
+  if (geom.type === 'Polygon') {
+    if (!geom.coordinates[0] || !checkRing(geom.coordinates[0])) return false
+    for (let i = 1; i < geom.coordinates.length; i++) {
+      if (checkRing(geom.coordinates[i])) return false
+    }
+    return true
+  } else if (geom.type === 'MultiPolygon') {
+    for (const polyCoords of geom.coordinates) {
+      if (polyCoords[0] && checkRing(polyCoords[0])) {
+        let inHole = false
+        for (let i = 1; i < polyCoords.length; i++) {
+          if (checkRing(polyCoords[i])) { inHole = true; break; }
+        }
+        if (!inHole) return true
+      }
+    }
+  }
+  return false
+}
+
+const selectPolygonForClassEdit = (idx, feat) => {
+  if (idx < 0 || !features.value[idx]) return
+  clickedFeatureIdx.value = idx
+  rightTab.value = 'classes'
+  refreshMapStyles()
+  flyToFeature(idx)
+
+  let matchedLayer = null
+  if (featureGroup) {
+    featureGroup.eachLayer(l => {
+      if (matchedLayer) return
+      if (l.feature === feat || l._uiId === feat?._uiId || (l.feature?.id && l.feature.id === feat?.id)) {
+        matchedLayer = l
+      }
+    })
+  }
+  if (matchedLayer && map) {
+    const bounds = matchedLayer.getBounds ? matchedLayer.getBounds() : null
+    const center = bounds && bounds.isValid() ? bounds.getCenter() : null
+    openClassPickerPopup(matchedLayer, feat || features.value[idx], idx, center)
+  }
+}
+
+const openClassPickerPopup = (layer, feat, idx, latlng, overlappingIndices = []) => {
   const currentClassId = feat.properties?.class_id !== undefined ? feat.properties.class_id : 0
   const currentClassName = feat.properties?.class_name || 'Belum Teridentifikasi'
   const currentColor = feat.properties?.color || '#9CA3AF'
@@ -7583,9 +7776,23 @@ const openClassPickerPopup = (layer, feat, idx, latlng) => {
 
   // Build interactive HTML popup
   const popupContent = document.createElement('div')
-  popupContent.className = 'p-1 text-slate-800 font-sans space-y-2 max-w-[240px]'
+  popupContent.className = 'p-1 text-slate-800 font-sans space-y-2 max-w-[250px]'
+
+  let overlapBanner = ''
+  if (overlappingIndices && overlappingIndices.length > 1) {
+    overlapBanner = `
+      <div class="p-1.5 bg-amber-50 rounded-lg border border-amber-200 space-y-1">
+        <div class="flex items-center justify-between text-[10px] text-amber-900 font-bold">
+          <span>⚠️ Tumpukan (${overlappingIndices.length} Poligon)</span>
+          <span class="text-[9px] text-amber-700">Pilih aktif:</span>
+        </div>
+        <div class="flex flex-wrap gap-1" id="popup-overlap-stack"></div>
+      </div>
+    `
+  }
 
   popupContent.innerHTML = `
+    ${overlapBanner}
     <div class="flex items-center justify-between border-b border-slate-200 pb-1.5">
       <div class="flex items-center gap-1.5">
         <div class="w-3 h-3 rounded-xs border border-slate-300" style="background-color: ${currentColor};"></div>
@@ -7605,6 +7812,30 @@ const openClassPickerPopup = (layer, feat, idx, latlng) => {
     <div class="grid grid-cols-2 gap-1 max-h-36 overflow-y-auto pr-0.5" id="popup-class-grid">
     </div>
   `
+
+  if (overlappingIndices && overlappingIndices.length > 1) {
+    const stackContainer = popupContent.querySelector('#popup-overlap-stack')
+    if (stackContainer) {
+      overlappingIndices.forEach(oIdx => {
+        const oFeat = features.value[oIdx]
+        if (!oFeat) return
+        const isCurrent = oIdx === idx
+        const oClass = annotationsStore.classes.find(c => c.id === oFeat.properties?.class_id)
+        const btn = document.createElement('button')
+        btn.className = `px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1 ${
+          isCurrent ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+        }`
+        btn.innerHTML = `
+          <span class="w-2 h-2 rounded-full shrink-0" style="background-color: ${oClass?.color || '#9CA3AF'};"></span>
+          <span>#${oIdx + 1} ${oClass?.name ? oClass.name.substring(0, 8) + '...' : 'Draf'}</span>
+        `
+        btn.onclick = () => {
+          selectPolygonForClassEdit(oIdx, oFeat)
+        }
+        stackContainer.appendChild(btn)
+      })
+    }
+  }
 
   const classGrid = popupContent.querySelector('#popup-class-grid')
   annotationsStore.classes.forEach(cls => {
@@ -7626,14 +7857,17 @@ const openClassPickerPopup = (layer, feat, idx, latlng) => {
     classGrid.appendChild(btn)
   })
 
-  L.popup({
-    className: 'custom-gis-popup',
-    offset: [0, -10],
-    closeButton: true
-  })
-    .setLatLng(latlng || layer.getBounds().getCenter())
-    .setContent(popupContent)
-    .openOn(map)
+  const popupPos = latlng || (layer && layer.getBounds ? layer.getBounds().getCenter() : null)
+  if (popupPos && map) {
+    L.popup({
+      className: 'custom-gis-popup',
+      offset: [0, -10],
+      closeButton: true
+    })
+      .setLatLng(popupPos)
+      .setContent(popupContent)
+      .openOn(map)
+  }
 }
 
 const reassignClassToClickedPolygon = async (cls) => {
@@ -8086,7 +8320,12 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
         updatedAt: draft.updatedAt,
         polygonCount: draft.features.length
       }
-      if (draft.features.length !== fetchedFeatures.length) {
+      const draftTime = draft.updatedAt ? new Date(draft.updatedAt).getTime() : 0
+      const serverTime = task.updated_at ? new Date(task.updated_at).getTime() : 0
+      const isCountDifferent = draft.features.length !== fetchedFeatures.length
+      const isDraftNewer = draftTime > (serverTime + 30000) // 30s buffer
+
+      if (isCountDifferent || isDraftNewer) {
         pendingDraftToRestore.value = draft
         showDraftRestorePrompt.value = true
       }
@@ -8096,6 +8335,18 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
     }
   } catch (err) {
     console.warn('Gagal membaca draf IndexedDB:', err)
+  }
+
+  // Reset unsaved changes on fresh task load
+  if (!preserveHistory) {
+    hasUnsavedChanges.value = false
+    if (task.updated_at) {
+      try {
+        cloudSavedAt.value = new Date(task.updated_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      } catch {
+        cloudSavedAt.value = null
+      }
+    }
   }
 
   // 5. Fetch sibling task information across other available years
@@ -8567,6 +8818,12 @@ const saveAnnotations = async () => {
   const ok = await annotationsStore.saveGridAnnotations(selectedTaskId.value, features.value)
   if (ok) {
     showToast('Semua poligon draf berhasil disimpan!')
+    hasUnsavedChanges.value = false
+    cloudSavedAt.value = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    if (serverAutoSaveTimer) {
+      clearTimeout(serverAutoSaveTimer)
+      serverAutoSaveTimer = null
+    }
     await tasksStore.fetchTaskDetail(selectedTaskId.value)
     if (selectedTaskId.value) {
       await clearTaskDraft(selectedTaskId.value)

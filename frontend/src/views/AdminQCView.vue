@@ -299,7 +299,7 @@
           <!-- Grid Cards List -->
           <div class="space-y-2 overflow-y-auto flex-1 min-h-[350px] max-h-[750px] xl:max-h-[860px] pr-1">
             <div
-              v-for="grid in displayGridList"
+              v-for="grid in renderedGridList"
               :key="grid.task_id || grid.id"
               @click="selectTaskByGridItem(grid)"
               class="p-3 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2 shadow-2xs hover:shadow-xs group"
@@ -353,6 +353,16 @@
                   </span>
                 </div>
               </div>
+            </div>
+
+            <!-- Load more button if grids exceed display limit -->
+            <div v-if="displayGridList.length > gridDisplayLimit" class="pt-2 text-center">
+              <button
+                @click="gridDisplayLimit += 60"
+                class="w-full text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 py-2 rounded-xl transition-all cursor-pointer shadow-2xs"
+              >
+                Muat 60 Grid Lagi (Menampilkan {{ renderedGridList.length }} dari {{ displayGridList.length }})
+              </button>
             </div>
           </div>
         </div>
@@ -929,13 +939,30 @@
               <span class="text-purple-700 font-mono text-[11px] font-bold">Total: ~{{ totalAreaHa }} Ha</span>
             </div>
 
+            <!-- Quick Filter if grid has many features -->
+            <div v-if="taskFeatures.length > 25" class="relative">
+              <input
+                v-model="polygonSearch"
+                type="text"
+                placeholder="Cari ID poligon / nama kelas..."
+                class="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-[11px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-rose-400"
+              />
+              <button
+                v-if="polygonSearch"
+                @click="polygonSearch = ''"
+                class="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600"
+              >
+                <X :size="12" />
+              </button>
+            </div>
+
             <div v-if="taskFeatures.length === 0" class="text-center py-8 text-slate-400 text-xs">
               Belum ada poligon didigitasi pada grid ini.
             </div>
 
             <div v-else class="space-y-1.5 max-h-52 overflow-y-auto pr-1">
               <div
-                v-for="(poly, idx) in taskFeatures"
+                v-for="(poly, idx) in displayedTaskFeatures"
                 :key="poly.id || idx"
                 :id="'qc-poly-' + poly.id"
                 @click="selectPolygon(poly)"
@@ -1010,6 +1037,16 @@
                     <Trash2 :size="13" />
                   </button>
                 </div>
+              </div>
+
+              <!-- Load more button if polygons exceed display limit -->
+              <div v-if="filteredTaskFeaturesCount > polygonDisplayLimit" class="pt-1 text-center">
+                <button
+                  @click="polygonDisplayLimit += 60"
+                  class="w-full text-[11px] font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 py-1.5 rounded-xl transition-all cursor-pointer shadow-2xs"
+                >
+                  Tampilkan 60 Poligon Lagi (Menampilkan {{ displayedTaskFeatures.length }} dari {{ filteredTaskFeaturesCount }})
+                </button>
               </div>
             </div>
 
@@ -1957,7 +1994,11 @@ const overviewData = ref({
 
 // All mosaic features cache
 const allMosaicFeatures = ref([])
-const showContextPolygons = ref(true)
+const showContextPolygons = ref(false)
+const previousSelectedPolygonId = ref(null)
+const gridDisplayLimit = ref(60)
+const polygonDisplayLimit = ref(60)
+const polygonSearch = ref('')
 
 // Live Map Variables
 let qcMap = null
@@ -2223,6 +2264,10 @@ const displayGridList = computed(() => {
   return list
 })
 
+const renderedGridList = computed(() => {
+  return displayGridList.value.slice(0, gridDisplayLimit.value)
+})
+
 const countByStatus = (status) => {
   return allDigitizedGrids.value.filter(t => t.status === status).length
 }
@@ -2230,6 +2275,33 @@ const countByStatus = (status) => {
 const totalAreaHa = computed(() => {
   const totalSqm = taskFeatures.value.reduce((acc, curr) => acc + (curr.properties?.area_sqm || 0), 0)
   return Math.round(totalSqm / 10000)
+})
+
+const taskFeaturesMap = computed(() => {
+  const map = new Map()
+  taskFeatures.value.forEach(f => map.set(f.id, f))
+  return map
+})
+
+const filteredTaskFeaturesCount = computed(() => {
+  if (!polygonSearch.value.trim()) return taskFeatures.value.length
+  const q = polygonSearch.value.trim().toLowerCase()
+  return taskFeatures.value.filter(f =>
+    String(f.id).includes(q) ||
+    (f.properties?.class_name || '').toLowerCase().includes(q)
+  ).length
+})
+
+const displayedTaskFeatures = computed(() => {
+  let list = taskFeatures.value
+  if (polygonSearch.value.trim()) {
+    const q = polygonSearch.value.trim().toLowerCase()
+    list = list.filter(f =>
+      String(f.id).includes(q) ||
+      (f.properties?.class_name || '').toLowerCase().includes(q)
+    )
+  }
+  return list.slice(0, polygonDisplayLimit.value)
 })
 
 const formatNumber = (val) => {
@@ -2248,9 +2320,21 @@ const allPinsResolved = computed(() => {
   return pins.length > 0 && pins.every(p => p.status === 'RESOLVED')
 })
 
+const pinsByAnnotationMap = computed(() => {
+  const map = new Map()
+  const pins = tasksStore.currentTaskReviewPins || []
+  pins.forEach(p => {
+    if (p.annotation_id) {
+      if (!map.has(p.annotation_id)) map.set(p.annotation_id, [])
+      map.get(p.annotation_id).push(p)
+    }
+  })
+  return map
+})
+
 const getPolygonPins = (annotationId) => {
   if (!annotationId) return []
-  return (tasksStore.currentTaskReviewPins || []).filter(p => p.annotation_id === annotationId)
+  return pinsByAnnotationMap.value.get(annotationId) || []
 }
 
 onMounted(async () => {
@@ -2296,11 +2380,15 @@ const refreshAllData = async () => {
     tasksStore.selectedArea = selectedProjectId.value ? Number(selectedProjectId.value) : null
     tasksStore.selectedStatus = null
     tasksStore.filterMyTasks = false
-    await Promise.all([
+    const loadPromises = [
       tasksStore.fetchTasks(),
-      loadOverviewData(yrParam),
-      loadMosaicFeatures(yrParam)
-    ])
+      loadOverviewData(yrParam)
+    ]
+    // Only fetch heavy mosaic features if user is in mosaic view or has enabled neighbor context
+    if (viewScope.value === 'mosaic' || showContextPolygons.value) {
+      loadPromises.push(loadMosaicFeatures(yrParam))
+    }
+    await Promise.all(loadPromises)
 
     await nextTick()
     ensureMapInitialized()
@@ -2372,6 +2460,12 @@ const switchViewScope = async (scope) => {
   await nextTick()
 
   if (scope === 'mosaic') {
+    if (allMosaicFeatures.value.length === 0) {
+      loadingOverview.value = true
+      const yrParam = selectedYear.value !== 'ALL' ? Number(selectedYear.value) : null
+      await loadMosaicFeatures(yrParam)
+      loadingOverview.value = false
+    }
     renderMosaicOnMap()
   } else if (scope === 'single') {
     if (selectedTask.value) {
@@ -2407,6 +2501,9 @@ const selectTask = async (task) => {
   qcTopologyResult.value = null
   hoveredFeature.value = null
   selectedPolygonId.value = null
+  previousSelectedPolygonId.value = null
+  polygonDisplayLimit.value = 60
+  polygonSearch.value = ''
 
   if (viewScope.value === 'mosaic') {
     viewScope.value = 'single'
@@ -2538,29 +2635,51 @@ const initOrUpdateQCMap = (task, features) => {
 
 const selectPolygon = (poly) => {
   if (!poly) return
-  selectedPolygonId.value = poly.id
+  const oldId = previousSelectedPolygonId.value
+  const newId = poly.id
 
-  // Highlight selected polygon on the map with glowing cyan border
-  polygonLayersMap.forEach((lyr, id) => {
-    const isTarget = id === poly.id
-    const featObj = taskFeatures.value.find(f => f.id === id)
-    const cls = annotationsStore.classes.find(c => c.id === featObj?.properties?.class_id)
-    const color = cls?.color || '#9CA3AF'
+  selectedPolygonId.value = newId
+  previousSelectedPolygonId.value = newId
 
-    lyr.setStyle({
-      weight: isTarget ? 4.5 : 2,
-      color: isTarget ? '#06b6d4' : '#ffffff',
-      fillColor: color,
-      fillOpacity: isTarget ? (qcOpacity.value > 0 ? Math.min(qcOpacity.value + 0.15, 0.5) : 0) : qcOpacity.value
-    })
-
-    if (isTarget) {
-      lyr.bringToFront()
-      if (lyr.getBounds && qcMap) {
-        qcMap.fitBounds(lyr.getBounds(), { padding: [60, 60], maxZoom: 16 })
-      }
+  // Ensure selected polygon is within visible range if filtered / paginated
+  if (!displayedTaskFeatures.value.some(p => p.id === newId)) {
+    const idx = taskFeatures.value.findIndex(p => p.id === newId)
+    if (idx !== -1) {
+      polygonDisplayLimit.value = Math.max(polygonDisplayLimit.value, idx + 20)
     }
-  })
+  }
+
+  // Fast reset previous polygon layer (O(1))
+  if (oldId && oldId !== newId) {
+    const oldLyr = polygonLayersMap.get(oldId)
+    if (oldLyr) {
+      const oldFeat = taskFeaturesMap.value.get(oldId)
+      const cls = annotationsStore.classes.find(c => c.id === oldFeat?.properties?.class_id)
+      oldLyr.setStyle({
+        weight: 2,
+        color: '#ffffff',
+        fillColor: cls?.color || '#9CA3AF',
+        fillOpacity: qcOpacity.value
+      })
+    }
+  }
+
+  // Fast highlight new polygon layer (O(1))
+  const newLyr = polygonLayersMap.get(newId)
+  if (newLyr) {
+    const newFeat = taskFeaturesMap.value.get(newId)
+    const cls = annotationsStore.classes.find(c => c.id === newFeat?.properties?.class_id)
+    newLyr.setStyle({
+      weight: 4.5,
+      color: '#06b6d4',
+      fillColor: cls?.color || '#9CA3AF',
+      fillOpacity: qcOpacity.value > 0 ? Math.min(qcOpacity.value + 0.15, 0.5) : 0
+    })
+    newLyr.bringToFront()
+    if (newLyr.getBounds && qcMap) {
+      qcMap.fitBounds(newLyr.getBounds(), { padding: [60, 60], maxZoom: 16 })
+    }
+  }
 
   // Scroll corresponding card into view in sidebar smoothly
   nextTick(() => {
@@ -2580,7 +2699,7 @@ const highlightPolygonOnMap = (polyId, isHover) => {
     layer.setStyle({ weight: 3.5, color: '#facc15', fillOpacity: qcOpacity.value })
     layer.bringToFront()
   } else {
-    const featObj = taskFeatures.value.find(f => f.id === polyId)
+    const featObj = taskFeaturesMap.value.get(polyId)
     const cls = annotationsStore.classes.find(c => c.id === featObj?.properties?.class_id)
     layer.setStyle({ weight: 2, color: '#ffffff', fillOpacity: qcOpacity.value, fillColor: cls?.color || '#9CA3AF' })
   }
@@ -2590,17 +2709,31 @@ const highlightPolygonOnMap = (polyId, isHover) => {
 // TOPOLOGY ERROR INSPECTION & HIGHLIGHT
 // ─────────────────────────────────────────────
 
-const getTopologyErrorsForPolygon = (polyId) => {
-  if (!qcTopologyResult.value?.errors || !polyId) return []
-  return qcTopologyResult.value.errors.filter(err => {
-    if (err.annotation_id && err.annotation_id === polyId) return true
-    if (Array.isArray(err.annotation_ids) && err.annotation_ids.includes(polyId)) return true
-    return false
+const errorsByPolygonMap = computed(() => {
+  const map = new Map()
+  if (!qcTopologyResult.value?.errors) return map
+  qcTopologyResult.value.errors.forEach(err => {
+    if (err.annotation_id) {
+      if (!map.has(err.annotation_id)) map.set(err.annotation_id, [])
+      map.get(err.annotation_id).push(err)
+    }
+    if (Array.isArray(err.annotation_ids)) {
+      err.annotation_ids.forEach(id => {
+        if (!map.has(id)) map.set(id, [])
+        map.get(id).push(err)
+      })
+    }
   })
+  return map
+})
+
+const getTopologyErrorsForPolygon = (polyId) => {
+  if (!polyId) return []
+  return errorsByPolygonMap.value.get(polyId) || []
 }
 
 const hasTopologyError = (polyId) => {
-  return getTopologyErrorsForPolygon(polyId).length > 0
+  return errorsByPolygonMap.value.has(polyId)
 }
 
 const toggleSidebarCollapse = () => {
@@ -2832,14 +2965,31 @@ const renderContextPolygons = (currentTaskId) => {
   if (!qcContextFeatureGroup) return
   qcContextFeatureGroup.clearLayers()
 
-  if (!showContextPolygons.value || allMosaicFeatures.value.length === 0) return
+  if (!showContextPolygons.value || allMosaicFeatures.value.length === 0 || !selectedTask.value) return
+
+  const curTask = selectedTask.value
+  const margin = 0.04 // ~4 km buffer around active grid bounds
+  const curMinLat = curTask.min_lat != null ? curTask.min_lat - margin : -Infinity
+  const curMaxLat = curTask.max_lat != null ? curTask.max_lat + margin : Infinity
+  const curMinLon = curTask.min_lon != null ? curTask.min_lon - margin : -Infinity
+  const curMaxLon = curTask.max_lon != null ? curTask.max_lon + margin : Infinity
 
   const classesMap = {}
   annotationsStore.classes.forEach(c => { classesMap[c.id] = c })
 
-  const otherFeatures = allMosaicFeatures.value.filter(f => f.properties?.task_grid_id !== currentTaskId)
+  // Only render neighboring polygons that lie within immediate buffer of current grid
+  const neighborFeatures = allMosaicFeatures.value.filter(f => {
+    if (f.properties?.task_grid_id === currentTaskId) return false
+    const b = f.properties?.bounds
+    if (b && b.length === 2) {
+      const fMinLat = b[0][0], fMinLon = b[0][1]
+      const fMaxLat = b[1][0], fMaxLon = b[1][1]
+      return (fMaxLat >= curMinLat && fMinLat <= curMaxLat && fMaxLon >= curMinLon && fMinLon <= curMaxLon)
+    }
+    return false
+  })
 
-  otherFeatures.forEach(feat => {
+  neighborFeatures.forEach(feat => {
     const cls = classesMap[feat.properties?.class_id]
     const color = cls?.color || feat.properties?.color_hex || '#9CA3AF'
 
@@ -2849,7 +2999,7 @@ const renderContextPolygons = (currentTaskId) => {
         weight: 1,
         dashArray: '3, 3',
         fillColor: color,
-        fillOpacity: Math.max(0.2, qcOpacity.value * 0.45)
+        fillOpacity: Math.max(0.15, qcOpacity.value * 0.45)
       })
     })
 
@@ -2863,7 +3013,13 @@ const renderContextPolygons = (currentTaskId) => {
   })
 }
 
-const toggleContextLayers = () => {
+const toggleContextLayers = async () => {
+  if (showContextPolygons.value && allMosaicFeatures.value.length === 0) {
+    loadingOverview.value = true
+    const yrParam = selectedYear.value !== 'ALL' ? Number(selectedYear.value) : null
+    await loadMosaicFeatures(yrParam)
+    loadingOverview.value = false
+  }
   if (selectedTask.value && viewScope.value === 'single') {
     renderContextPolygons(selectedTask.value.id)
   }
@@ -2980,7 +3136,8 @@ const ensureMapInitialized = () => {
       center: [centerLat, centerLon],
       zoom: zoom,
       maxZoom: 22,
-      zoomControl: false
+      zoomControl: false,
+      preferCanvas: true
     })
 
     L.control.zoom({ position: 'bottomright' }).addTo(qcMap)

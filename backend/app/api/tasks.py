@@ -3,7 +3,7 @@ from typing import Any, List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from app.db.session import get_db
@@ -687,22 +687,36 @@ def get_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
-    query = db.query(TaskGrid)
+    query = db.query(TaskGrid).options(
+        joinedload(TaskGrid.assignee),
+        joinedload(TaskGrid.study_area)
+    )
     
     if study_area_id:
         query = query.filter(TaskGrid.study_area_id == study_area_id)
     if year:
         query = query.filter(TaskGrid.year == year)
-    if status_filter:
+    if status_filter and isinstance(status_filter, str):
         query = query.filter(TaskGrid.status == status_filter)
     if assigned_to_me:
         query = query.filter(TaskGrid.assigned_user_id == current_user.id)
         
     tasks = query.all()
     
+    # Batch query annotation count to avoid N+1 query loop
+    ann_counts = {}
+    if tasks:
+        task_ids = [t.id for t in tasks]
+        # Query count grouped by task_grid_id in a single database roundtrip
+        counts_res = db.query(
+            Annotation.task_grid_id,
+            func.count(Annotation.id)
+        ).filter(Annotation.task_grid_id.in_(task_ids)).group_by(Annotation.task_grid_id).all()
+        ann_counts = {grid_id: count for grid_id, count in counts_res}
+    
     result = []
     for t in tasks:
-        ann_cnt = db.query(func.count(Annotation.id)).filter(Annotation.task_grid_id == t.id).scalar() or 0
+        ann_cnt = ann_counts.get(t.id, 0)
         assignee_name = t.assignee.full_name if t.assignee else None
         study_name = t.study_area.name if t.study_area else None
         

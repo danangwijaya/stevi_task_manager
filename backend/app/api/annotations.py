@@ -4,7 +4,7 @@ import os
 import math
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from shapely.geometry import shape, mapping, Polygon, MultiPolygon, box
 from shapely.ops import unary_union
 from shapely.validation import make_valid, explain_validity
@@ -42,7 +42,10 @@ def get_annotations_overview(
     """
     Returns aggregated digitations across all grids with segments by grid, mapper, and land cover class.
     """
-    query = db.query(TaskGrid).join(Annotation).distinct()
+    query = db.query(TaskGrid).join(Annotation).distinct().options(
+        joinedload(TaskGrid.assignee),
+        joinedload(TaskGrid.study_area)
+    )
     if study_area_id:
         query = query.filter(TaskGrid.study_area_id == study_area_id)
     if year:
@@ -65,8 +68,39 @@ def get_annotations_overview(
     total_polygons = 0
     total_area_sqm = 0.0
 
+    if not grids:
+        return {
+            "summary": {
+                "total_annotations": 0,
+                "total_grids_digitized": 0,
+                "total_area_ha": 0.0
+            },
+            "by_grid": [],
+            "by_mapper": [],
+            "by_class": []
+        }
+
+    # Batch load all annotation summary records in one fast query without geom_geojson column
+    grid_ids = [g.id for g in grids]
+    ann_records = db.query(
+        Annotation.id,
+        Annotation.task_grid_id,
+        Annotation.class_id,
+        Annotation.class_name,
+        Annotation.area_sqm,
+        Annotation.user_id,
+        User.full_name,
+        User.username,
+        User.nim_nip
+    ).outerjoin(User, Annotation.user_id == User.id)\
+     .filter(Annotation.task_grid_id.in_(grid_ids)).all()
+
+    anns_by_grid = {}
+    for a in ann_records:
+        anns_by_grid.setdefault(a.task_grid_id, []).append(a)
+
     for grid in grids:
-        anns = db.query(Annotation).filter(Annotation.task_grid_id == grid.id).all()
+        anns = anns_by_grid.get(grid.id, [])
         grid_sqm = sum(a.area_sqm or 0 for a in anns)
         total_area_sqm += grid_sqm
         total_polygons += len(anns)
@@ -92,9 +126,9 @@ def get_annotations_overview(
 
             # mapper aggregation
             u_id = a.user_id or (grid.assigned_user_id if grid.assigned_user_id else 0)
-            u_name = a.author.full_name if a.author else (grid.assignee.full_name if grid.assignee else "Unknown")
-            u_uname = a.author.username if a.author else (grid.assignee.username if grid.assignee else "")
-            u_nim = a.author.nim_nip if a.author else (grid.assignee.nim_nip if grid.assignee else "")
+            u_name = a.full_name if a.full_name else (grid.assignee.full_name if grid.assignee else "Unknown")
+            u_uname = a.username if a.username else (grid.assignee.username if grid.assignee else "")
+            u_nim = a.nim_nip if a.nim_nip else (grid.assignee.nim_nip if grid.assignee else "")
             if u_id not in by_mapper_dict:
                 by_mapper_dict[u_id] = {
                     "user_id": u_id,
@@ -234,7 +268,7 @@ def get_grid_annotations(
     if not task:
         raise HTTPException(status_code=404, detail="Task grid not found")
         
-    annotations = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
+    annotations = db.query(Annotation).options(joinedload(Annotation.author)).filter(Annotation.task_grid_id == task_grid_id).all()
     
     features = []
     for ann in annotations:
@@ -761,7 +795,7 @@ def validate_topology(
     if not task:
         raise HTTPException(status_code=404, detail="Task grid not found")
 
-    annotations = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
+    annotations = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).order_by(Annotation.id.asc()).all()
     if not annotations:
         return {
             "valid": False,
@@ -914,11 +948,15 @@ def validate_topology(
         })
 
     is_valid = len(errors) == 0
+    non_overlap_errors = len([e for e in errors if e.get("type") != "OVERLAP"])
+    total_error_count = non_overlap_errors + overlap_count
 
     return {
         "valid": is_valid,
         "coverage_percent": round(coverage_percent, 2),
         "polygon_count": len(annotations),
+        "total_errors": total_error_count,
+        "total_overlaps": overlap_count,
         "errors": errors,
         "warnings": warnings
     }
@@ -1462,7 +1500,7 @@ def resolve_overlap(
         # Subtract B from A: A is clipped, B remains unchanged
         diff = geom_a.difference(geom_b)
         diff = make_valid(diff)
-        polys = _extract_polygons(diff, min_area_sqm=3.0)
+        polys = sorted(_extract_polygons(diff, min_area_sqm=3.0), key=lambda p: p.area, reverse=True)
         if not polys:
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann_a.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann_a)
@@ -1490,7 +1528,7 @@ def resolve_overlap(
         # Subtract A from B: B is clipped, A remains unchanged
         diff = geom_b.difference(geom_a)
         diff = make_valid(diff)
-        polys = _extract_polygons(diff, min_area_sqm=3.0)
+        polys = sorted(_extract_polygons(diff, min_area_sqm=3.0), key=lambda p: p.area, reverse=True)
         if not polys:
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann_b.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann_b)
@@ -1515,9 +1553,10 @@ def resolve_overlap(
         return {"message": f"Poligon #{ann_b.id} ({ann_b.class_name}) berhasil dipotong oleh #{ann_a.id} ({ann_a.class_name}). Bentuk #{ann_a.id} tetap utuh."}
         
     elif req.action.startswith("merge"):
-        union_geom = geom_a.union(geom_b)
-        union_geom = make_valid(union_geom)
-        polys = _extract_polygons(union_geom, min_area_sqm=0.1)
+        union_geom = _merge_polygons_robust([geom_a, geom_b])
+        if not union_geom or union_geom.is_empty:
+            raise HTTPException(status_code=400, detail="Gagal menggabungkan poligon")
+        polys = sorted(_extract_polygons(union_geom, min_area_sqm=0.1), key=lambda p: p.area, reverse=True)
         if not polys:
             raise HTTPException(status_code=400, detail="Gagal menggabungkan poligon")
             
@@ -1846,6 +1885,75 @@ def _extract_polygons(geom, min_area_sqm=3.0):
             polys.extend(_extract_polygons(g, min_area_sqm=min_area_sqm))
         return polys
     return []
+
+
+def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=50.0):
+    """
+    Robustly merges a list of Shapely geometries:
+    1. Snaps adjacent polygons to resolve vertex misalignments and shared edge slivers
+    2. Unions geometries into a single Polygon without internal seams
+    3. Bridges micro-gaps if needed
+    4. Removes degenerate slit holes from the interior ring
+    """
+    from shapely.ops import unary_union, snap
+    from shapely.geometry import Polygon as SPolygon, MultiPolygon as SMultiPolygon
+    from shapely.validation import make_valid
+
+    if not geoms:
+        return None
+    valid_geoms = [g for g in geoms if g and not g.is_empty]
+    if not valid_geoms:
+        return None
+    if len(valid_geoms) == 1:
+        return valid_geoms[0]
+
+    # Iterative snapping along shared borders to prevent MultiPolygon fracturing
+    current = valid_geoms[0]
+    for g in valid_geoms[1:]:
+        try:
+            g_snapped = snap(g, current, tolerance=snap_tol)
+            current = unary_union([current, g_snapped])
+        except Exception:
+            current = unary_union([current, g])
+
+    if not current.is_valid:
+        try:
+            current = make_valid(current)
+        except Exception:
+            pass
+
+    # If MultiPolygon or split, attempt micro-buffer dissolve to bridge tiny slivers
+    if current.geom_type == 'MultiPolygon':
+        try:
+            dissolved = unary_union([g.buffer(snap_tol) for g in valid_geoms]).buffer(-snap_tol)
+            dissolved_polys = _extract_polygons(dissolved, min_area_sqm=0.1)
+            if len(dissolved_polys) == 1:
+                current = dissolved_polys[0]
+        except Exception:
+            pass
+
+    # Extract distinct polygon parts
+    polys = _extract_polygons(current, min_area_sqm=0.1)
+    if not polys:
+        return current
+
+    # Sort parts by area descending
+    polys = sorted(polys, key=lambda p: p.area, reverse=True)
+
+    # Clean interior slit holes from the primary polygon
+    min_hole_deg = min_hole_sqm / (111320.0 ** 2)
+    cleaned_parts = []
+    for p in polys:
+        if p.geom_type == 'Polygon' and len(p.interiors) > 0:
+            cleaned_holes = [h for h in p.interiors if SPolygon(h).area > min_hole_deg]
+            p = SPolygon(p.exterior, cleaned_holes)
+        p = _clean_spikes_and_holes(p)
+        if p and not p.is_empty and p.area > 1e-12:
+            cleaned_parts.append(p)
+
+    if not cleaned_parts:
+        return polys[0]
+    return cleaned_parts[0] if len(cleaned_parts) == 1 else SMultiPolygon(cleaned_parts)
 
 
 @router.put("/{annotation_id}/class")
@@ -2876,30 +2984,14 @@ def merge_polygons(
             target_class_id = req.features[0].get("properties", {}).get("class_id", 1)
             target_class_name = classes_dict.get(target_class_id, "Tutupan Lahan")
 
-        merged_geom = unary_union(geoms)
-        try:
-            from shapely import set_precision
-            merged_geom = set_precision(merged_geom, grid_size=1e-7)
-        except Exception:
-            pass
+        merged_geom = _merge_polygons_robust(geoms)
+        if not merged_geom or merged_geom.is_empty:
+            raise HTTPException(
+                status_code=400,
+                detail="Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bersentuhan yang dapat digabungkan."
+            )
 
         merged_polys = _extract_polygons(merged_geom, min_area_sqm=0.1)
-        if len(merged_polys) > 1:
-            try:
-                buffered_union = unary_union([g.buffer(1.5e-5) for g in geoms]).buffer(-1.5e-5)
-                bridged_polys = _extract_polygons(buffered_union, min_area_sqm=0.1)
-                if len(bridged_polys) == 1:
-                    merged_polys = bridged_polys
-            except Exception:
-                pass
-
-        cleaned_merged_polys = []
-        for mp in merged_polys:
-            cleaned_p = _clean_spikes_and_holes(mp)
-            if cleaned_p and not cleaned_p.is_empty and cleaned_p.area > 1e-12:
-                cleaned_merged_polys.append(cleaned_p)
-        merged_polys = cleaned_merged_polys or merged_polys
-
         if not merged_polys or len(merged_polys) > 1:
             raise HTTPException(
                 status_code=400,
@@ -2918,8 +3010,15 @@ def merge_polygons(
             }
         }
         if not req.persist:
-            del_ids = [f.get("id") for f in req.features if f.get("id") and (isinstance(f.get("id"), int) or (isinstance(f.get("id"), str) and str(f.get("id")).isdigit()))]
-            del_ui_ids = [f.get("_uiId") for f in req.features if f.get("_uiId")]
+            del_ids = []
+            del_ui_ids = []
+            for f in req.features:
+                fid = f.get("id") if f.get("id") is not None else f.get("properties", {}).get("id")
+                if fid is not None:
+                    del_ids.append(fid)
+                f_ui = f.get("_uiId") or f.get("properties", {}).get("_uiId")
+                if f_ui:
+                    del_ui_ids.append(f_ui)
             return {
                 "message": f"Berhasil menggabungkan {len(req.features)} poligon menjadi 1 poligon '{target_class_name}'!",
                 "deleted_ids": del_ids,
@@ -2974,37 +3073,12 @@ def merge_polygons(
     if not geoms:
         raise HTTPException(status_code=400, detail="Geometri poligon tidak valid.")
 
-    merged_geom = unary_union(geoms)
-    try:
-        from shapely import set_precision
-        merged_geom = set_precision(merged_geom, grid_size=1e-7)
-    except Exception:
-        pass
-
-    merged_polys = _extract_polygons(merged_geom, min_area_sqm=0.1)
-
-    # If unary_union produced > 1 polygon, attempt micro-gap bridging (up to ~1.5 meters)
-    if len(merged_polys) > 1:
-        try:
-            buffered_union = unary_union([g.buffer(1.5e-5) for g in geoms]).buffer(-1.5e-5)
-            bridged_polys = _extract_polygons(buffered_union, min_area_sqm=0.1)
-            if len(bridged_polys) == 1:
-                merged_polys = bridged_polys
-        except Exception:
-            pass
-
-    # Clean any whiskers, turnaround spikes, or collapsed slit lines
-    cleaned_merged_polys = []
-    for mp in merged_polys:
-        cleaned_p = _clean_spikes_and_holes(mp)
-        if cleaned_p and not cleaned_p.is_empty and cleaned_p.area > 1e-12:
-            cleaned_merged_polys.append(cleaned_p)
-    merged_polys = cleaned_merged_polys or merged_polys
-
-    if not merged_polys:
+    merged_geom = _merge_polygons_robust(geoms)
+    if not merged_geom or merged_geom.is_empty:
         raise HTTPException(status_code=400, detail="Gagal menggabungkan geometri poligon terpilih.")
 
-    if len(merged_polys) > 1:
+    merged_polys = _extract_polygons(merged_geom, min_area_sqm=0.1)
+    if not merged_polys or len(merged_polys) > 1:
         raise HTTPException(
             status_code=400,
             detail="Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bertampalan atau berbatasan langsung yang dapat digabungkan."
