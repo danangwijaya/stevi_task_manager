@@ -14,7 +14,7 @@ const getBaseUrl = () => {
 
 const api = axios.create({
   baseURL: getBaseUrl(),
-  timeout: 30000
+  timeout: 120000 // 120s default timeout for large spatial datasets
 })
 
 api.interceptors.request.use(
@@ -102,7 +102,7 @@ export default {
   saveGridAnnotations: (taskGridId, features) => api.post(`/annotations/grid/${taskGridId}`, {
     task_grid_id: taskGridId,
     features: features
-  }),
+  }, { timeout: 180000 }), // 3 minutes timeout for massive multi-thousand polygon grids
   deleteAnnotation: (annId) => api.delete(`/annotations/${annId}`),
   initBasePolygon: (taskGridId) => api.post(`/annotations/grid/${taskGridId}/init-base`),
   validateTopology: (taskGridId) => api.post(`/annotations/grid/${taskGridId}/validate-topology`),
