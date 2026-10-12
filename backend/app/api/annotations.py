@@ -1,4 +1,4 @@
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Optional, Union
 import json
 import os
 import math
@@ -15,13 +15,17 @@ from app.db.models import Annotation, TaskGrid, User, LandCoverClass, TaskReview
 from app.core.config import settings
 from app.api.deps import get_current_user
 from app.services.snapshot_service import create_grid_snapshot_from_db, restore_grid_snapshot, log_audit
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 class GeoJSONFeature(BaseModel):
     type: str = "Feature"
+    id: Optional[Union[int, str]] = None
     geometry: Dict[str, Any]
-    properties: Dict[str, Any]
+    properties: Dict[str, Any] = {}
 
 class AnnotationSaveRequest(BaseModel):
     task_grid_id: int
@@ -459,8 +463,8 @@ def save_grid_annotations(
             if not extracted_polys:
                 continue
 
-            # Check if this feature has an existing integer database ID
-            raw_fid = f.id or f.properties.get("id")
+            # Safely extract existing feature ID without throwing AttributeError
+            raw_fid = getattr(f, "id", None) or (f.properties.get("id") if f.properties else None)
             fid = None
             if isinstance(raw_fid, int):
                 fid = raw_fid
@@ -498,14 +502,24 @@ def save_grid_annotations(
                     )
                     db.add(ann)
                     saved_annotations.append(ann)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error parsing feature in grid {task_grid_id}: {e}")
             continue
 
-    # Clean up annotations that were genuinely deleted by the user
-    to_delete_ids = set(existing_map.keys()) - retained_ids
-    if to_delete_ids:
-        db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(to_delete_ids)).update({"annotation_id": None}, synchronize_session=False)
-        db.query(Annotation).filter(Annotation.id.in_(to_delete_ids)).delete(synchronize_session=False)
+    # ABSOLUTE SAFETY GUARD: If client sent features, but none could be processed, ABORT TO PROTECT DATA!
+    if len(data.features) > 0 and len(saved_annotations) == 0:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Gagal memproses geometri poligon. Simpan dibatalkan untuk melindungi data poligon."
+        )
+
+    # Clean up annotations that were genuinely deleted by the user ONLY IF saved_annotations is non-empty
+    if len(saved_annotations) > 0:
+        to_delete_ids = set(existing_map.keys()) - retained_ids
+        if to_delete_ids:
+            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(to_delete_ids)).update({"annotation_id": None}, synchronize_session=False)
+            db.query(Annotation).filter(Annotation.id.in_(to_delete_ids)).delete(synchronize_session=False)
 
     # Auto mark task as IN_PROGRESS if it was ASSIGNED or UNASSIGNED
     if task.status in ["ASSIGNED", "REVISION_NEEDED", "UNASSIGNED"]:
