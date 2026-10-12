@@ -613,18 +613,29 @@
               </label>
 
               <!-- Opacity Slider -->
-              <div class="flex items-center gap-1.5 text-[11px] text-slate-600 font-bold">
+              <div
+                class="flex items-center gap-1.5 text-[11px] text-slate-600 font-bold bg-slate-50/80 px-2.5 py-1 rounded-xl border border-slate-200 select-none"
+                title="Tahan Spasi untuk intip citra satelit (opasitas 0%), atau klik angka persentase untuk toggle"
+              >
                 <span>Opasitas:</span>
                 <input
                   type="range"
-                  min="0.1"
+                  min="0"
                   max="0.95"
                   step="0.05"
-                  v-model="qcOpacity"
+                  v-model.number="qcOpacity"
                   @input="updateQCOpacity"
                   class="w-16 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-rose-600"
                 />
-                <span class="font-mono text-rose-600 w-8 text-right">{{ Math.round(qcOpacity * 100) }}%</span>
+                <button
+                  type="button"
+                  @click="toggleQCOpacityZero"
+                  class="font-mono text-rose-600 hover:text-rose-800 hover:underline w-8 text-right cursor-pointer"
+                  :title="Number(qcOpacity) === 0 ? 'Klik untuk kembalikan opasitas' : 'Klik untuk ubah ke 0%'"
+                >
+                  {{ Math.round(qcOpacity * 100) }}%
+                </button>
+                <kbd class="hidden sm:inline-block px-1 py-0.2 bg-slate-200/70 text-slate-500 rounded text-[9px] font-mono font-normal ml-0.5" title="Shortcut: Tahan tombol Spasi di keyboard">Spasi</kbd>
               </div>
 
               <!-- Topology Check Button (Single mode) -->
@@ -698,6 +709,15 @@
             >
               Batal (Esc)
             </button>
+          </div>
+
+          <!-- Spacebar Peek Indicator on Map -->
+          <div
+            v-if="isSpacePeeking"
+            class="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-slate-900/95 backdrop-blur-md text-emerald-300 px-4 py-1.5 rounded-xl shadow-xl flex items-center gap-2.5 text-xs font-semibold border border-emerald-500/40 animate-in fade-in slide-in-from-top-2"
+          >
+            <Eye :size="14" class="text-emerald-400 shrink-0 animate-pulse" />
+            <span>Intip Citra Satelit (Opasitas 0%) — Lepas [Spasi] untuk kembali</span>
           </div>
 
           <!-- Active Feature Info Pill on Map Bottom -->
@@ -2009,6 +2029,8 @@ let qcGridBoundingLayer = null
 
 const qcLayer = ref('local_s2_rgb')
 const qcOpacity = ref(0.65)
+const isSpacePeeking = ref(false)
+let savedOpacityBeforePeek = 0.65
 const hoveredFeature = ref(null)
 const selectedPolygonId = ref(null)
 let polygonLayersMap = new Map()
@@ -2359,12 +2381,17 @@ onMounted(async () => {
     } catch (_) {}
   }
 
+  window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('keyup', handleKeyup)
+
   await nextTick()
   ensureMapInitialized()
   await refreshAllData()
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('keyup', handleKeyup)
   if (qcMap) {
     qcMap.remove()
     qcMap = null
@@ -3406,15 +3433,69 @@ const setQCLayer = (layerId) => {
 }
 
 const updateQCOpacity = () => {
+  const opVal = Number(qcOpacity.value)
+  const isZero = opVal === 0
   if (qcFeatureGroup) {
     qcFeatureGroup.eachLayer(l => {
-      l.setStyle({ fillOpacity: qcOpacity.value })
+      const isSelected = selectedPolygonId.value && l.feature?.id === selectedPolygonId.value
+      l.setStyle({
+        fillOpacity: isSelected ? (opVal > 0 ? Math.min(opVal + 0.15, 0.5) : 0) : opVal,
+        opacity: isZero ? 0.35 : 1
+      })
     })
   }
   if (qcContextFeatureGroup) {
     qcContextFeatureGroup.eachLayer(l => {
-      l.setStyle({ fillOpacity: Math.max(0.15, qcOpacity.value * 0.45) })
+      l.setStyle({
+        fillOpacity: isZero ? 0 : Math.max(0.15, opVal * 0.45),
+        opacity: isZero ? 0.2 : 0.8
+      })
     })
+  }
+}
+
+const toggleQCOpacityZero = () => {
+  if (Number(qcOpacity.value) === 0) {
+    qcOpacity.value = savedOpacityBeforePeek > 0 ? savedOpacityBeforePeek : 0.65
+  } else {
+    savedOpacityBeforePeek = Number(qcOpacity.value) > 0 ? Number(qcOpacity.value) : 0.65
+    qcOpacity.value = 0
+  }
+  updateQCOpacity()
+}
+
+const handleKeydown = (e) => {
+  // If user is typing in an input, textarea, or select, don't hijack shortcuts
+  const activeTag = document.activeElement?.tagName?.toLowerCase()
+  if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') {
+    return
+  }
+  if (document.activeElement?.isContentEditable) {
+    return
+  }
+
+  // Quick Peek Satellite: Hold Space to temporarily set opacity to 0%
+  if (e.code === 'Space' && !e.repeat && !isSpacePeeking.value) {
+    e.preventDefault()
+    isSpacePeeking.value = true
+    if (Number(qcOpacity.value) > 0) {
+      savedOpacityBeforePeek = Number(qcOpacity.value)
+      qcOpacity.value = 0
+    } else {
+      qcOpacity.value = savedOpacityBeforePeek > 0 ? savedOpacityBeforePeek : 0.65
+    }
+    updateQCOpacity()
+  }
+}
+
+const handleKeyup = (e) => {
+  if (e.code === 'Space' && isSpacePeeking.value) {
+    e.preventDefault()
+    isSpacePeeking.value = false
+    if (Number(qcOpacity.value) === 0) {
+      qcOpacity.value = savedOpacityBeforePeek > 0 ? savedOpacityBeforePeek : 0.65
+      updateQCOpacity()
+    }
   }
 }
 
