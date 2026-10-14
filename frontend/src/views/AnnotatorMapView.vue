@@ -1334,6 +1334,27 @@
           </div>
         </div>
 
+        <!-- Floating Pill: X Kelas Tutupan Lahan Disembunyikan -->
+        <div
+          v-if="hiddenClassIds.size > 0"
+          class="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-slate-900/95 text-white px-3.5 py-1.5 rounded-full shadow-xl flex items-center gap-2.5 text-xs border border-slate-700/80 backdrop-blur-md transition-all animate-in fade-in slide-in-from-bottom-2 select-none"
+        >
+          <div class="flex items-center gap-1.5 text-amber-300 font-semibold text-[11px]">
+            <EyeOff :size="13" />
+            <span>{{ hiddenClassIds.size }} Kelas Disembunyikan</span>
+          </div>
+          <div class="h-3 w-px bg-slate-700"></div>
+          <button
+            type="button"
+            @click="showAllClasses"
+            class="text-[10px] bg-rose-600 hover:bg-rose-500 text-white font-bold px-2 py-0.5 rounded-full transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+            title="Tampilkan kembali seluruh poligon kelas tutupan lahan"
+          >
+            <Eye :size="11" />
+            <span>Tampilkan Semua</span>
+          </button>
+        </div>
+
         <!-- SVG Gamma Filter Definition for Leaflet Tile GPU Filtering -->
         <svg class="sr-only" aria-hidden="true" style="position: absolute; width: 0; height: 0; pointer-events: none; overflow: hidden;">
           <filter id="raster-gamma-filter" color-interpolation-filters="sRGB">
@@ -1551,44 +1572,174 @@
         </div>
       </div>
 
-      <!-- Tab Content 1: Land Cover Classes (for active drawing / splitting) -->
-      <div v-show="rightTab === 'classes'" class="flex-1 p-3 space-y-1.5 overflow-y-auto">
-        <div class="text-[10px] text-slate-500 pb-1 font-bold flex justify-between uppercase tracking-wider">
-          <span>PILIH KELAS AKTIF:</span>
-          <span class="text-rose-600 font-mono">U-Net 1024px</span>
+      <!-- Tab Content 1: Land Cover Classes (for active drawing / splitting / layer visibility toggle) -->
+      <div v-show="rightTab === 'classes'" class="flex-1 p-3 space-y-2 overflow-y-auto flex flex-col">
+        <!-- Visibility Action Header -->
+        <div class="bg-slate-50/90 border border-slate-200 rounded-2xl p-2.5 space-y-2 shadow-2xs">
+          <div class="flex items-center justify-between">
+            <div class="text-[10px] text-slate-600 font-extrabold uppercase tracking-wider flex items-center gap-1.5">
+              <Layers :size="13" class="text-slate-400" />
+              <span>Layer 12 Kelas Tutupan</span>
+            </div>
+            <span class="text-[9px] font-mono font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded-full border border-rose-200/70">
+              U-Net 1024px
+            </span>
+          </div>
+
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              @click="showAllClasses"
+              :disabled="hiddenClassIds.size === 0"
+              class="flex-1 py-1 px-2 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer shadow-2xs"
+              :class="hiddenClassIds.size === 0
+                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 hover:border-emerald-300'"
+              title="Tampilkan kembali seluruh poligon dari 12 kelas di peta"
+            >
+              <Eye :size="12" />
+              <span>Semua Aktif</span>
+            </button>
+            <button
+              type="button"
+              @click="hideAllClasses"
+              :disabled="hiddenClassIds.size >= annotationsStore.classes.length"
+              class="flex-1 py-1 px-2 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer shadow-2xs"
+              :class="hiddenClassIds.size >= annotationsStore.classes.length
+                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 hover:border-slate-300'"
+              title="Sembunyikan seluruh poligon untuk inspeksi citra satelit atau isolasi kelas"
+            >
+              <EyeOff :size="12" />
+              <span>Sembunyi Semua</span>
+            </button>
+          </div>
+
+          <!-- Alert pill if some classes are hidden -->
+          <div
+            v-if="hiddenClassIds.size > 0"
+            class="px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between text-[10px] text-amber-800 animate-in fade-in duration-150"
+          >
+            <div class="flex items-center gap-1.5 min-w-0">
+              <EyeOff :size="11" class="text-amber-600 shrink-0" />
+              <span class="truncate font-medium"><b>{{ hiddenClassIds.size }}</b> kelas disembunyikan</span>
+            </div>
+            <button
+              type="button"
+              @click="showAllClasses"
+              class="text-[9px] font-bold text-amber-900 underline hover:text-amber-950 shrink-0 cursor-pointer ml-1"
+            >
+              Reset
+            </button>
+          </div>
         </div>
 
-        <button
-          v-for="cls in annotationsStore.classes"
-          :key="cls.id"
-          @click="annotationsStore.setSelectedClass(cls)"
-          class="w-full text-left p-2 rounded-xl transition-all border flex items-center justify-between group cursor-pointer"
-          :class="annotationsStore.selectedClass?.id === cls.id 
-            ? 'bg-rose-50/90 border-rose-400 shadow-xs ring-1 ring-rose-400/50' 
-            : 'bg-slate-50/60 border-slate-200 hover:bg-white hover:border-slate-300'"
-        >
-          <div class="flex items-center gap-2.5 min-w-0">
-            <div
-              class="w-4 h-4 rounded-md shrink-0 border border-slate-300 shadow-2xs"
-              :style="{ backgroundColor: cls.color }"
-            ></div>
-            <div class="truncate">
-              <div class="text-xs font-bold text-slate-800 group-hover:text-slate-900 leading-tight truncate">
-                {{ cls.name }}
+        <div class="text-[10px] text-slate-400 font-bold uppercase tracking-wider px-0.5 flex items-center justify-between">
+          <span>Pilih Kelas Gambar / Visibilitas:</span>
+          <span class="text-[9px] text-slate-400 lowercase font-normal">klik mata = on/off</span>
+        </div>
+
+        <!-- 12 Classes List -->
+        <div class="space-y-1.5 flex-1">
+          <div
+            v-for="cls in annotationsStore.classes"
+            :key="cls.id"
+            @click="handleSelectClass(cls)"
+            class="w-full text-left p-2 rounded-xl transition-all border flex items-center justify-between group cursor-pointer relative"
+            :class="[
+              annotationsStore.selectedClass?.id === cls.id 
+                ? 'bg-rose-50/90 border-rose-400 shadow-xs ring-1 ring-rose-400/50' 
+                : hiddenClassIds.has(cls.id)
+                  ? 'bg-slate-100/60 border-slate-200 border-dashed opacity-65 hover:opacity-90 hover:bg-slate-50'
+                  : 'bg-slate-50/60 border-slate-200 hover:bg-white hover:border-slate-300'
+            ]"
+          >
+            <div class="flex items-center gap-2.5 min-w-0 flex-1">
+              <!-- Color Indicator -->
+              <div
+                class="w-4 h-4 rounded-md shrink-0 border border-slate-300 shadow-2xs relative transition-transform group-hover:scale-105"
+                :style="{ backgroundColor: cls.color }"
+              >
+                <!-- Slash indicator if hidden -->
+                <div
+                  v-if="hiddenClassIds.has(cls.id)"
+                  class="absolute inset-0 flex items-center justify-center bg-slate-900/40 rounded-md text-white"
+                >
+                  <EyeOff :size="9" />
+                </div>
               </div>
-              <div class="text-[9px] text-slate-500 truncate">{{ cls.description }}</div>
+
+              <!-- Name & Description -->
+              <div class="truncate flex-1">
+                <div
+                  class="text-xs font-bold leading-tight truncate flex items-center gap-1.5"
+                  :class="[
+                    annotationsStore.selectedClass?.id === cls.id ? 'text-rose-950' : 'text-slate-800 group-hover:text-slate-900',
+                    hiddenClassIds.has(cls.id) ? 'line-through decoration-slate-400/70 text-slate-500' : ''
+                  ]"
+                >
+                  <span class="truncate">{{ cls.name }}</span>
+                  <span
+                    v-if="hiddenClassIds.has(cls.id)"
+                    class="text-[8px] font-mono uppercase px-1 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-200/80 shrink-0 font-bold"
+                  >
+                    Off
+                  </span>
+                </div>
+                <div class="text-[9px] text-slate-500 truncate">{{ cls.description }}</div>
+              </div>
+            </div>
+
+            <!-- Right Controls: Count, Solo, & Eye Visibility Toggle -->
+            <div class="flex items-center gap-1 shrink-0 pl-1">
+              <!-- Polygon Count Badge -->
+              <span
+                v-if="classCounts[cls.id]"
+                class="text-[9px] font-mono px-1.5 py-0.2 rounded-full font-bold border"
+                :class="hiddenClassIds.has(cls.id)
+                  ? 'bg-slate-200 text-slate-500 border-slate-300'
+                  : 'bg-rose-100 text-rose-700 border-rose-200'"
+                :title="`Ada ${classCounts[cls.id]} poligon ${cls.name} pada grid ini`"
+              >
+                {{ classCounts[cls.id] }}
+              </span>
+
+              <!-- Class ID Badge -->
+              <span class="text-[9px] font-mono text-slate-400 bg-white px-1 py-0.5 rounded border border-slate-200">
+                #{{ cls.id }}
+              </span>
+
+              <!-- Solo Button (Quickly isolate this class) -->
+              <button
+                type="button"
+                @click.stop="isolateClass(cls.id)"
+                class="text-[9px] px-1.5 py-0.5 rounded transition-all cursor-pointer font-bold shrink-0 ml-0.5"
+                :class="isOnlyThisClassVisible(cls.id)
+                  ? 'bg-indigo-600 text-white shadow-2xs border border-indigo-700'
+                  : 'opacity-70 group-hover:opacity-100 bg-slate-100 hover:bg-indigo-100 text-slate-500 hover:text-indigo-700 border border-slate-200/80'"
+                title="Hanya tampilkan kelas ini di peta (isolasi kelas)"
+              >
+                Solo
+              </button>
+
+              <!-- Layer Visibility Toggle Button (Eye / EyeOff) -->
+              <button
+                type="button"
+                @click.stop="toggleActiveClassVisibility(cls.id)"
+                class="p-1.5 rounded-lg transition-all cursor-pointer shrink-0 ml-0.5"
+                :class="hiddenClassIds.has(cls.id)
+                  ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300 shadow-2xs'
+                  : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200/80'"
+                :title="hiddenClassIds.has(cls.id)
+                  ? `Klik untuk mengaktifkan / menampilkan poligon kelas ${cls.name} di peta`
+                  : `Klik untuk menonaktifkan / menyembunyikan poligon kelas ${cls.name} di peta`"
+              >
+                <EyeOff v-if="hiddenClassIds.has(cls.id)" :size="13" />
+                <Eye v-else :size="13" />
+              </button>
             </div>
           </div>
-          <div class="flex items-center gap-1.5 shrink-0 pl-1">
-            <span
-              v-if="classCounts[cls.id]"
-              class="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-rose-100 text-rose-700 font-bold border border-rose-200"
-            >
-              {{ classCounts[cls.id] }}
-            </span>
-            <span class="text-[9px] font-mono text-slate-400 bg-white px-1 py-0.5 rounded border border-slate-200">#{{ cls.id }}</span>
-          </div>
-        </button>
+        </div>
       </div>
 
       <!-- Tab Content 2: List of Drawn Polygons with Multi-Selection -->
@@ -1656,6 +1807,19 @@
             <Search :size="13" class="absolute left-2.5 top-2.5 text-slate-400 pointer-events-none" />
           </div>
 
+          <!-- Filter only visible classes in polygons list -->
+          <div v-if="hiddenClassIds.size > 0" class="flex items-center justify-between text-[11px] px-2 py-1 bg-amber-50/80 border border-amber-200 rounded-xl">
+            <label class="flex items-center gap-1.5 text-amber-900 font-bold cursor-pointer select-none text-[10px]">
+              <input
+                type="checkbox"
+                v-model="filterListByVisibleClasses"
+                class="w-3.5 h-3.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+              />
+              <span>Hanya kelas yang aktif di peta</span>
+            </label>
+            <span class="text-[9px] font-mono text-amber-700 font-bold">({{ hiddenClassIds.size }} kelas off)</span>
+          </div>
+
           <!-- Pagination Bar (if total > pageSize) -->
           <div v-if="filteredAndPagedFeatures.totalPages > 1" class="flex items-center justify-between text-[11px] text-slate-500 bg-slate-50/80 px-2.5 py-1 rounded-xl border border-slate-200/80 font-mono">
             <span>Hal {{ polyListPage }}/{{ filteredAndPagedFeatures.totalPages }} ({{ filteredAndPagedFeatures.total }} item)</span>
@@ -1690,7 +1854,8 @@
             :class="[
               selectedPolyUiIds.has(item.feat._uiId)
                 ? 'bg-cyan-50/90 border-cyan-400 shadow-xs ring-2 ring-cyan-400/40 text-cyan-950'
-                : (clickedFeatureIdx === item.originalIdx ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/40' : 'border-slate-200 hover:border-slate-300 hover:bg-white')
+                : (clickedFeatureIdx === item.originalIdx ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/40' : 'border-slate-200 hover:border-slate-300 hover:bg-white'),
+              hiddenClassIds.has(item.feat.properties?.class_id) ? 'opacity-65 border-dashed bg-slate-100/50' : ''
             ]"
           >
             <div class="flex items-center justify-between">
@@ -1707,6 +1872,14 @@
                   :style="{ backgroundColor: item.feat.properties?.color || '#9CA3AF' }"
                 ></div>
                 <span class="font-bold text-slate-800 truncate">{{ item.feat.properties?.class_name || 'Belum Teridentifikasi' }}</span>
+                <span
+                  v-if="hiddenClassIds.has(item.feat.properties?.class_id)"
+                  class="text-[9px] font-bold text-amber-800 bg-amber-100 border border-amber-200/80 px-1 py-0.2 rounded flex items-center gap-0.5 shrink-0"
+                  title="Kelas poligon ini saat ini disembunyikan di peta"
+                >
+                  <EyeOff :size="9" />
+                  <span>Off</span>
+                </span>
               </div>
               <div class="flex items-center gap-1.5 shrink-0">
                 <span v-if="selectedPolyUiIds.has(item.feat._uiId)" class="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" title="Terpilih di peta"></span>
@@ -3096,6 +3269,77 @@ const polyListPage = ref(1)
 const polyListPageSize = 40
 const polySearchQuery = ref('')
 
+// ─── CLASS VISIBILITY & LAYER TOGGLE (POIN 13) ───────────────
+const hiddenClassIds = ref(new Set())
+const filterListByVisibleClasses = ref(false)
+
+const isClassVisible = (classId) => !hiddenClassIds.value.has(classId)
+
+const toggleActiveClassVisibility = (classId) => {
+  const next = new Set(hiddenClassIds.value)
+  if (next.has(classId)) {
+    next.delete(classId)
+  } else {
+    next.add(classId)
+  }
+  hiddenClassIds.value = next
+  refreshMapStyles()
+  const cls = annotationsStore.classes.find(c => c.id === classId)
+  if (next.has(classId)) {
+    showToast(`Poligon kelas "${cls?.name || classId}" disembunyikan di peta`)
+  } else {
+    showToast(`Poligon kelas "${cls?.name || classId}" ditampilkan kembali`)
+  }
+}
+
+const showAllClasses = () => {
+  hiddenClassIds.value = new Set()
+  refreshMapStyles()
+  showToast('Semua 12 kelas tutupan lahan ditampilkan')
+}
+
+const hideAllClasses = () => {
+  const next = new Set()
+  annotationsStore.classes.forEach(c => next.add(c.id))
+  hiddenClassIds.value = next
+  refreshMapStyles()
+  showToast('Semua kelas tutupan lahan disembunyikan (mode inspeksi citra)')
+}
+
+const isolateClass = (classId) => {
+  const otherClasses = annotationsStore.classes.filter(c => c.id !== classId)
+  const areAllOthersHidden = otherClasses.every(c => hiddenClassIds.value.has(c.id))
+  
+  if (areAllOthersHidden && !hiddenClassIds.value.has(classId)) {
+    showAllClasses()
+    return
+  }
+  
+  const next = new Set()
+  otherClasses.forEach(c => next.add(c.id))
+  hiddenClassIds.value = next
+  refreshMapStyles()
+  const cls = annotationsStore.classes.find(c => c.id === classId)
+  showToast(`Hanya menampilkan kelas "${cls?.name || classId}"`)
+}
+
+const isOnlyThisClassVisible = (classId) => {
+  if (hiddenClassIds.value.has(classId)) return false
+  const otherClasses = annotationsStore.classes.filter(c => c.id !== classId)
+  return otherClasses.length > 0 && otherClasses.every(c => hiddenClassIds.value.has(c.id))
+}
+
+const handleSelectClass = (cls) => {
+  if (hiddenClassIds.value.has(cls.id)) {
+    const next = new Set(hiddenClassIds.value)
+    next.delete(cls.id)
+    hiddenClassIds.value = next
+    refreshMapStyles()
+    showToast(`Kelas "${cls.name}" diaktifkan dan ditampilkan kembali untuk digitasi`)
+  }
+  annotationsStore.setSelectedClass(cls)
+}
+
 // ─── OFFLINE DRAFT & NETWORK RESILIENCE (POIN 1) ─────────────
 const isNetworkOnline = ref(typeof navigator !== 'undefined' ? navigator.onLine : true)
 const localDraftStatus = ref(null) // { updatedAt, polygonCount }
@@ -3124,6 +3368,9 @@ const leaderboardList = ref([])
 
 const filteredAndPagedFeatures = computed(() => {
   let list = (features.value || []).map((f, i) => ({ feat: f, originalIdx: i }))
+  if (filterListByVisibleClasses.value && hiddenClassIds.value.size > 0) {
+    list = list.filter(item => !hiddenClassIds.value.has(item.feat.properties?.class_id))
+  }
   if (polySearchQuery.value && polySearchQuery.value.trim()) {
     const q = polySearchQuery.value.toLowerCase().trim()
     list = list.filter(item => {
@@ -3370,8 +3617,9 @@ const selectedPolyUiIds = ref(new Set())
 const hoverFeatureIdx = ref(null)
 
 const isAllSelected = computed(() => {
-  if (features.value.length === 0) return false
-  return features.value.every(f => selectedPolyUiIds.value.has(f._uiId))
+  const visibleFeatures = features.value.filter(f => !hiddenClassIds.value.has(f.properties?.class_id))
+  if (visibleFeatures.length === 0) return false
+  return visibleFeatures.every(f => selectedPolyUiIds.value.has(f._uiId || getFeatureUiId(f)))
 })
 
 const toggleSelectAll = () => {
@@ -3380,6 +3628,8 @@ const toggleSelectAll = () => {
   } else {
     const next = new Set()
     features.value.forEach(f => {
+      const cId = f.properties?.class_id
+      if (cId !== undefined && hiddenClassIds.value.has(cId)) return // don't select hidden polygons
       const uId = f._uiId || getFeatureUiId(f)
       next.add(uId)
     })
@@ -4479,6 +4729,9 @@ const initMap = () => {
   map.on('zoomend moveend', updateMapScaleInfo)
   map.on('zoomend', () => {
     renderReviewPinsOnMap()
+    if (hiddenClassIds.value.size > 0) {
+      refreshMapStyles()
+    }
   })
   map.on('mousemove', onMapMouseMove)
   updateMapScaleInfo()
@@ -4655,6 +4908,8 @@ const onMapMouseUp = async (e) => {
         let newlySelectedCount = 0
         features.value.forEach(feat => {
           try {
+            const fcId = feat.properties?.class_id
+            if (fcId !== undefined && hiddenClassIds.value.has(fcId)) return
             const fPoly = turf.feature(feat.geometry)
             if (turf.booleanIntersects(fPoly, boxPoly)) {
               const uId = feat._uiId || getFeatureUiId(feat)
@@ -5455,6 +5710,7 @@ const findTargetPolygonForCut = (cutGeom) => {
       for (let i = 0; i < features.value.length; i++) {
         const feat = features.value[i]
         if (!feat || !feat.geometry) continue
+        if (feat.properties?.class_id !== undefined && hiddenClassIds.value.has(feat.properties.class_id)) continue
         if (!testIntersects(feat)) continue
 
         let pointsInside = 0
@@ -5517,6 +5773,7 @@ const findTargetPolygonForCut = (cutGeom) => {
       for (let i = 0; i < features.value.length; i++) {
         const feat = features.value[i]
         if (!feat || !feat.geometry) continue
+        if (feat.properties?.class_id !== undefined && hiddenClassIds.value.has(feat.properties.class_id)) continue
         if (!testIntersects(feat)) continue
 
         let interArea = 0
@@ -7539,6 +7796,12 @@ const applyAutoClipAndHealOnEdit = (editedLayer) => {
 const bindLayerEvents = (layer) => {
   layer.off('click')
   layer.on('click', (e) => {
+    // Check if layer belongs to a hidden class:
+    const fClassId = layer.feature?.properties?.class_id
+    if (fClassId !== undefined && hiddenClassIds.value.has(fClassId)) {
+      return // Ignore clicks on hidden polygons completely
+    }
+
     // 0. Mode Tambah Pin Catatan Evaluasi (Klik di atas poligon):
     if (isAddEvaluationPinMode.value) {
       L.DomEvent.stopPropagation(e)
@@ -7617,6 +7880,8 @@ const bindLayerEvents = (layer) => {
     if (e.latlng) {
       const clickPt = [e.latlng.lng, e.latlng.lat]
       features.value.forEach((f, fIdx) => {
+        const fcId = f?.properties?.class_id
+        if (fcId !== undefined && hiddenClassIds.value.has(fcId)) return // Skip hidden classes
         if (f && f.geometry && isPointInPolygonGeom(clickPt, f.geometry)) {
           overlappingIndices.push(fIdx)
         }
@@ -7917,6 +8182,13 @@ const openClassPickerPopup = (layer, feat, idx, latlng, overlappingIndices = [])
 const reassignClassToClickedPolygon = async (cls) => {
   if (clickedFeatureIdx.value === null || !featureGroup) return
   
+  if (hiddenClassIds.value.has(cls.id)) {
+    const next = new Set(hiddenClassIds.value)
+    next.delete(cls.id)
+    hiddenClassIds.value = next
+    refreshMapStyles()
+  }
+
   let layerIdx = 0
   featureGroup.eachLayer((layer) => {
     if (layerIdx === clickedFeatureIdx.value) {
@@ -8094,6 +8366,18 @@ const selectFeatureFromList = (idx) => {
 const flyToFeature = (idx) => {
   clickedFeatureIdx.value = idx
   if (!featureGroup || !map) return
+
+  const feat = features.value[idx]
+  if (feat) {
+    const cId = feat.properties?.class_id
+    if (cId !== undefined && hiddenClassIds.value.has(cId)) {
+      const next = new Set(hiddenClassIds.value)
+      next.delete(cId)
+      hiddenClassIds.value = next
+      refreshMapStyles()
+      showToast(`Kelas "${feat.properties?.class_name}" ditampilkan kembali untuk inspeksi poligon`)
+    }
+  }
   
   let layerIdx = 0
   featureGroup.eachLayer((layer) => {
@@ -8110,9 +8394,41 @@ const refreshMapStyles = () => {
   if (!featureGroup) return
   let idx = 0
   featureGroup.eachLayer((layer) => {
-    const feat = features.value[idx] || layer.feature
+    const feat = layer.feature || features.value[idx]
     const uId = layer._uiId || feat?._uiId || (feat && getFeatureUiId(feat))
     if (!layer._uiId && uId) layer._uiId = uId
+
+    const classId = feat?.properties?.class_id ?? layer.feature?.properties?.class_id
+    const isClassHidden = classId !== undefined && classId !== null && hiddenClassIds.value.has(classId)
+
+    const el = layer.getElement ? layer.getElement() : null
+
+    if (isClassHidden) {
+      layer.setStyle({
+        stroke: false,
+        fill: false,
+        opacity: 0,
+        fillOpacity: 0,
+        weight: 0,
+        interactive: false
+      })
+      if (el) {
+        el.style.display = 'none'
+        el.style.pointerEvents = 'none'
+      }
+      if (layer.pm && typeof layer.pm.enabled === 'function' && layer.pm.enabled()) {
+        try { layer.pm.disable() } catch (_) {}
+      }
+      idx++
+      return
+    }
+
+    if (el) {
+      if (el.style.display === 'none') {
+        el.style.display = ''
+      }
+      el.style.pointerEvents = 'auto'
+    }
 
     const isClicked = clickedFeatureIdx.value === idx
     const isMergedSelected = isFeatureSelectedForMerge(feat, layer)
@@ -8163,6 +8479,9 @@ const refreshMapStyles = () => {
       fillOpacity: fillOpacity,
       opacity: strokeOpacity,
       weight: weight,
+      stroke: true,
+      fill: true,
+      interactive: true,
       dashArray: dashArray
     })
     idx++
@@ -8258,6 +8577,7 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
   }
   if (!preserveHistory) {
     activeTool.value = null
+    hiddenClassIds.value = new Set()
   }
   selectedForMerge.value = []
 

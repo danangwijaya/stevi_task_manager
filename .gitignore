@@ -48,6 +48,8 @@ exports/
 # 6. Operating System Files & Backups
 .DS_Store
 */.DS_Store
+backups/
+*.dump
 Thumbs.db
 *.bak*
 SSL/
