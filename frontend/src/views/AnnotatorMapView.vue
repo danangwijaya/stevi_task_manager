@@ -1551,6 +1551,36 @@
           </div>
         </div>
 
+        <!-- Hole Detection & Filling Action if Polygon has interior rings (Bolong) -->
+        <div v-if="selectedPolygonHoleCount > 0" class="p-2.5 bg-amber-50/90 border border-amber-200/90 rounded-xl space-y-2 animate-in fade-in duration-150">
+          <div class="flex items-center justify-between text-[11px] text-amber-950 font-bold">
+            <span class="flex items-center gap-1.5">
+              <CircleDot :size="13" class="text-amber-600 shrink-0" />
+              <span>Poligon Memiliki {{ selectedPolygonHoleCount }} Lubang (Bolong)</span>
+            </span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              @click="closeSelectedPolygonHoles"
+              class="flex-1 py-1.5 px-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
+              title="Tutup seluruh lubang di dalam poligon ini sehingga menjadi poligon solid utuh"
+            >
+              <CircleSlash :size="11" />
+              <span>Tutup Semua Lubang</span>
+            </button>
+            <button
+              type="button"
+              @click="extractSelectedPolygonHolesAsNewFeatures"
+              class="flex-1 py-1.5 px-2 bg-white hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
+              title="Ekstrak lubang menjadi poligon terpisah agar bisa diisi kelas tutupan lahan"
+            >
+              <Split :size="11" />
+              <span>Ekstrak Jadi Poligon</span>
+            </button>
+          </div>
+        </div>
+
         <div class="flex items-center gap-2 pt-1 border-t border-indigo-200/60">
           <button
             @click="handleSmartDeleteSelected"
@@ -3241,7 +3271,9 @@ import {
   Wifi,
   WifiOff,
   Trophy,
-  Split
+  Split,
+  CircleDot,
+  CircleSlash
 } from 'lucide-vue-next'
 import * as turf from '@turf/turf'
 import { useAuthStore } from '../stores/auth'
@@ -8214,6 +8246,152 @@ const reassignClassToClickedPolygon = async (cls) => {
       await api.updateAnnotationClass(targetFeat.id, cls.id)
     } catch {}
   }
+}
+
+// ── HOLE / LUBANG MANAGEMENT FOR SELECTED POLYGON ──────
+const selectedPolygonHoleCount = computed(() => {
+  if (clickedFeatureIdx.value === null) return 0
+  const feat = features.value[clickedFeatureIdx.value]
+  if (!feat || !feat.geometry) return 0
+  const g = feat.geometry
+  if (g.type === 'Polygon' && Array.isArray(g.coordinates)) {
+    return Math.max(0, g.coordinates.length - 1)
+  }
+  if (g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) {
+    let count = 0
+    for (const polyCoords of g.coordinates) {
+      if (Array.isArray(polyCoords) && polyCoords.length > 1) {
+        count += polyCoords.length - 1
+      }
+    }
+    return count
+  }
+  return 0
+})
+
+const closeSelectedPolygonHoles = () => {
+  if (clickedFeatureIdx.value === null) return
+  const targetFeat = features.value[clickedFeatureIdx.value]
+  if (!targetFeat || !targetFeat.geometry) return
+
+  const g = JSON.parse(JSON.stringify(targetFeat.geometry))
+  let removedHoles = 0
+
+  if (g.type === 'Polygon' && Array.isArray(g.coordinates) && g.coordinates.length > 1) {
+    removedHoles = g.coordinates.length - 1
+    g.coordinates = [g.coordinates[0]] // Keep exterior ring, drop all interior holes
+  } else if (g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) {
+    for (let i = 0; i < g.coordinates.length; i++) {
+      if (Array.isArray(g.coordinates[i]) && g.coordinates[i].length > 1) {
+        removedHoles += g.coordinates[i].length - 1
+        g.coordinates[i] = [g.coordinates[i][0]]
+      }
+    }
+  }
+
+  if (removedHoles === 0) return
+
+  let newAreaM2 = 0
+  try {
+    newAreaM2 = turf.area(turf.feature(g))
+  } catch (_) {}
+
+  const updatedFeat = {
+    ...targetFeat,
+    geometry: g,
+    properties: {
+      ...(targetFeat.properties || {}),
+      area_sqm: newAreaM2
+    }
+  }
+
+  const targetId = targetFeat.id || targetFeat.properties?.id
+  const targetUiId = targetFeat._uiId || getFeatureUiId(targetFeat)
+
+  applyDeltaUpdate(
+    targetId ? [targetId] : [],
+    [updatedFeat],
+    [],
+    targetUiId ? [targetUiId] : []
+  )
+
+  syncFeaturesFromMap()
+  pushHistory()
+  showToast(`✨ Berhasil menutup ${removedHoles} lubang pada poligon #${clickedFeatureIdx.value + 1}!`)
+}
+
+const extractSelectedPolygonHolesAsNewFeatures = () => {
+  if (clickedFeatureIdx.value === null) return
+  const targetFeat = features.value[clickedFeatureIdx.value]
+  if (!targetFeat || !targetFeat.geometry) return
+
+  const g = JSON.parse(JSON.stringify(targetFeat.geometry))
+  const extractedHoles = []
+
+  if (g.type === 'Polygon' && Array.isArray(g.coordinates) && g.coordinates.length > 1) {
+    for (let i = 1; i < g.coordinates.length; i++) {
+      extractedHoles.push(g.coordinates[i])
+    }
+    g.coordinates = [g.coordinates[0]]
+  } else if (g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) {
+    for (let p = 0; p < g.coordinates.length; p++) {
+      if (Array.isArray(g.coordinates[p]) && g.coordinates[p].length > 1) {
+        for (let i = 1; i < g.coordinates[p].length; i++) {
+          extractedHoles.push(g.coordinates[p][i])
+        }
+        g.coordinates[p] = [g.coordinates[p][0]]
+      }
+    }
+  }
+
+  if (extractedHoles.length === 0) return
+
+  let newAreaM2 = 0
+  try {
+    newAreaM2 = turf.area(turf.feature(g))
+  } catch (_) {}
+
+  const updatedOuter = {
+    ...targetFeat,
+    geometry: g,
+    properties: {
+      ...(targetFeat.properties || {}),
+      area_sqm: newAreaM2
+    }
+  }
+
+  const targetId = targetFeat.id || targetFeat.properties?.id
+  const targetUiId = targetFeat._uiId || getFeatureUiId(targetFeat)
+
+  const newFeatures = extractedHoles.map((holeRing, idx) => {
+    const holeGeom = { type: 'Polygon', coordinates: [holeRing] }
+    let areaM2 = 0
+    try {
+      areaM2 = turf.area(turf.feature(holeGeom))
+    } catch (_) {}
+    return {
+      type: 'Feature',
+      geometry: holeGeom,
+      properties: {
+        class_id: 0,
+        class_name: 'Belum Teridentifikasi',
+        color: '#94A3B8',
+        area_sqm: areaM2
+      },
+      _uiId: `hole_${Date.now()}_${idx}`
+    }
+  })
+
+  applyDeltaUpdate(
+    targetId ? [targetId] : [],
+    [updatedOuter, ...newFeatures],
+    [],
+    targetUiId ? [targetUiId] : []
+  )
+
+  syncFeaturesFromMap()
+  pushHistory()
+  showToast(`✨ Berhasil mengekstrak ${newFeatures.length} lubang menjadi poligon baru!`)
 }
 
 const handleSmartDeleteSelected = () => {
