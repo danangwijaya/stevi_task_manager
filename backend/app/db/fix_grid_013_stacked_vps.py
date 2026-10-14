@@ -129,21 +129,29 @@ def analyze_and_fix_grid(grid_query_str: str, apply_changes: bool = False):
                         if r1 > 0.85 and r2 > 0.85:
                             # Tentukan mana yang disimpan dan mana yang dihapus:
                             # Prioritas simpan:
-                            # 1. Jika beda tanggal pembuatan, simpan yang lebih baru (latest user edit)
-                            # 2. Jika sama/hampir sama waktu, simpan yang memiliki lubang (holes) lebih lengkap
-                            # 3. Jika lubang sama, simpan ID yang lebih baru
-                            if p1["created_at"] < p2["created_at"]:
-                                del_p, keep_p = p1, p2
-                            elif p1["created_at"] > p2["created_at"]:
+                            # 1. Prioritaskan poligon yang SUDAH DILABEL (class_id > 0) daripada 'Belum Teridentifikasi' (class_id == 0)
+                            p1_is_labeled = (p1["class_id"] != 0 and p1["class_name"] != "Belum Teridentifikasi")
+                            p2_is_labeled = (p2["class_id"] != 0 and p2["class_name"] != "Belum Teridentifikasi")
+
+                            if p1_is_labeled and not p2_is_labeled:
                                 del_p, keep_p = p2, p1
+                            elif p2_is_labeled and not p1_is_labeled:
+                                del_p, keep_p = p1, p2
                             else:
+                                # 2. Jika status label sama, simpan yang memiliki lubang (holes) lebih lengkap
                                 if p1["holes"] < p2["holes"]:
                                     del_p, keep_p = p1, p2
                                 elif p1["holes"] > p2["holes"]:
                                     del_p, keep_p = p2, p1
                                 else:
-                                    del_p = p1 if p1["id"] < p2["id"] else p2
-                                    keep_p = p2 if p1["id"] < p2["id"] else p1
+                                    # 3. Jika lubang sama, simpan yang lebih baru (latest user edit)
+                                    if p1["created_at"] < p2["created_at"]:
+                                        del_p, keep_p = p1, p2
+                                    elif p1["created_at"] > p2["created_at"]:
+                                        del_p, keep_p = p2, p1
+                                    else:
+                                        del_p = p1 if p1["id"] < p2["id"] else p2
+                                        keep_p = p2 if p1["id"] < p2["id"] else p1
 
                             reason = f"Mutual Overlap {max(r1, r2)*100:.1f}% (del: #{del_p['id']} [{del_p['class_name']}], keep: #{keep_p['id']} [{keep_p['class_name']}])"
                             to_delete_map[del_p["id"]] = {
