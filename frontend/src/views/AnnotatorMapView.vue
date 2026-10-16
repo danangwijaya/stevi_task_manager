@@ -6851,23 +6851,25 @@ const loadSurgeryError = (idx) => {
     let geojson = null
     let cId = null
 
-    // 1. Try finding in active Leaflet featureGroup
-    if (featureGroup) {
-      featureGroup.eachLayer(l => {
-        const lid = l.feature?.id ?? l.feature?.properties?.id
-        if (lid != null && String(lid) === String(polyId)) {
-          geojson = l.toGeoJSON ? l.toGeoJSON() : l.feature
-          cId = geojson?.properties?.class_id
-        }
-      })
-    }
-
-    // 2. Fallback: try finding in features store array
-    if (!geojson && features.value) {
+    // 1. Fast in-memory array lookup
+    if (features.value) {
       const feat = features.value.find(f => String(f.id ?? f.properties?.id) === String(polyId))
       if (feat) {
         geojson = JSON.parse(JSON.stringify(feat))
         cId = geojson.properties?.class_id
+      }
+    }
+
+    // 2. Fallback: try finding in active Leaflet featureGroup with early break
+    if (!geojson && featureGroup) {
+      const layers = featureGroup.getLayers ? featureGroup.getLayers() : []
+      for (const l of layers) {
+        const lid = l.feature?.id ?? l.feature?.properties?.id
+        if (lid != null && String(lid) === String(polyId)) {
+          geojson = l.toGeoJSON ? l.toGeoJSON() : l.feature
+          cId = geojson?.properties?.class_id
+          break
+        }
       }
     }
 
@@ -9540,14 +9542,10 @@ const runTopologyCheck = async (autoSave = true) => {
       } catch (saveErr) {
         console.warn('Could not auto-save before topology check:', saveErr)
       }
-
-      // Reload features dari server agar ID layer di peta = ID di database
-      try {
-        await loadTaskData(selectedTaskId.value, true)
-      } catch (reloadErr) {
-        console.warn('Could not reload features after save:', reloadErr)
-      }
     }
+
+    // Yield to the browser event loop so UI paints the loading spinner smoothly
+    await new Promise(r => setTimeout(r, 60))
 
     const res = await api.validateTopology(selectedTaskId.value)
     topologyResult.value = res.data

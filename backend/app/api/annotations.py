@@ -985,23 +985,30 @@ def validate_topology(
                             overlap_sqm = inter.area * (111320.0 ** 2)
                             ann_i = valid_polys[i]["ann"]
                             ann_j = valid_polys[j]["ann"]
+                            # Simplify complex overlap shape so client Leaflet SVG renders smoothly without UI freeze
+                            inter_disp = inter.simplify(1.5e-5, preserve_topology=True)
+                            if inter_disp.is_empty:
+                                inter_disp = inter
                             errors.append({
                                 "type": "OVERLAP",
                                 "annotation_ids": [ann_i.id, ann_j.id],
                                 "class_names": [ann_i.class_name, ann_j.class_name],
                                 "area_sqm": round(overlap_sqm, 2),
-                                "geometry": mapping(inter),
+                                "geometry": mapping(inter_disp),
                                 "message": f"Tumpang tindih {round(overlap_sqm, 1)} m² ({overlap_pct:.4f}% dari grid) antara poligon #{ann_i.id} ({ann_i.class_name}) dan #{ann_j.id} ({ann_j.class_name})"
                             })
                     elif inter.area > WARNING_OVERLAP_THRESHOLD:
                         overlap_sqm = inter.area * (111320.0 ** 2)
                         ann_i = valid_polys[i]["ann"]
                         ann_j = valid_polys[j]["ann"]
+                        inter_disp = inter.simplify(1.5e-5, preserve_topology=True)
+                        if inter_disp.is_empty:
+                            inter_disp = inter
                         warnings.append({
                             "type": "MICRO_OVERLAP",
                             "annotation_ids": [ann_i.id, ann_j.id],
                             "area_sqm": round(overlap_sqm, 2),
-                            "geometry": mapping(inter),
+                            "geometry": mapping(inter_disp),
                             "message": f"Tumpang tindih mikro tepi {round(overlap_sqm, 2)} m² antara #{ann_i.id} dan #{ann_j.id} (toleransi digitasi wajar)"
                         })
                 except Exception:
@@ -1016,7 +1023,7 @@ def validate_topology(
     # 3 & 4. Gap detection and coverage
     coverage_percent = 0.0
     try:
-        all_geoms = [sp["geom"] for sp in shapely_polygons if sp["geom"].is_valid]
+        all_geoms = [sp["geom"] for sp in shapely_polygons if sp["geom"].is_valid and not sp["geom"].is_empty and sp["geom"].area > 1e-11]
         if all_geoms:
             union_geom = unary_union(all_geoms)
             # Clip to grid bounds
@@ -1028,18 +1035,23 @@ def validate_topology(
             if gap_area.area > ERROR_OVERLAP_THRESHOLD:
                 gap_pct = (gap_area.area / grid_area) * 100
                 gap_sqm = gap_area.area * (111320.0 ** 2)
+                # Simplify gap geometry for ultra-fast JSON transmission and instantaneous Leaflet SVG rendering
+                clean_gap = gap_area.simplify(1.5e-5, preserve_topology=True)
+                if clean_gap.is_empty:
+                    clean_gap = gap_area
+                gap_geom_dict = mapping(clean_gap)
                 if gap_pct > 5.0:
                     warnings.append({
                         "type": "GAP",
                         "area_sqm": round(gap_sqm, 2),
-                        "geometry": mapping(gap_area),
+                        "geometry": gap_geom_dict,
                         "message": f"Area kosong (gap) terdeteksi: {gap_pct:.2f}% dari grid ({round(gap_sqm, 1)} m²) belum tercakup poligon. Jika area ini adalah laut/pesisir di luar daratan, Anda tetap dapat mengirim ke QC."
                     })
                 elif gap_pct > 0.5:
                     warnings.append({
                         "type": "SMALL_GAP",
                         "area_sqm": round(gap_sqm, 2),
-                        "geometry": mapping(gap_area),
+                        "geometry": gap_geom_dict,
                         "message": f"Area kosong kecil terdeteksi: {gap_pct:.2f}% dari grid ({round(gap_sqm, 1)} m²) — pertimbangkan untuk menutup celah"
                     })
     except Exception as e:
@@ -1336,17 +1348,28 @@ def auto_heal_topology(
             cur_ann = item["ann"]
             was_clipped = False
 
-            for accepted in accepted_list:
-                if not cur_geom.is_empty and cur_geom.intersects(accepted["geom"]):
-                    try:
-                        inter = cur_geom.intersection(accepted["geom"])
-                        if inter.area > clip_thresh:
-                            cur_geom = cur_geom.difference(accepted["geom"])
-                            cur_geom = make_valid(cur_geom)
-                            was_clipped = True
-                            clipped_count += 1
-                    except Exception:
-                        pass
+            if not cur_geom.is_empty:
+                c_bounds = cur_geom.bounds
+                for accepted in accepted_list:
+                    a_bounds = accepted["geom"].bounds
+                    # Fast disjoint bounding box check (eliminates 95% of pairwise geometry calls)
+                    if (c_bounds[0] > a_bounds[2] or c_bounds[2] < a_bounds[0] or
+                        c_bounds[1] > a_bounds[3] or c_bounds[3] < a_bounds[1]):
+                        continue
+
+                    if cur_geom.intersects(accepted["geom"]):
+                        try:
+                            inter = cur_geom.intersection(accepted["geom"])
+                            if inter.area > clip_thresh:
+                                cur_geom = cur_geom.difference(accepted["geom"])
+                                cur_geom = make_valid(cur_geom)
+                                c_bounds = cur_geom.bounds
+                                was_clipped = True
+                                clipped_count += 1
+                                if cur_geom.is_empty:
+                                    break
+                        except Exception:
+                            pass
 
             effective_min_sqm = max(3.0, options.min_sliver_area_sqm) if options.remove_slivers else 2.0
             extracted = _extract_polygons(cur_geom, min_area_sqm=effective_min_sqm)
