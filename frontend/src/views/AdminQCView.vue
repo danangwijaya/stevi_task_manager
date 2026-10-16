@@ -2029,7 +2029,7 @@ let qcContextFeatureGroup = null
 let qcGridBoundingLayer = null
 
 const savedQcLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_qc_layer') : null
-const qcLayer = ref(savedQcLayer || 'google_sat')
+const qcLayer = ref(savedQcLayer || 'local_s2_rgb')
 const qcOpacity = ref(0.65)
 const isSpacePeeking = ref(false)
 let savedOpacityBeforePeek = 0.65
@@ -2052,10 +2052,10 @@ const activeQcInspectorBounds = ref(null)
 const isQcInspectorLoading = ref(false)
 
 const layerOptions = [
-  { id: 'google_sat', name: 'Google Sat', icon: Globe2 },
-  { id: 'esri_sat', name: 'Esri Sat', icon: Globe },
   { id: 'local_s2_rgb', name: 'Sentinel-2 Lokal (RGB)', icon: Satellite },
   { id: 'local_s2_cir', name: 'Sentinel-2 Lokal (NIR)', icon: Flame },
+  { id: 'google_sat', name: 'Google Sat', icon: Globe2 },
+  { id: 'esri_sat', name: 'Esri Sat', icon: Globe },
   { id: 'false_color_nir', name: 'False NIR', icon: Flame },
   { id: 'swir', name: 'SWIR', icon: Sprout },
   { id: 'ndvi', name: 'NDVI', icon: TrendingUp }

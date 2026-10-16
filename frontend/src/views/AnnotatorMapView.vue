@@ -3314,7 +3314,7 @@ const annotationsStore = useAnnotationsStore()
 
 const selectedTaskId = ref(null)
 const savedPreferredLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_preferred_layer') : null
-const currentLayer = ref(savedPreferredLayer || 'google_sat')
+const currentLayer = ref(savedPreferredLayer || 'local_s2_rgb')
 const currentYear = ref(2025)
 const availableRasterYears = ref([2025, 2022])
 const polygonOpacity = ref(0.6)
@@ -4446,9 +4446,8 @@ const getArcgisRasterFunction = (layerId) => {
 }
 
 const layerOptions = [
-  { id: 'google_sat', name: 'Google Satellite Ultra-HD', desc: 'Citra satelit resolusi sangat tinggi zoom 20+ — Rekomendasi Utama', icon: Globe2, colorClass: 'text-blue-600 font-bold' },
-  { id: 'true_color', name: 'Sentinel-2 EOX Cloudless (ESA)', desc: 'Komposit bebas awan tahunan ESA Copernicus EOX 10m', icon: Satellite, colorClass: 'text-emerald-700 font-bold' },
-  { id: 'esri_sat', name: 'Esri World Imagery', desc: 'Citra satelit global resolusi tinggi jernih', icon: Globe, colorClass: 'text-slate-600' },
+  { id: 'local_s2_rgb', name: 'Sentinel-2 Sumbar (Warna Asli RGB)', desc: 'Citra lokal komposit 10m Cloud-Optimized GeoTIFF — Acuan Utama Digitasi', icon: Satellite, colorClass: 'text-emerald-700 font-bold' },
+  { id: 'local_s2_cir', name: 'Sentinel-2 Sumbar (Infrared / NIR False Color)', desc: 'Citra lokal B8-B4-B3 (NIR) — Membedakan Hutan, Sawit, Sawah & Air', icon: Flame, colorClass: 'text-rose-600 font-bold' },
   { id: 'arcgis_s2_natural', name: 'Sentinel-2 L2A (ArcGIS Natural Color DRA)', desc: 'Esri Living Atlas • Warna alami 10m BOA dengan Dynamic Range Adjustment', icon: Satellite, colorClass: 'text-emerald-700' },
   { id: 'arcgis_s2_nir', name: 'Sentinel-2 L2A (ArcGIS False Color NIR)', desc: 'Esri Living Atlas • B8-B4-B3 vegetasi merah menyala (Hutan vs Semak)', icon: Flame, colorClass: 'text-rose-600' },
   { id: 'arcgis_s2_agri', name: 'Sentinel-2 L2A (ArcGIS Agriculture SWIR)', desc: 'Esri Living Atlas • B11-B8-B2 pemilah sawah, kelapa sawit & tanah', icon: Sprout, colorClass: 'text-amber-600' },
@@ -4458,8 +4457,9 @@ const layerOptions = [
   { id: 'arcgis_s2_ndmi', name: 'Sentinel-2 L2A (ArcGIS NDMI Kelembaban)', desc: 'Esri Living Atlas • Indeks kelembaban kanopi & tanah basah', icon: Sprout, colorClass: 'text-cyan-600' },
   { id: 'arcgis_s2_ndwi', name: 'Sentinel-2 L2A (ArcGIS NDWI Air & Tambak)', desc: 'Esri Living Atlas • Indeks air pemisah tegas danau, sungai & tambak', icon: Globe2, colorClass: 'text-blue-600' },
   { id: 'arcgis_s2_scl', name: 'Sentinel-2 L2A (Scene Classification Map)', desc: 'Esri Living Atlas • Peta klasifikasi otomatis Sen2Cor ESA', icon: Palette, colorClass: 'text-purple-600' },
-  { id: 'local_s2_rgb', name: 'Sentinel-2 Sumbar (Raster Lokal COG RGB)', desc: 'Citra lokal komposit 10m Cloud-Optimized GeoTIFF', icon: Satellite, colorClass: 'text-emerald-700' },
-  { id: 'local_s2_cir', name: 'Sentinel-2 Sumbar (Raster Lokal NIR False Color)', desc: 'Citra lokal B8-B4-B3 (NIR) — Membedakan Hutan, Sawit, Sawah & Air', icon: Flame, colorClass: 'text-rose-600' },
+  { id: 'true_color', name: 'Sentinel-2 EOX Cloudless (ESA)', desc: 'Komposit bebas awan tahunan ESA Copernicus EOX', icon: Satellite, colorClass: 'text-blue-700' },
+  { id: 'google_sat', name: 'Google Satellite Ultra-HD', desc: 'Citra satelit resolusi sangat tinggi zoom 20+', icon: Globe2, colorClass: 'text-blue-600' },
+  { id: 'esri_sat', name: 'Esri World Imagery', desc: 'Citra satelit global resolusi tinggi jernih', icon: Globe, colorClass: 'text-slate-600' },
   { id: 'osm', name: 'OpenStreetMap Base', desc: 'Peta jalan & batas wilayah administrasi', icon: MapIcon, colorClass: 'text-slate-500' }
 ]
 
