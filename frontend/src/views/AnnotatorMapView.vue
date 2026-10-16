@@ -402,7 +402,7 @@
           </button>
 
           <button
-            @click="saveAnnotations(true, true)"
+            @click="saveAnnotations(false, true)"
             :disabled="annotationsStore.saving || isExplicitSaving"
             class="bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-3.5 py-1.5 rounded-md border border-slate-300 transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
             title="Simpan perubahan poligon ke server (Ctrl+S)"
@@ -9851,9 +9851,9 @@ const syncFeaturesFromMap = () => {
   features.value = accepted
 }
 
-const saveAnnotations = async (reloadGeometry = true, isManual = true) => {
+const saveAnnotations = async (reloadGeometry = false, isManual = true) => {
   if (typeof reloadGeometry !== 'boolean') {
-    reloadGeometry = true
+    reloadGeometry = false
     isManual = true
   }
   if (!selectedTaskId.value) {
@@ -9903,6 +9903,21 @@ const saveAnnotations = async (reloadGeometry = true, isManual = true) => {
         localDraftStatus.value = null
         showDraftRestorePrompt.value = false
       }
+
+      // In-place ID update on existing Leaflet layers without re-rendering the DOM!
+      if (ok.id_map && typeof ok.id_map === 'object' && featureGroup) {
+        featureGroup.eachLayer(l => {
+          const uId = l._uiId || l.feature?._uiId
+          if (uId && ok.id_map[uId]) {
+            const dbId = ok.id_map[uId]
+            if (l.feature) {
+              l.feature.id = dbId
+              if (l.feature.properties) l.feature.properties.id = dbId
+            }
+          }
+        })
+      }
+
       if (reloadGeometry) {
         try {
           await loadTaskData(selectedTaskId.value, true)

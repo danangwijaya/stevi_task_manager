@@ -499,48 +499,79 @@ def save_grid_annotations(
     ), reverse=True)
 
     # SPATIAL COLLISION DEDUPLICATION GUARD:
-    # Never allow duplicate / stacked polygons into the database!
+    # 25x25 Spatial Grid Hash Index for O(1) candidate lookup (eliminates O(N^2) CPU freeze on dense grids)
     accepted = []
     dropped_dups_count = 0
 
     if candidates:
-        accepted_geoms = []
+        all_minx = min(c["poly"].bounds[0] for c in candidates)
+        all_maxx = max(c["poly"].bounds[2] for c in candidates)
+        all_miny = min(c["poly"].bounds[1] for c in candidates)
+        all_maxy = max(c["poly"].bounds[3] for c in candidates)
+
+        span_x = max(all_maxx - all_minx, 1e-5)
+        span_y = max(all_maxy - all_miny, 1e-5)
+
+        # 25x25 spatial index partitions the grid into 625 compact buckets
+        cell_w = span_x / 25.0
+        cell_h = span_y / 25.0
+
+        spatial_grid = {}
+
         for cand in candidates:
             c_poly = cand["poly"]
             c_cid = cand["class_id"]
-            
+            c_bounds = c_poly.bounds
+
+            min_cx = int((c_bounds[0] - all_minx) / cell_w)
+            max_cx = int((c_bounds[2] - all_minx) / cell_w)
+            min_cy = int((c_bounds[1] - all_miny) / cell_h)
+            max_cy = int((c_bounds[3] - all_miny) / cell_h)
+
+            # Query only polygons sharing the candidate's spatial grid buckets
+            cand_indices = set()
+            for cx in range(min_cx, max_cx + 1):
+                for cy in range(min_cy, max_cy + 1):
+                    bucket = spatial_grid.get((cx, cy))
+                    if bucket:
+                        cand_indices.update(bucket)
+
             is_dup = False
-            if accepted_geoms:
-                c_bounds = c_poly.bounds
-                for a_poly, a_cand in accepted:
-                    a_bounds = a_poly.bounds
-                    # BBox disjoint check
-                    if (c_bounds[0] > a_bounds[2] or c_bounds[2] < a_bounds[0] or
-                        c_bounds[1] > a_bounds[3] or c_bounds[3] < a_bounds[1]):
-                        continue
-                    
-                    if c_poly.intersects(a_poly):
-                        try:
-                            inter = c_poly.intersection(a_poly)
-                            inter_area = inter.area
-                            if inter_area > 0:
-                                ratio_c = inter_area / c_poly.area
-                                ratio_a = inter_area / a_poly.area
-                                # Mutual duplicate / stacked (>85% mutual overlap)
-                                if ratio_c > 0.85 and ratio_a > 0.85:
-                                    is_dup = True
-                                    dropped_dups_count += 1
-                                    break
-                                # Candidate is unlabelled (class_id == 0) and almost entirely inside an already accepted polygon (>90%)
-                                if c_cid == 0 and ratio_c > 0.90:
-                                    is_dup = True
-                                    dropped_dups_count += 1
-                                    break
-                        except Exception:
-                            pass
+            for idx in cand_indices:
+                a_poly, a_cand = accepted[idx]
+                a_bounds = a_poly.bounds
+
+                # BBox disjoint check
+                if (c_bounds[0] > a_bounds[2] or c_bounds[2] < a_bounds[0] or
+                    c_bounds[1] > a_bounds[3] or c_bounds[3] < a_bounds[1]):
+                    continue
+
+                if c_poly.intersects(a_poly):
+                    try:
+                        inter = c_poly.intersection(a_poly)
+                        inter_area = inter.area
+                        if inter_area > 0:
+                            ratio_c = inter_area / c_poly.area
+                            ratio_a = inter_area / a_poly.area
+                            # Mutual duplicate / stacked (>85% mutual overlap)
+                            if ratio_c > 0.85 and ratio_a > 0.85:
+                                is_dup = True
+                                dropped_dups_count += 1
+                                break
+                            # Candidate is unlabelled (class_id == 0) and almost entirely inside an already accepted polygon (>90%)
+                            if c_cid == 0 and ratio_c > 0.90:
+                                is_dup = True
+                                dropped_dups_count += 1
+                                break
+                    except Exception:
+                        pass
+
             if not is_dup:
+                new_idx = len(accepted)
                 accepted.append((c_poly, cand))
-                accepted_geoms.append(c_poly)
+                for cx in range(min_cx, max_cx + 1):
+                    for cy in range(min_cy, max_cy + 1):
+                        spatial_grid.setdefault((cx, cy), []).append(new_idx)
 
     if dropped_dups_count > 0:
         logger.warning(f"Grid {task_grid_id}: Otomatis membuang {dropped_dups_count} poligon duplikat/tumpuk saat simpan.")
