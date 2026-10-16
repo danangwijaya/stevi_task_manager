@@ -1009,23 +1009,27 @@ def update_task_status(
 
     # Define valid transitions
     VALID_TRANSITIONS = {
-        "UNASSIGNED": ["ASSIGNED", "IN_PROGRESS"],
-        "ASSIGNED": ["IN_PROGRESS", "UNASSIGNED"],
-        "IN_PROGRESS": ["SUBMITTED"],
-        "SUBMITTED": ["APPROVED", "REVISION_NEEDED"],
-        "REVISION_NEEDED": ["IN_PROGRESS", "SUBMITTED"],
-        "APPROVED": ["REVISION_NEEDED"],  # Admin/Dosen can reopen
+        "UNASSIGNED": ["ASSIGNED", "IN_PROGRESS", "SUBMITTED"],
+        "ASSIGNED": ["IN_PROGRESS", "UNASSIGNED", "SUBMITTED"],
+        "IN_PROGRESS": ["SUBMITTED", "APPROVED"],
+        "SUBMITTED": ["APPROVED", "REVISION_NEEDED", "IN_PROGRESS"],
+        "REVISION_NEEDED": ["IN_PROGRESS", "SUBMITTED", "APPROVED"],
+        "APPROVED": ["REVISION_NEEDED", "IN_PROGRESS"],  # Admin/Dosen can reopen
     }
 
     # Permissions check
     user_role = (current_user.role or "").strip().lower()
-    if user_role not in ["admin", "dosen", "supervisi"]:
-        if task.assigned_user_id != current_user.id:
+    if user_role not in ["admin", "dosen", "supervisi", "reviewer"]:
+        if task.assigned_user_id is None:
+            task.assigned_user_id = current_user.id
+        elif task.assigned_user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Hanya dapat mengubah status grid milik sendiri")
-        # Contributors can only: IN_PROGRESS->SUBMITTED, REVISION_NEEDED->SUBMITTED
+        # Contributors can transition from ASSIGNED / IN_PROGRESS / REVISION_NEEDED / UNASSIGNED -> SUBMITTED or IN_PROGRESS
         allowed_contributor = {
+            "UNASSIGNED": ["IN_PROGRESS", "SUBMITTED"],
+            "ASSIGNED": ["IN_PROGRESS", "SUBMITTED"],
             "IN_PROGRESS": ["SUBMITTED"],
-            "REVISION_NEEDED": ["SUBMITTED"],
+            "REVISION_NEEDED": ["IN_PROGRESS", "SUBMITTED"],
         }
         contributor_allowed = allowed_contributor.get(old_status, [])
         if new_status not in contributor_allowed:
@@ -1044,6 +1048,9 @@ def update_task_status(
 
     task.status = new_status
     task.updated_at = datetime.utcnow()
+    if new_status == "UNASSIGNED":
+        task.assigned_user_id = None
+        task.completed_at = None
     if status_update.reviewer_notes is not None:
         task.reviewer_notes = status_update.reviewer_notes
     if new_status == "APPROVED":

@@ -14,7 +14,7 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgis_data:/var/lib/postgresql/data
-    command: ["postgres", "-c", "max_connections=250", "-c", "shared_buffers=4GB", "-c", "work_mem=64MB"]
+    command: ["postgres", "-c", "max_connections=250", "-c", "shared_buffers=4GB", "-c", "work_mem=32MB"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-geoai_user} -d ${POSTGRES_DB:-geoai_landcover}"]
       interval: 10s
@@ -31,6 +31,8 @@ services:
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8"]
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://geoai_user:geoai_password_2026@postgis:5432/geoai_landcover}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
       SECRET_KEY: ${SECRET_KEY:-geoai_super_secret_jwt_key_2026_landcover_unet_sample}
       RASTER_BASE_DIR: /app/data/raster
       GEE_SERVICE_ACCOUNT: ${GEE_SERVICE_ACCOUNT:-}
@@ -39,6 +41,12 @@ services:
     depends_on:
       postgis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")'"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
     volumes:
       - exports_data:/app/exports
       - ./backend/data/raster:/app/data/raster
@@ -58,7 +66,8 @@ services:
       - ./certbot/conf:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   postgis_data:

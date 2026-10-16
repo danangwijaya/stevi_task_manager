@@ -3046,6 +3046,26 @@
                   </button>
                 </template>
 
+                <!-- Gap / Celah Kosong Action -->
+                <template v-else-if="surgeryCurrentError?.type === 'GAP' || surgeryCurrentError?.type === 'SMALL_GAP'">
+                  <button
+                    @click="openFillGapsModal"
+                    :disabled="surgeryIsProcessing"
+                    class="w-full p-3 rounded-xl bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-200 text-left transition-colors cursor-pointer group disabled:opacity-50 shadow-2xs"
+                  >
+                    <div class="flex items-center justify-between text-xs font-semibold text-slate-900">
+                      <span class="flex items-center gap-1.5">
+                        <PlusCircle :size="14" class="text-indigo-600" />
+                        <span>Isi Celah Kosong (Fill Gaps)</span>
+                      </span>
+                      <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">Tutup Celah</span>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-1 leading-normal">
+                      Buat poligon baru otomatis untuk mengisi area celah kosong ini sesuai kelas tutupan lahan yang dipilih.
+                    </p>
+                  </button>
+                </template>
+
                 <!-- Vertex Edit Section -->
                 <div class="p-3.5 rounded-xl bg-white border border-slate-200 space-y-3 shadow-2xs">
                   <div class="flex items-center justify-between">
@@ -3296,7 +3316,8 @@ import {
   Trophy,
   Split,
   CircleDot,
-  CircleSlash
+  CircleSlash,
+  PlusCircle
 } from 'lucide-vue-next'
 import * as turf from '@turf/turf'
 import { useAuthStore } from '../stores/auth'
@@ -3735,7 +3756,17 @@ const resetCurrentGridAnnotations = async () => {
   if (!confirmed) return
 
   try {
+    if (serverAutoSaveTimer) { clearTimeout(serverAutoSaveTimer); serverAutoSaveTimer = null }
+    if (draftAutoSaveTimer) { clearTimeout(draftAutoSaveTimer); draftAutoSaveTimer = null }
+
     const res = await api.resetTaskAnnotations(selectedTaskId.value)
+    await clearTaskDraft(selectedTaskId.value)
+    localDraftStatus.value = null
+    showDraftRestorePrompt.value = false
+    hasUnsavedChanges.value = false
+    history.value = []
+    historyIndex.value = -1
+
     showToast(res.data?.message || 'Grid berhasil direset bersih!')
     selectedPolyUiIds.value.clear()
     await loadTaskData(selectedTaskId.value, false)
@@ -3888,8 +3919,21 @@ const batchDeleteSelectedPolygons = async () => {
   pushHistory()
 
   try {
-    await annotationsStore.saveGridAnnotations(selectedTaskId.value, remaining)
-    showToast(`🗑️ ${count} poligon berhasil dihapus & diserap ke tetangga!`)
+    if (remaining.length === 0) {
+      if (serverAutoSaveTimer) { clearTimeout(serverAutoSaveTimer); serverAutoSaveTimer = null }
+      if (draftAutoSaveTimer) { clearTimeout(draftAutoSaveTimer); draftAutoSaveTimer = null }
+      await api.resetTaskAnnotations(selectedTaskId.value)
+      await clearTaskDraft(selectedTaskId.value)
+      localDraftStatus.value = null
+      showDraftRestorePrompt.value = false
+      hasUnsavedChanges.value = false
+      history.value = []
+      historyIndex.value = -1
+      showToast('🗑️ Seluruh poligon grid berhasil dikosongkan!')
+    } else {
+      await annotationsStore.saveGridAnnotations(selectedTaskId.value, remaining)
+      showToast(`🗑️ ${count} poligon berhasil dihapus & diserap ke tetangga!`)
+    }
     try { await loadTaskData(selectedTaskId.value, true) } catch (_) {}
   } catch (err) {
     alert(err.response?.data?.detail || 'Gagal menyimpan perubahan hapus poligon')
@@ -3904,6 +3948,25 @@ const batchMergeSelectedPolygons = async () => {
   const targetClass = annotationsStore.selectedClass || annotationsStore.classes.find(c => c.id !== 0) || annotationsStore.classes[0]
   const targetClassId = targetClass?.id || 1
   const targetClassName = targetClass?.name || 'Hutan Lahan Kering'
+
+  try {
+    const ids = toMerge.map(f => f.id ?? f.properties?.id ?? f._uiId).filter(Boolean)
+    const res = await api.mergePolygons(selectedTaskId.value, ids, targetClassId, toMerge, false)
+    if (res.data?.created_features?.length) {
+      const delUis = res.data.deleted_ui_ids || toMerge.map(f => f._uiId).filter(Boolean)
+      applyDeltaUpdate(
+        res.data.deleted_ids || [],
+        res.data.created_features || [],
+        res.data.updated_features || [],
+        delUis
+      )
+      selectedPolyUiIds.value.clear()
+      showToast(`🧩 ${toMerge.length} poligon berhasil digabung menjadi [${targetClassName}]!`)
+      return
+    }
+  } catch (apiErr) {
+    console.warn('Backend mergePolygons fallback to client turf union:', apiErr)
+  }
 
   try {
     const validPolys = toMerge.map(f => {
@@ -5239,6 +5302,18 @@ const queueServerAutoSave = () => {
     try {
       const ok = await annotationsStore.saveGridAnnotations(selectedTaskId.value, features.value)
       if (ok) {
+        if (ok.id_map && typeof ok.id_map === 'object' && featureGroup) {
+          featureGroup.eachLayer(l => {
+            const uId = l._uiId || l.feature?._uiId || l.feature?.properties?._uiId
+            if (uId && ok.id_map[uId] !== undefined) {
+              const dbId = ok.id_map[uId]
+              if (l.feature) {
+                l.feature.id = dbId
+                if (l.feature.properties) l.feature.properties.id = dbId
+              }
+            }
+          })
+        }
         cloudSavedAt.value = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         hasUnsavedChanges.value = false
       }
@@ -5532,32 +5607,24 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
   const delUiSet = new Set((Array.isArray(deletedUiIds) ? deletedUiIds : [deletedUiIds]).filter(Boolean).map(u => String(u)))
 
   if (delStrSet.size > 0 || delUiSet.size > 0) {
-    const getBaseId = (str) => {
-      if (!str) return str
-      const s = String(str)
-      if (s.includes('_p')) return s.split('_p')[0]
-      if (s.includes('_')) return s.split('_')[0]
-      return s
-    }
     const layersToRemove = []
     featureGroup.eachLayer(l => {
+      const lUiId = l._uiId || l.feature?._uiId || l.feature?.properties?._uiId
+      if (lUiId && delUiSet.has(String(lUiId))) {
+        layersToRemove.push(l)
+        return
+      }
       const fid = l.feature?.id ?? l.feature?.properties?.id
       if (fid !== undefined && fid !== null) {
         const fidStr = String(fid)
-        const baseId = getBaseId(fidStr)
-        if (delStrSet.has(fidStr) || delStrSet.has(baseId)) {
+        if (delStrSet.has(fidStr)) {
           layersToRemove.push(l)
           return
         }
       }
-      const lUiId = l._uiId || l.feature?._uiId
-      if (lUiId) {
-        if (delUiSet.has(lUiId)) {
-          layersToRemove.push(l)
-          return
-        }
+      if (lUiId && delUiSet.size === 0) {
         for (const delId of delStrSet) {
-          if (lUiId === `f_id_${delId}` || lUiId.startsWith(`f_id_${delId}_`)) {
+          if (lUiId === `f_id_${delId}`) {
             layersToRemove.push(l)
             return
           }
@@ -5574,17 +5641,16 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
     })
 
     features.value = features.value.filter(f => {
+      const fUiId = f._uiId || f.properties?._uiId
+      if (fUiId && delUiSet.has(String(fUiId))) return false
       const fid = f.id ?? f.properties?.id
       if (fid !== undefined && fid !== null) {
         const fidStr = String(fid)
-        const baseId = getBaseId(fidStr)
-        if (delStrSet.has(fidStr) || delStrSet.has(baseId)) return false
+        if (delStrSet.has(fidStr)) return false
       }
-      const fUiId = f._uiId || f.properties?._uiId
-      if (fUiId) {
-        if (delUiSet.has(fUiId)) return false
+      if (fUiId && delUiSet.size === 0) {
         for (const delId of delStrSet) {
-          if (fUiId === `f_id_${delId}` || fUiId.startsWith(`f_id_${delId}_`)) return false
+          if (fUiId === `f_id_${delId}`) return false
         }
       }
       return true
@@ -5710,6 +5776,13 @@ const findTargetPolygonForCut = (cutGeom) => {
         const buff = turf.buffer(feat, 0.0005, { units: 'kilometers' })
         if (turf.booleanIntersects(cutFeat, buff)) return true
       } catch (_) {}
+      // Also check if cutFeat intersects an interior hole of feat (e.g. Cookie Cutter filling a hole)
+      if (cutGeom.type !== 'LineString' && feat.geometry.type === 'Polygon' && Array.isArray(feat.geometry.coordinates) && feat.geometry.coordinates.length > 1) {
+        try {
+          const outerPoly = turf.polygon([feat.geometry.coordinates[0]])
+          if (turf.booleanIntersects(cutFeat, outerPoly)) return true
+        } catch (_) {}
+      }
       return false
     }
 
@@ -5775,6 +5848,13 @@ const findTargetPolygonForCut = (cutGeom) => {
             const inter = turf.intersect(turf.featureCollection([cutFeat, cf]))
             if (inter && turf.area(inter) > 0) isRealTarget = true
           } catch (_) {}
+          if (!isRealTarget && cf.geometry?.type === 'Polygon' && cf.geometry.coordinates?.length > 1) {
+            try {
+              const outerPoly = turf.polygon([cf.geometry.coordinates[0]])
+              const interOuter = turf.intersect(turf.featureCollection([cutFeat, outerPoly]))
+              if (interOuter && turf.area(interOuter) > 0) isRealTarget = true
+            } catch (_) {}
+          }
         }
         if (isRealTarget) {
           const annId = extractNumericId(cf)
@@ -5849,6 +5929,7 @@ const findTargetPolygonForCut = (cutGeom) => {
     } else {
       // Polygon / Cookie cutter:
       const candidates = []
+      const holeFallbackCandidates = []
       for (let i = 0; i < features.value.length; i++) {
         const feat = features.value[i]
         if (!feat || !feat.geometry) continue
@@ -5861,13 +5942,31 @@ const findTargetPolygonForCut = (cutGeom) => {
           interArea = inter ? turf.area(inter) : 0
         } catch (_) {}
 
-        if (interArea <= 0) continue
-
         let featArea = 0
         try {
           featArea = turf.area(feat)
         } catch (_) {
           featArea = 9999999
+        }
+
+        if (interArea <= 0) {
+          if (feat.geometry.type === 'Polygon' && feat.geometry.coordinates?.length > 1) {
+            try {
+              const outerPoly = turf.polygon([feat.geometry.coordinates[0]])
+              const interOuter = turf.intersect(turf.featureCollection([cutFeat, outerPoly]))
+              const outerInterArea = interOuter ? turf.area(interOuter) : 0
+              if (outerInterArea > 0) {
+                holeFallbackCandidates.push({
+                  feat,
+                  annId: extractNumericId(feat),
+                  interArea: outerInterArea,
+                  featArea,
+                  coverageRatio: outerInterArea / (featArea + 1e-6)
+                })
+              }
+            } catch (_) {}
+          }
+          continue
         }
 
         const coverageRatio = interArea / (featArea + 1e-6)
@@ -5888,6 +5987,10 @@ const findTargetPolygonForCut = (cutGeom) => {
           return a.featArea - b.featArea
         })
         return { feat: candidates[0].feat, annId: candidates[0].annId }
+      }
+      if (holeFallbackCandidates.length > 0) {
+        holeFallbackCandidates.sort((a, b) => a.featArea - b.featArea)
+        return { feat: holeFallbackCandidates[0].feat, annId: holeFallbackCandidates[0].annId }
       }
     }
   } catch (_) {}
@@ -5945,9 +6048,9 @@ const handleSplitByLine = async (lineGeom) => {
       if (targetFeat) delUis.add(String(getFeatureUiId(targetFeat)))
 
       const delIds = new Set(res.data?.deleted_ids || [])
-      if (targetAnnId) delIds.add(targetAnnId)
       if (targetFeat?.id) delIds.add(targetFeat.id)
       if (targetFeat?.properties?.id) delIds.add(targetFeat.properties.id)
+      if (delUis.size === 0 && targetAnnId) delIds.add(targetAnnId)
 
       applyDeltaUpdate(Array.from(delIds), res.data?.created_features || [], res.data?.updated_features || [], Array.from(delUis))
       // Auto-select the newly created cut piece so user can see it and edit its class immediately
@@ -5995,9 +6098,9 @@ const handleSplitByPolygon = async (cuttingGeom) => {
       if (targetFeat) delUis.add(String(getFeatureUiId(targetFeat)))
 
       const delIds = new Set(res.data?.deleted_ids || [])
-      if (targetAnnId) delIds.add(targetAnnId)
       if (targetFeat?.id) delIds.add(targetFeat.id)
       if (targetFeat?.properties?.id) delIds.add(targetFeat.properties.id)
+      if (delUis.size === 0 && targetAnnId) delIds.add(targetAnnId)
 
       applyDeltaUpdate(Array.from(delIds), res.data?.created_features || [], res.data?.updated_features || [], Array.from(delUis))
       // Auto-select the newly cut area piece
@@ -6207,6 +6310,9 @@ const openRepairToolboxModal = () => {
 
 const handleApplyRepairOptions = async () => {
   if (!selectedTaskId.value) return
+  if (hasUnsavedChanges.value) {
+    await saveAnnotations()
+  }
   isApplyingRepairOptions.value = true
   try {
     const res = await api.autoHealTopology(selectedTaskId.value, repairOptions.value)
@@ -6317,6 +6423,9 @@ const openResolveOverlapModal = (err) => {
 
 const executeResolveOverlap = async (action, targetClassId = null) => {
   if (!selectedTaskId.value) return
+  if (hasUnsavedChanges.value) {
+    await saveAnnotations()
+  }
   overlapModalData.value.isResolving = true
   try {
     const res = await api.resolveOverlap({
@@ -6342,6 +6451,9 @@ const executeResolveOverlap = async (action, targetClassId = null) => {
 const isRepairingSingleGeom = ref({})
 const handleRepairSingleGeometry = async (annId) => {
   if (!annId) return
+  if (hasUnsavedChanges.value) {
+    await saveAnnotations()
+  }
   isRepairingSingleGeom.value[annId] = true
   try {
     const res = await api.repairAnnotationGeometry(annId)
@@ -6375,6 +6487,9 @@ const openAssignClassModal = (annId, currentClassId = 0) => {
 
 const executeAssignClass = async () => {
   if (!assignClassModalData.value.annotation_id) return
+  if (hasUnsavedChanges.value) {
+    await saveAnnotations()
+  }
   assignClassModalData.value.isAssigning = true
   try {
     await api.updateAnnotationClass(
@@ -6413,6 +6528,9 @@ const openFillGapsModal = () => {
 
 const executeFillGaps = async () => {
   if (!selectedTaskId.value) return
+  if (hasUnsavedChanges.value) {
+    await saveAnnotations()
+  }
   fillGapsModalData.value.isFilling = true
   try {
     const res = await api.fillGridGaps(
@@ -7634,6 +7752,9 @@ const isCleaningSlivers = ref(false)
 
 const handleCleanSlivers = async () => {
   if (!selectedTaskId.value) return
+  if (hasUnsavedChanges.value) {
+    await saveAnnotations()
+  }
   if (!confirm('Bersihkan dan serap semua sliver garis/pita tipis pada grid ini ke poligon tetangganya?')) return
 
   isCleaningSlivers.value = true
@@ -7652,6 +7773,9 @@ const handleCleanSlivers = async () => {
 
 const handleAutoHeal = async () => {
   if (!selectedTaskId.value) return
+  if (hasUnsavedChanges.value) {
+    await saveAnnotations()
+  }
   if (!confirm('Rapikan geometri grid ini? Sistem akan menggunakan konfigurasi perbaikan cepat standar.')) return
 
   isHealingTopology.value = true
@@ -7678,9 +7802,22 @@ const cleanSliversFromGeometry = (geom) => {
 
   if (geom.type === 'Polygon') {
     try {
-      const p = turf.polygon(geom.coordinates)
-      if (turf.area(p) < MIN_AREA_SQM) return null
-      return geom
+      if (!geom.coordinates || geom.coordinates.length === 0) return null
+      const ext = geom.coordinates[0]
+      const extPoly = turf.polygon([ext])
+      if (turf.area(extPoly) < MIN_AREA_SQM) return null
+
+      // Filter out micro-sliver interior holes created by seams/cracks
+      const cleanHoles = []
+      for (let h = 1; h < geom.coordinates.length; h++) {
+        try {
+          const holePoly = turf.polygon([geom.coordinates[h]])
+          if (turf.area(holePoly) >= MIN_AREA_SQM) {
+            cleanHoles.push(geom.coordinates[h])
+          }
+        } catch (_) {}
+      }
+      return { type: 'Polygon', coordinates: [ext, ...cleanHoles] }
     } catch (_) {
       return null
     }
@@ -7690,9 +7827,20 @@ const cleanSliversFromGeometry = (geom) => {
     const validPolys = []
     for (const polyCoords of geom.coordinates) {
       try {
-        const p = turf.polygon(polyCoords)
-        if (turf.area(p) >= MIN_AREA_SQM) {
-          validPolys.push(polyCoords)
+        if (!polyCoords || polyCoords.length === 0) continue
+        const ext = polyCoords[0]
+        const extPoly = turf.polygon([ext])
+        if (turf.area(extPoly) >= MIN_AREA_SQM) {
+          const cleanHoles = []
+          for (let h = 1; h < polyCoords.length; h++) {
+            try {
+              const holePoly = turf.polygon([polyCoords[h]])
+              if (turf.area(holePoly) >= MIN_AREA_SQM) {
+                cleanHoles.push(polyCoords[h])
+              }
+            } catch (_) {}
+          }
+          validPolys.push([ext, ...cleanHoles])
         }
       } catch (_) {}
     }
@@ -8333,10 +8481,11 @@ const reassignClassToClickedPolygon = async (cls) => {
   }
 
   pushHistory()
+  queueOfflineDraftSave()
   showToast(`Kelas Poligon #${clickedFeatureIdx.value + 1} diubah → ${cls.name}`)
 
-  // 3. Fast direct save in background
-  if (targetFeat.id) {
+  // 3. Fast direct save in background only if real numeric database ID
+  if (targetFeat.id && typeof targetFeat.id === 'number') {
     try {
       await api.updateAnnotationClass(targetFeat.id, cls.id)
     } catch (err) {
@@ -8374,19 +8523,58 @@ const closeSelectedPolygonHoles = () => {
   const g = JSON.parse(JSON.stringify(targetFeat.geometry))
   let removedHoles = 0
 
+  const otherFeats = features.value.filter((_, i) => i !== clickedFeatureIdx.value)
+  const isHoleOccupied = (holeRingCoords) => {
+    try {
+      const holePoly = turf.polygon([holeRingCoords])
+      const holeArea = turf.area(holePoly)
+      if (holeArea <= 0) return false
+      for (const of of otherFeats) {
+        if (!of || !of.geometry) continue
+        const ofGeom = turf.feature(of.geometry)
+        if (turf.booleanIntersects(holePoly, ofGeom)) {
+          const inter = turf.intersect(turf.featureCollection([holePoly, ofGeom]))
+          if (inter && turf.area(inter) > 0.05 * holeArea) {
+            return true
+          }
+        }
+      }
+    } catch (_) {}
+    return false
+  }
+
   if (g.type === 'Polygon' && Array.isArray(g.coordinates) && g.coordinates.length > 1) {
-    removedHoles = g.coordinates.length - 1
-    g.coordinates = [g.coordinates[0]] // Keep exterior ring, drop all interior holes
+    const extRing = g.coordinates[0]
+    const keptHoles = []
+    for (let i = 1; i < g.coordinates.length; i++) {
+      if (isHoleOccupied(g.coordinates[i])) {
+        keptHoles.push(g.coordinates[i])
+      } else {
+        removedHoles++
+      }
+    }
+    g.coordinates = [extRing, ...keptHoles]
   } else if (g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) {
     for (let i = 0; i < g.coordinates.length; i++) {
       if (Array.isArray(g.coordinates[i]) && g.coordinates[i].length > 1) {
-        removedHoles += g.coordinates[i].length - 1
-        g.coordinates[i] = [g.coordinates[i][0]]
+        const extRing = g.coordinates[i][0]
+        const keptHoles = []
+        for (let h = 1; h < g.coordinates[i].length; h++) {
+          if (isHoleOccupied(g.coordinates[i][h])) {
+            keptHoles.push(g.coordinates[i][h])
+          } else {
+            removedHoles++
+          }
+        }
+        g.coordinates[i] = [extRing, ...keptHoles]
       }
     }
   }
 
-  if (removedHoles === 0) return
+  if (removedHoles === 0) {
+    showToast('ℹ️ Seluruh lubang pada poligon ini telah terisi poligon lain, tidak ada lubang kosong yang perlu ditutup.')
+    return
+  }
 
   let newAreaM2 = 0
   try {
@@ -8501,6 +8689,9 @@ const handleSmartDeleteSelected = () => {
 
 const executeSmartDelete = async (targetFeat, targetIdx) => {
   if (!selectedTaskId.value) return
+  if (hasUnsavedChanges.value) {
+    await saveAnnotations()
+  }
   if (features.value.length <= 1) {
     alert('⚠️ Poligon ini adalah satu-satunya poligon di dalam grid tile.\n\nTidak dapat dihapus karena akan membuat seluruh grid kosong bolong!\nJika ingin mengganti tutupan lahan, silakan gunakan menu Ubah Kelas atau Potong Poligon.')
     return
@@ -8960,11 +9151,12 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
   try {
     const draft = await getTaskDraft(taskId)
     if (draft && draft.features && draft.features.length > 0) {
+      const rawDraftTime = draft.updatedAt || (draft.savedAt ? new Date(draft.savedAt).toISOString() : null)
       localDraftStatus.value = {
-        updatedAt: draft.updatedAt,
+        updatedAt: rawDraftTime,
         polygonCount: draft.features.length
       }
-      const draftTime = draft.updatedAt ? new Date(draft.updatedAt).getTime() : 0
+      const draftTime = rawDraftTime ? new Date(rawDraftTime).getTime() : 0
       const serverTime = task.updated_at ? new Date(task.updated_at).getTime() : 0
 
       // Only prompt restore if draft is genuinely newer than server state (e.g. browser crashed before saving)
@@ -9438,6 +9630,7 @@ const syncFeaturesFromMap = () => {
     json._uiId = layer._uiId
     json.properties = {
       id: json.id,
+      _uiId: layer._uiId,
       class_id: currentProps.class_id !== undefined ? currentProps.class_id : 0,
       class_name: currentProps.class_name || 'Belum Teridentifikasi',
       color: currentProps.color || '#9CA3AF',
@@ -9548,7 +9741,13 @@ const saveAnnotations = async () => {
     alert('Pilih grid tugas terlebih dahulu sebelum menyimpan.')
     return
   }
-  if (annotationsStore.saving) return
+  if (annotationsStore.saving) {
+    let waitCount = 0
+    while (annotationsStore.saving && waitCount < 30) {
+      await new Promise(r => setTimeout(r, 100))
+      waitCount++
+    }
+  }
   syncFeaturesFromMap()
 
   if (features.value.length === 0) {
@@ -9567,6 +9766,10 @@ const saveAnnotations = async () => {
     if (serverAutoSaveTimer) {
       clearTimeout(serverAutoSaveTimer)
       serverAutoSaveTimer = null
+    }
+    if (draftAutoSaveTimer) {
+      clearTimeout(draftAutoSaveTimer)
+      draftAutoSaveTimer = null
     }
     await tasksStore.fetchTaskDetail(selectedTaskId.value)
     if (selectedTaskId.value) {
@@ -9590,6 +9793,12 @@ const submitForReview = async () => {
   if (features.value.length === 0) {
     alert('Harap buat minimal 1 poligon tutupan lahan sebelum submit!')
     return
+  }
+
+  const unassignedCount = features.value.filter(f => !f.properties?.class_id || Number(f.properties?.class_id) === 0).length
+  if (unassignedCount > 0) {
+    const proceed = confirm(`⚠️ Perhatian: Terdapat ${unassignedCount} poligon yang masih berstatus 'Belum Teridentifikasi' (Kelas 0).\n\nDisarankan untuk menentukan kelas tutupan lahan terlebih dahulu.\nTetap lanjutkan submit ke QC sekarang?`)
+    if (!proceed) return
   }
 
   syncFeaturesFromMap()
@@ -9625,6 +9834,11 @@ const submitForReview = async () => {
             if (recheck.data.valid) {
               const ok = await tasksStore.updateStatus(selectedTaskId.value, 'SUBMITTED')
               if (ok) {
+                if (selectedTaskId.value) {
+                  await clearTaskDraft(selectedTaskId.value)
+                  localDraftStatus.value = null
+                  showDraftRestorePrompt.value = false
+                }
                 showToast('🎉 Topologi berhasil dirapikan otomatis & tugas berhasil disubmit untuk review QC!')
               }
               topologyLoading.value = false
@@ -9651,6 +9865,11 @@ const submitForReview = async () => {
 
   const ok = await tasksStore.updateStatus(selectedTaskId.value, 'SUBMITTED')
   if (ok) {
+    if (selectedTaskId.value) {
+      await clearTaskDraft(selectedTaskId.value)
+      localDraftStatus.value = null
+      showDraftRestorePrompt.value = false
+    }
     showToast('🎉 Tugas berhasil disubmit untuk review QC!')
     await tasksStore.fetchTaskDetail(selectedTaskId.value)
   } else {

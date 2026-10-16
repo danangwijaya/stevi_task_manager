@@ -47,3 +47,12 @@ def root():
         "docs_url": "/docs",
         "api_v1": settings.API_V1_STR
     }
+
+@app.get("/health")
+@app.get(f"{settings.API_V1_STR}/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "service": "geoai_backend",
+        "version": "1.0.0"
+    }

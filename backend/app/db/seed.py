@@ -32,19 +32,26 @@ def sync_postgres_sequences(db: Session):
         db.commit()
 
 def ensure_schema_migrations(db: Session):
-    """Ensure newly added columns exist in postgres without breaking existing data."""
-    if engine.dialect.name == "postgresql":
+    """Ensure newly added columns exist in postgres / sqlite without breaking existing data."""
+    is_pg = engine.dialect.name == "postgresql"
+    is_sqlite = engine.dialect.name == "sqlite"
+
+    if is_pg or is_sqlite:
         logger.info("Ensuring users table schema migrations...")
         cols = [
             ("phone", "VARCHAR(50)"),
             ("institution", "VARCHAR(255)"),
             ("department", "VARCHAR(255)"),
             ("nim_nip", "VARCHAR(100)"),
+            ("gender", "VARCHAR(10)"),
             ("address", "TEXT"),
         ]
         for col_name, col_type in cols:
             try:
-                db.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_name} {col_type};"))
+                if is_pg:
+                    db.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_name} {col_type};"))
+                else:
+                    db.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type};"))
             except Exception as e:
                 logger.debug(f"Schema migration note for {col_name}: {e}")
 
@@ -56,9 +63,46 @@ def ensure_schema_migrations(db: Session):
         ]
         for col_name, col_type in sa_cols:
             try:
-                db.execute(text(f"ALTER TABLE study_areas ADD COLUMN IF NOT EXISTS {col_name} {col_type};"))
+                if is_pg:
+                    db.execute(text(f"ALTER TABLE study_areas ADD COLUMN IF NOT EXISTS {col_name} {col_type};"))
+                else:
+                    db.execute(text(f"ALTER TABLE study_areas ADD COLUMN {col_name} {col_type};"))
             except Exception as e:
                 logger.debug(f"Schema migration note for study_areas.{col_name}: {e}")
+
+        logger.info("Ensuring task_grids table schema migrations...")
+        tg_cols = [
+            ("tile_key", "VARCHAR(100)"),
+            ("raster_file_2022", "VARCHAR(255)"),
+            ("raster_file_2025", "VARCHAR(255)"),
+            ("qc1_approved", "BOOLEAN DEFAULT FALSE"),
+            ("qc2_approved", "BOOLEAN DEFAULT FALSE"),
+            ("finishing_approved", "BOOLEAN DEFAULT FALSE"),
+        ]
+        for col_name, col_type in tg_cols:
+            try:
+                if is_pg:
+                    db.execute(text(f"ALTER TABLE task_grids ADD COLUMN IF NOT EXISTS {col_name} {col_type};"))
+                else:
+                    db.execute(text(f"ALTER TABLE task_grids ADD COLUMN {col_name} {col_type};"))
+            except Exception as e:
+                logger.debug(f"Schema migration note for task_grids.{col_name}: {e}")
+
+        # Ensure performance indexes exist on annotations and task_grids
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS ix_annotations_task_grid_id ON annotations (task_grid_id);",
+            "CREATE INDEX IF NOT EXISTS ix_annotations_user_id ON annotations (user_id);",
+            "CREATE INDEX IF NOT EXISTS ix_annotations_class_id ON annotations (class_id);",
+            "CREATE INDEX IF NOT EXISTS ix_task_grids_study_area_id ON task_grids (study_area_id);",
+            "CREATE INDEX IF NOT EXISTS ix_task_grids_year ON task_grids (year);",
+            "CREATE INDEX IF NOT EXISTS ix_task_grids_assigned_user_id ON task_grids (assigned_user_id);",
+            "CREATE INDEX IF NOT EXISTS ix_task_grids_status ON task_grids (status);"
+        ]
+        for idx_sql in indexes:
+            try:
+                db.execute(text(idx_sql))
+            except Exception as e:
+                logger.debug(f"Index creation note for {idx_sql}: {e}")
         db.commit()
 
 def seed_database():

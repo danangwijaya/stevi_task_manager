@@ -62,8 +62,8 @@ class TaskGrid(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     grid_code = Column(String(50), unique=True, index=True, nullable=False)
-    study_area_id = Column(Integer, ForeignKey("study_areas.id"), nullable=False)
-    year = Column(Integer, default=2026, nullable=False)
+    study_area_id = Column(Integer, ForeignKey("study_areas.id"), nullable=False, index=True)
+    year = Column(Integer, default=2026, nullable=False, index=True)
     
     # Bounding Box in WGS84
     min_lon = Column(Float, nullable=False)
@@ -77,8 +77,8 @@ class TaskGrid(Base):
     raster_file_2022 = Column(String(255), nullable=True)
     raster_file_2025 = Column(String(255), nullable=True)
     
-    assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    status = Column(String(30), default=TaskStatus.UNASSIGNED.value, nullable=False)
+    assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    status = Column(String(30), default=TaskStatus.UNASSIGNED.value, nullable=False, index=True)
     reviewer_notes = Column(Text, nullable=True)
     
     # Tahapan QC & Finishing
@@ -101,9 +101,9 @@ class Annotation(Base):
     __tablename__ = "annotations"
     
     id = Column(Integer, primary_key=True, index=True)
-    task_grid_id = Column(Integer, ForeignKey("task_grids.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    class_id = Column(Integer, nullable=False) # 1 to 12
+    task_grid_id = Column(Integer, ForeignKey("task_grids.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    class_id = Column(Integer, nullable=False, index=True) # 1 to 12
     class_name = Column(String(100), nullable=False)
     geom_geojson = Column(Text, nullable=False) # GeoJSON Feature geometry
     area_sqm = Column(Float, default=0.0)

@@ -1,3 +1,4 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -13,9 +14,13 @@ engine_kwargs = {
 }
 
 if not is_sqlite:
+    # Lean & safe default for multi-worker production:
+    # 8 workers * (10 pool + 10 overflow) = max 160 connections (leaves 90 free slots out of Postgres 250 limit)
+    pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
+    max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "10"))
     engine_kwargs.update({
-        "pool_size": 30,
-        "max_overflow": 20,
+        "pool_size": pool_size,
+        "max_overflow": max_overflow,
         "pool_timeout": 30,
         "pool_recycle": 1800,
     })

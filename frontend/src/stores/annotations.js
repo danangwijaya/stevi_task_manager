@@ -50,9 +50,25 @@ export const useAnnotationsStore = defineStore('annotations', {
       this.lastSaveError = null
       try {
         const response = await api.saveGridAnnotations(taskGridId, features)
-        this.currentFeatures = response.data?.saved_features || features
+        const idMap = response.data?.id_map || null
+        if (idMap && Array.isArray(features)) {
+          features.forEach(f => {
+            if (!f) return
+            const uId = f._uiId || f.properties?._uiId
+            if (uId && idMap[uId] !== undefined) {
+              const dbId = idMap[uId]
+              f.id = dbId
+              if (f.properties) f.properties.id = dbId
+            }
+          })
+        }
+        if (Array.isArray(response.data?.saved_features) && response.data.saved_features.length > 0) {
+          this.currentFeatures = response.data.saved_features
+        } else {
+          this.currentFeatures = features
+        }
         this.dirty = false
-        return true
+        return { ok: true, id_map: idMap, count: response.data?.count }
       } catch (err) {
         console.error('Failed to save annotations:', err)
         this.lastSaveError = err.response?.data?.detail || err.message || 'Gagal menyimpan anotasi ke server.'

@@ -461,6 +461,7 @@ def save_grid_annotations(
 
             # Safely extract existing feature ID without throwing AttributeError
             raw_fid = getattr(f, "id", None) or props.get("id")
+            raw_ui_id = getattr(f, "_uiId", None) or props.get("_uiId")
             fid = None
             if isinstance(raw_fid, int):
                 fid = raw_fid
@@ -474,11 +475,13 @@ def save_grid_annotations(
                 seen_geom_keys.add(geom_key)
 
                 area_sqm = poly_part.area * (111320.0 ** 2)
+                part_ui_id = str(raw_ui_id) if (raw_ui_id and poly_idx == 0) else (f"{raw_ui_id}_p{poly_idx + 1}" if raw_ui_id else None)
                 candidates.append({
                     "poly": poly_part,
                     "class_id": class_id,
                     "class_name": class_name,
                     "fid": fid if poly_idx == 0 else None,
+                    "ui_id": part_ui_id,
                     "area_sqm": area_sqm
                 })
         except Exception as e:
@@ -543,9 +546,11 @@ def save_grid_annotations(
         logger.warning(f"Grid {task_grid_id}: Otomatis membuang {dropped_dups_count} poligon duplikat/tumpuk saat simpan.")
 
     saved_annotations = []
+    saved_with_ui = []
     for poly_part, cand in accepted:
         part_geojson = mapping(poly_part)
         fid = cand["fid"]
+        ui_id = cand.get("ui_id")
         class_id = cand["class_id"]
         class_name = cand["class_name"]
         area_sqm = cand["area_sqm"]
@@ -560,6 +565,7 @@ def save_grid_annotations(
             ann.user_id = current_user.id
             retained_ids.add(fid)
             saved_annotations.append(ann)
+            saved_with_ui.append((ann, ui_id))
         else:
             ann = Annotation(
                 task_grid_id=task_grid_id,
@@ -571,6 +577,7 @@ def save_grid_annotations(
             )
             db.add(ann)
             saved_annotations.append(ann)
+            saved_with_ui.append((ann, ui_id))
 
     # ABSOLUTE SAFETY GUARD: If client sent features, but none could be processed, ABORT TO PROTECT DATA!
     if len(data.features) > 0 and len(saved_annotations) == 0:
@@ -597,6 +604,11 @@ def save_grid_annotations(
             task.assigned_user_id = current_user.id
         
     db.flush()
+    id_map = {}
+    for ann, ui_id in saved_with_ui:
+        if ui_id and ann.id is not None:
+            id_map[str(ui_id)] = ann.id
+
     db.commit()
 
     # Automatically record version snapshot & audit log
@@ -616,10 +628,11 @@ def save_grid_annotations(
             task_grid_id=task_grid_id,
         )
 
-    # Return lightweight confirmation to prevent 30s network timeout on massive grids
+    # Return lightweight confirmation + id_map to synchronize frontend _uiId with real DB IDs
     return {
         "message": f"Successfully saved {len(saved_annotations)} annotation polygons",
         "count": len(saved_annotations),
+        "id_map": id_map,
         "saved_features": []
     }
 
@@ -953,13 +966,12 @@ def validate_topology(
     WARNING_OVERLAP_THRESHOLD = 0.5 * SQM_TO_DEG2 # Overlaps 0.5 - 3.0 m² are non-blocking micro-slivers
 
     valid_polys = [sp for sp in shapely_polygons if sp["geom"].is_valid and not sp["geom"].is_empty]
+    overlap_count = 0
     
     if len(valid_polys) > 1:
         geoms_list = [sp["geom"] for sp in valid_polys]
         tree = STRtree(geoms_list)
         candidate_pairs = tree.query(geoms_list, predicate="intersects")
-
-        overlap_count = 0
         MAX_DISPLAY_ERRORS = 100
 
         for i, j in zip(candidate_pairs[0], candidate_pairs[1]):
@@ -1017,11 +1029,11 @@ def validate_topology(
                 gap_pct = (gap_area.area / grid_area) * 100
                 gap_sqm = gap_area.area * (111320.0 ** 2)
                 if gap_pct > 5.0:
-                    errors.append({
+                    warnings.append({
                         "type": "GAP",
                         "area_sqm": round(gap_sqm, 2),
                         "geometry": mapping(gap_area),
-                        "message": f"Area kosong (gap) terdeteksi: {gap_pct:.2f}% dari grid ({round(gap_sqm, 1)} m²) belum tercakup poligon"
+                        "message": f"Area kosong (gap) terdeteksi: {gap_pct:.2f}% dari grid ({round(gap_sqm, 1)} m²) belum tercakup poligon. Jika area ini adalah laut/pesisir di luar daratan, Anda tetap dapat mengirim ke QC."
                     })
                 elif gap_pct > 0.5:
                     warnings.append({
@@ -1906,12 +1918,20 @@ def _clean_spikes_and_holes(poly):
     if poly.geom_type != 'Polygon':
         return poly
 
-    # 1. Clean collapsed/zero-area interior holes
+    # 1. Clean collapsed/zero-area or micro-thin slit interior holes
     cleaned_holes = []
     if len(poly.interiors) > 0:
         for h in poly.interiors:
-            if SPolygon(h).area > 1e-9:
-                cleaned_holes.append(h)
+            try:
+                h_poly = SPolygon(h)
+                h_area_sqm = h_poly.area * (111320.0 ** 2)
+                h_perim_m = h.length * 111320.0
+                avg_thickness_m = (2.0 * h_area_sqm / h_perim_m) if h_perim_m > 0 else 0.0
+                if h_area_sqm > 1.0 and avg_thickness_m > 0.15:
+                    cleaned_holes.append(h)
+            except Exception:
+                if SPolygon(h).area > 1e-9:
+                    cleaned_holes.append(h)
 
     # 2. Clean foldback turnaround spikes on exterior ring:
     ext_coords = list(poly.exterior.coords)
@@ -1961,11 +1981,72 @@ def _clean_spikes_and_holes(poly):
         return poly
 
 
+def _subdivide_multihole_polygon(poly, max_holes=15, _depth=0):
+    """
+    Automatically subdivides a giant background Polygon that has accumulated too many
+    interior holes (> max_holes) into smaller singlepart Polygons along the median hole
+    centroid axis, preventing browser/Leaflet freeze on complex grids.
+    """
+    if poly is None or poly.is_empty or poly.geom_type != 'Polygon':
+        return [poly] if (poly and not poly.is_empty) else []
+    if len(poly.interiors) <= max_holes or _depth >= 6:
+        return [poly]
+
+    try:
+        minx, miny, maxx, maxy = poly.bounds
+        dx = maxx - minx
+        dy = maxy - miny
+        pad = 1e-4
+
+        hole_centroids = [h.centroid for h in poly.interiors]
+        if dx >= dy:
+            xs = sorted(c.x for c in hole_centroids)
+            mid_x = xs[len(xs) // 2]
+            if mid_x <= minx + 1e-7 or mid_x >= maxx - 1e-7:
+                mid_x = (minx + maxx) / 2.0
+            half1 = box(minx - pad, miny - pad, mid_x, maxy + pad)
+            half2 = box(mid_x, miny - pad, maxx + pad, maxy + pad)
+        else:
+            ys = sorted(c.y for c in hole_centroids)
+            mid_y = ys[len(ys) // 2]
+            if mid_y <= miny + 1e-7 or mid_y >= maxy - 1e-7:
+                mid_y = (miny + maxy) / 2.0
+            half1 = box(minx - pad, miny - pad, maxx + pad, mid_y)
+            half2 = box(minx - pad, mid_y, maxx + pad, maxy + pad)
+
+        p1 = poly.intersection(half1)
+        p2 = poly.intersection(half2)
+
+        raw_parts = []
+        for piece in (p1, p2):
+            if piece is None or piece.is_empty:
+                continue
+            if piece.geom_type == 'Polygon':
+                raw_parts.append(piece)
+            elif piece.geom_type in ('MultiPolygon', 'GeometryCollection'):
+                raw_parts.extend([g for g in piece.geoms if g.geom_type == 'Polygon' and not g.is_empty])
+
+        if len(raw_parts) <= 1:
+            return [poly]
+
+        result = []
+        for rp in raw_parts:
+            cleaned_rp = _clean_spikes_and_holes(rp)
+            if cleaned_rp.geom_type == 'Polygon' and not cleaned_rp.is_empty:
+                result.extend(_subdivide_multihole_polygon(cleaned_rp, max_holes=max_holes, _depth=_depth + 1))
+            elif cleaned_rp.geom_type == 'MultiPolygon':
+                for sub_g in cleaned_rp.geoms:
+                    result.extend(_subdivide_multihole_polygon(sub_g, max_holes=max_holes, _depth=_depth + 1))
+        return result if result else [poly]
+    except Exception:
+        return [poly]
+
+
 def _extract_polygons(geom, min_area_sqm=3.0):
     """
     Recursively unpacks GeometryCollection / MultiPolygon into distinct Polygon objects,
     validates/heals geometry with make_valid, and filters out micro-slivers below min_area_sqm.
-    Cleans spikes and collapsed line holes automatically.
+    Cleans spikes and collapsed line holes automatically, and subdivides polygons with >15 holes.
     """
     from shapely.validation import make_valid
     if geom is None or geom.is_empty:
@@ -1985,7 +2066,12 @@ def _extract_polygons(geom, min_area_sqm=3.0):
 
     if geom.geom_type == 'Polygon':
         geom = _clean_spikes_and_holes(geom)
+        if geom.geom_type in ('MultiPolygon', 'GeometryCollection'):
+            return _extract_polygons(geom, min_area_sqm=min_area_sqm)
         if geom.is_valid and geom.area >= min_area_deg:
+            if len(geom.interiors) > 15:
+                sub_parts = _subdivide_multihole_polygon(geom, max_holes=15)
+                return [sp for sp in sub_parts if sp.is_valid and sp.area >= min_area_deg]
             return [geom]
         return []
     elif geom.geom_type == 'MultiPolygon':
@@ -2006,7 +2092,7 @@ def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=50.0):
     Robustly merges a list of Shapely geometries:
     1. Snaps adjacent polygons to resolve vertex misalignments and shared edge slivers
     2. Unions geometries into a single Polygon without internal seams
-    3. Bridges micro-gaps if needed
+    3. Applies morphological mitre closing to weld seam cracks & micro-gaps
     4. Removes degenerate slit holes from the interior ring
     """
     from shapely.ops import unary_union, snap
@@ -2036,10 +2122,21 @@ def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=50.0):
         except Exception:
             pass
 
-    # If MultiPolygon or split, attempt micro-buffer dissolve to bridge tiny slivers
+    # Always attempt morphological mitre-closing to eliminate internal seam lines and micro-cracks
+    try:
+        closed = current.buffer(snap_tol, join_style=2).buffer(-snap_tol, join_style=2)
+        if closed and not closed.is_empty:
+            if not closed.is_valid:
+                closed = make_valid(closed)
+            if closed.is_valid and abs(closed.area - current.area) / (current.area + 1e-12) < 0.05:
+                current = closed
+    except Exception:
+        pass
+
+    # If still MultiPolygon, attempt slightly wider micro-buffer dissolve to bridge seam slivers
     if current.geom_type == 'MultiPolygon':
         try:
-            dissolved = unary_union([g.buffer(snap_tol) for g in valid_geoms]).buffer(-snap_tol)
+            dissolved = unary_union([g.buffer(snap_tol * 1.5, join_style=2) for g in valid_geoms]).buffer(-snap_tol * 1.5, join_style=2)
             dissolved_polys = _extract_polygons(dissolved, min_area_sqm=0.1)
             if len(dissolved_polys) == 1:
                 current = dissolved_polys[0]
@@ -2054,12 +2151,18 @@ def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=50.0):
     # Sort parts by area descending
     polys = sorted(polys, key=lambda p: p.area, reverse=True)
 
-    # Clean interior slit holes from the primary polygon
-    min_hole_deg = min_hole_sqm / (111320.0 ** 2)
+    # Clean interior slit holes and small holes from merged parts
     cleaned_parts = []
     for p in polys:
         if p.geom_type == 'Polygon' and len(p.interiors) > 0:
-            cleaned_holes = [h for h in p.interiors if SPolygon(h).area > min_hole_deg]
+            cleaned_holes = []
+            for h in p.interiors:
+                h_poly = SPolygon(h)
+                h_area_sqm = h_poly.area * (111320.0 ** 2)
+                h_perim_m = h.length * 111320.0
+                avg_thickness_m = (2.0 * h_area_sqm / h_perim_m) if h_perim_m > 0 else 0.0
+                if h_area_sqm > min_hole_sqm and avg_thickness_m >= 1.2:
+                    cleaned_holes.append(h)
             p = SPolygon(p.exterior, cleaned_holes)
         p = _clean_spikes_and_holes(p)
         if p and not p.is_empty and p.area > 1e-12:
@@ -2268,7 +2371,37 @@ def split_by_polygon(
         parent_class_id = int(target_f.get("properties", {}).get("class_id", 0))
         parent_class_name = target_f.get("properties", {}).get("class_name", classes_dict.get(parent_class_id, "Belum Teridentifikasi"))
 
-        inter_polys = _extract_polygons(poly.intersection(cutter_in_grid), min_area_sqm=0.1)
+        # Check if cutter intersects any empty interior holes of poly (allowing Cookie Cutter to fill/cut voids)
+        poly_for_inter = poly
+        try:
+            if poly.geom_type == 'Polygon' and len(poly.interiors) > 0:
+                other_anns = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
+                other_geoms = []
+                for oa in other_anns:
+                    if target_id is not None and str(oa.id) == str(target_id):
+                        continue
+                    try:
+                        og = shape(json.loads(oa.geom_geojson))
+                        if og and not og.is_empty and og.intersects(cutter_in_grid):
+                            other_geoms.append(og)
+                    except Exception:
+                        pass
+                other_union = unary_union(other_geoms) if other_geoms else None
+                void_pieces = []
+                for h in poly.interiors:
+                    h_poly = Polygon(h)
+                    if h_poly.intersects(cutter_in_grid):
+                        empty_h = h_poly.difference(other_union) if other_union else h_poly
+                        if empty_h and not empty_h.is_empty:
+                            void_cut = empty_h.intersection(cutter_in_grid)
+                            if void_cut and not void_cut.is_empty and void_cut.area > 1e-11:
+                                void_pieces.append(void_cut)
+                if void_pieces:
+                    poly_for_inter = unary_union([poly] + void_pieces)
+        except Exception:
+            poly_for_inter = poly
+
+        inter_polys = _extract_polygons(poly_for_inter.intersection(cutter_in_grid), min_area_sqm=0.1)
         diff_polys = _extract_polygons(poly.difference(cutter_in_grid), min_area_sqm=0.1)
 
         if inter_polys:
@@ -2349,10 +2482,12 @@ def split_by_polygon(
             if not cutter_box.intersects(poly):
                 continue
 
-            if not poly.intersects(cutter):
+            # Also check if cutter is inside an interior hole of poly
+            poly_outer = Polygon(poly.exterior) if poly.geom_type == 'Polygon' else poly
+            if not poly_outer.intersects(cutter):
                 continue
 
-            inter = poly.intersection(cutter)
+            inter = poly_outer.intersection(cutter)
             inter_area = inter.area if inter and not inter.is_empty else 0
             if inter_area > 1e-10:
                 candidate_anns_with_area.append((ann, poly, inter_area))
@@ -2480,11 +2615,27 @@ def split_by_polygon(
 
         for ann, poly, inter_area in target_candidates:
             try:
-                intersection = poly.intersection(cutter)
+                poly_for_inter = poly
+                if poly.geom_type == 'Polygon' and len(poly.interiors) > 0:
+                    other_geoms = [c[1] for c in candidate_anns_with_area if c[0].id != ann.id]
+                    other_union = unary_union(other_geoms) if other_geoms else None
+                    void_pieces = []
+                    for h in poly.interiors:
+                        h_poly = Polygon(h)
+                        if h_poly.intersects(cutter):
+                            empty_h = h_poly.difference(other_union) if other_union else h_poly
+                            if empty_h and not empty_h.is_empty:
+                                void_cut = empty_h.intersection(cutter)
+                                if void_cut and not void_cut.is_empty and void_cut.area > 1e-11:
+                                    void_pieces.append(void_cut)
+                    if void_pieces:
+                        poly_for_inter = unary_union([poly] + void_pieces)
+
+                intersection = poly_for_inter.intersection(cutter)
                 difference = poly.difference(cutter)
 
-                inter_polys = _extract_polygons(intersection, min_area_sqm=10.0)
-                diff_polys = _extract_polygons(difference, min_area_sqm=10.0)
+                inter_polys = _extract_polygons(intersection, min_area_sqm=0.1)
+                diff_polys = _extract_polygons(difference, min_area_sqm=0.1)
 
                 if inter_polys and diff_polys:
                     split_occurred = True

@@ -50,11 +50,13 @@ export async function saveTaskDraft(taskId, features, meta = {}) {
       const tx = db.transaction(STORE_NAME, 'readwrite')
       const store = tx.objectStore(STORE_NAME)
 
+      const now = Date.now()
       const draftRecord = {
         taskId: Number(taskId),
         features: JSON.parse(JSON.stringify(features)),
         polygonCount: features.length,
-        savedAt: Date.now(),
+        savedAt: now,
+        updatedAt: new Date(now).toISOString(),
         meta: meta
       }
 
