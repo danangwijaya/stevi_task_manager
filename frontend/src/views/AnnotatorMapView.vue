@@ -3246,7 +3246,7 @@ import {
   Sprout,
   Globe2,
   Globe,
-  Map,
+  Map as MapIcon,
   RotateCw,
   TrendingUp,
   Copy,
@@ -4458,7 +4458,7 @@ const layerOptions = [
   { id: 'true_color', name: 'Sentinel-2 EOX Cloudless (ESA)', desc: 'Komposit bebas awan tahunan ESA Copernicus EOX', icon: Satellite, colorClass: 'text-blue-700' },
   { id: 'google_sat', name: 'Google Satellite Ultra-HD', desc: 'Citra satelit resolusi sangat tinggi zoom 20+', icon: Globe2, colorClass: 'text-blue-600' },
   { id: 'esri_sat', name: 'Esri World Imagery', desc: 'Citra satelit global resolusi tinggi jernih', icon: Globe, colorClass: 'text-slate-600' },
-  { id: 'osm', name: 'OpenStreetMap Base', desc: 'Peta jalan & batas wilayah administrasi', icon: Map, colorClass: 'text-slate-500' }
+  { id: 'osm', name: 'OpenStreetMap Base', desc: 'Peta jalan & batas wilayah administrasi', icon: MapIcon, colorClass: 'text-slate-500' }
 ]
 
 const getTileUrl = (layerType, year) => {
