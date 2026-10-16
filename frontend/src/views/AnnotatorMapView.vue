@@ -3313,8 +3313,8 @@ const tasksStore = useTasksStore()
 const annotationsStore = useAnnotationsStore()
 
 const selectedTaskId = ref(null)
-// v2: preferensi lama ('google_sat' dari versi sebelumnya) diabaikan agar Sentinel-2 COG lokal kembali menjadi default
-const savedPreferredLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_preferred_layer_v2') : null
+// v3: Sentinel-2 COG lokal selalu menjadi default murni tanpa basemap satelit google di bawahnya
+const savedPreferredLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_preferred_layer_v3') : null
 const currentLayer = ref(savedPreferredLayer || 'local_s2_rgb')
 const currentYear = ref(2025)
 const availableRasterYears = ref([2025, 2022])
@@ -4497,7 +4497,7 @@ const getTileUrl = (layerType, year) => {
 
 const applyImageryFilter = () => {
   const { brightness, contrast, saturation, opacity, gamma } = imagerySettings.value
-  const targetLayer = tileLayer || arcgisLayer || baseTileLayer
+  const targetLayer = tileLayer || arcgisLayer
   const container = targetLayer?.getContainer?.()
   if (container) {
     const isGammaAltered = gamma && Math.abs(Number(gamma) - 1.0) > 0.01
@@ -4550,17 +4550,7 @@ watch(
 const updateTileLayer = async () => {
   if (!map) return
 
-  // 0. Always guarantee an underlying high-res base satellite layer is present
-  // This guarantees the map NEVER renders as a blank gray canvas
-  if (!baseTileLayer) {
-    baseTileLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-      maxZoom: 22,
-      maxNativeZoom: 20,
-      attribution: 'Google Satellite Ultra-HD'
-    }).addTo(map)
-    baseTileLayer.bringToBack()
-  }
-
+  // Bersihkan layer sebelumnya agar tidak tumpang tindih
   if (tileLayer) {
     map.removeLayer(tileLayer)
     tileLayer = null
@@ -4569,19 +4559,28 @@ const updateTileLayer = async () => {
     map.removeLayer(arcgisLayer)
     arcgisLayer = null
   }
+  if (baseTileLayer) {
+    map.removeLayer(baseTileLayer)
+    baseTileLayer = null
+  }
 
-  // If user selected Google Satellite, baseTileLayer is our primary active layer
+  // 1. Jika user memilih Google Satellite secara eksplisit
   if (currentLayer.value === 'google_sat') {
-    baseTileLayer.bringToBack()
+    tileLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+      maxZoom: 22,
+      maxNativeZoom: 20,
+      attribution: 'Google Satellite Ultra-HD'
+    }).addTo(map)
+    tileLayer.bringToBack()
     applyImageryFilter()
     return
   }
 
-  // 1. If user selected Local Sentinel-2 COG Raster Layer
+  // 2. Jika user memilih Citra Sentinel-2 COG Lokal (RGB / CIR)
+  // Murni hanya menampilkan citra Sentinel-2, tanpa Google Satelit di bawahnya (laut/area kosong tetap bersih)
   if (currentLayer.value === 'local_s2_rgb' || currentLayer.value === 'local_s2_cir') {
     const mode = currentLayer.value === 'local_s2_cir' ? 'cir' : 'rgb'
     const yr = currentYear.value || 2025
-    // Gunakan mosaic tile URL agar citra lokal COG mengalir kontinu menutupi grid aktif dan grid sebelah
     const tileUrl = api.getMosaicRasterTileUrl(yr, mode, imagerySettings.value.gamma)
 
     tileLayer = L.tileLayer(tileUrl, {
@@ -4590,12 +4589,11 @@ const updateTileLayer = async () => {
       attribution: `Citra Sentinel-2 Sumbar (${yr}) 10m Cloud-Optimized GeoTIFF`
     }).addTo(map)
     tileLayer.bringToBack()
-    baseTileLayer.bringToBack()
     applyImageryFilter()
     return
   }
 
-  // 2. If user selected an ArcGIS Sentinel-2 L2A ImageServer layer
+  // 3. Jika user memilih ArcGIS Sentinel-2 L2A ImageServer layer
   if (currentLayer.value.startsWith('arcgis_s2_')) {
     try {
       const res = await api.getArcgisToken()
@@ -4624,16 +4622,15 @@ const updateTileLayer = async () => {
       }).addTo(map)
 
       arcgisLayer.bringToBack()
-      baseTileLayer.bringToBack()
       applyImageryFilter()
       return
     } catch (err) {
-      console.warn('Failed to load ArcGIS Sentinel-2 layer, falling back to Google Satellite:', err)
-      showToast('Gagal memuat ArcGIS Sentinel-2, beralih ke Google Satellite...')
+      console.warn('Failed to load ArcGIS Sentinel-2 layer:', err)
+      showToast('Gagal memuat ArcGIS Sentinel-2.')
     }
   }
 
-  // 3. Standard Tile Layers (EOX Sentinel-2, Esri World Imagery, OSM)
+  // 4. Layer Satelit Standar Lainnya (EOX Sentinel-2, Esri World Imagery, OSM)
   const conf = getTileUrl(currentLayer.value, currentYear.value)
   tileLayer = L.tileLayer(conf.url, {
     maxZoom: 22,
@@ -4642,7 +4639,6 @@ const updateTileLayer = async () => {
   }).addTo(map)
 
   tileLayer.bringToBack()
-  baseTileLayer.bringToBack()
   applyImageryFilter()
 }
 
@@ -8790,7 +8786,7 @@ const setOpacityPreset = (val) => {
 const setLayer = (layerId) => {
   currentLayer.value = layerId
   try {
-    localStorage.setItem('geostevia_preferred_layer_v2', layerId)
+    localStorage.setItem('geostevia_preferred_layer_v3', layerId)
   } catch (e) {}
   updateTileLayer()
 }

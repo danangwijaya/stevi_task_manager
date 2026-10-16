@@ -2028,7 +2028,7 @@ let qcFeatureGroup = null
 let qcContextFeatureGroup = null
 let qcGridBoundingLayer = null
 
-const savedQcLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_qc_layer_v2') : null
+const savedQcLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_qc_layer_v3') : null
 const qcLayer = ref(savedQcLayer || 'local_s2_rgb')
 const qcOpacity = ref(0.65)
 const isSpacePeeking = ref(false)
@@ -3398,29 +3398,29 @@ const fitMapBounds = () => {
 const updateQCTileLayer = (year = 2025) => {
   if (!qcMap) return
 
-  // Always ensure underlying high-res base satellite layer is present
-  if (!qcBaseTileLayer) {
-    qcBaseTileLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-      maxZoom: 22,
-      maxNativeZoom: 20,
-      attribution: 'Google Satellite Ultra-HD'
-    }).addTo(qcMap)
-    qcBaseTileLayer.bringToBack()
-  }
-
   if (qcTileLayer) {
     qcMap.removeLayer(qcTileLayer)
     qcTileLayer = null
   }
+  if (qcBaseTileLayer) {
+    qcMap.removeLayer(qcBaseTileLayer)
+    qcBaseTileLayer = null
+  }
 
+  // 1. Google Satellite hanya jika dipilih secara eksplisit
   if (qcLayer.value === 'google_sat') {
-    qcBaseTileLayer.bringToBack()
+    qcTileLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+      maxZoom: 22,
+      maxNativeZoom: 20,
+      attribution: 'Google Satellite Ultra-HD'
+    }).addTo(qcMap)
+    qcTileLayer.bringToBack()
     return
   }
 
+  // 2. Sentinel-2 COG Lokal (RGB / CIR) murni tanpa Google Satelit di bawahnya (laut/area kosong tetap bersih)
   if (qcLayer.value === 'local_s2_rgb' || qcLayer.value === 'local_s2_cir') {
     const mode = qcLayer.value === 'local_s2_cir' ? 'cir' : 'rgb'
-    // Gunakan mosaic tile URL agar citra COG lokal mengalir kontinu menutupi grid aktif dan grid tetangga
     const tileUrl = api.getMosaicRasterTileUrl(year, mode)
 
     qcTileLayer = L.tileLayer(tileUrl, {
@@ -3429,10 +3429,10 @@ const updateQCTileLayer = (year = 2025) => {
       attribution: `Citra Sentinel-2 Sumbar (${year}) 10m COG`
     }).addTo(qcMap)
     qcTileLayer.bringToBack()
-    qcBaseTileLayer.bringToBack()
     return
   }
 
+  // 3. Layer Lainnya (EOX, Esri, OSM)
   const conf = getTileUrl(qcLayer.value, year)
   qcTileLayer = L.tileLayer(conf.url, {
     maxZoom: 22,
@@ -3445,13 +3445,12 @@ const updateQCTileLayer = (year = 2025) => {
   }
 
   qcTileLayer.bringToBack()
-  qcBaseTileLayer.bringToBack()
 }
 
 const setQCLayer = (layerId) => {
   qcLayer.value = layerId
   try {
-    localStorage.setItem('geostevia_qc_layer_v2', layerId)
+    localStorage.setItem('geostevia_qc_layer_v3', layerId)
   } catch (e) {}
   updateQCTileLayer(selectedTask.value?.year || 2025)
 }
