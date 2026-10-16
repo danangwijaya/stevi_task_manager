@@ -1378,6 +1378,31 @@
           </button>
         </div>
 
+        <!-- GLOBAL PROCESS / TOPOLOGY LOADING OVERLAY (Mencegah Kesan Macet / Stuck) -->
+        <transition name="fade">
+          <div
+            v-if="isGlobalProcessing"
+            class="absolute inset-0 z-[1050] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 select-none pointer-events-auto"
+          >
+            <div class="bg-white/95 text-slate-800 p-6 rounded-3xl shadow-2xl border border-slate-200/90 flex flex-col items-center gap-3.5 max-w-sm w-full text-center animate-in zoom-in-95 duration-150">
+              <div class="relative flex items-center justify-center">
+                <div class="w-14 h-14 rounded-full border-4 border-indigo-100 border-t-indigo-600 animate-spin"></div>
+                <div class="absolute text-indigo-600">
+                  <RotateCw :size="20" class="animate-spin" />
+                </div>
+              </div>
+              <div>
+                <div class="font-bold text-base text-slate-900">{{ globalProcessingTitle }}</div>
+                <div class="text-xs text-slate-500 mt-1.5 leading-relaxed">{{ globalProcessingMessage }}</div>
+              </div>
+              <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden mt-1">
+                <div class="bg-indigo-600 h-full rounded-full animate-pulse w-3/4"></div>
+              </div>
+              <div class="text-[10px] text-slate-400 font-medium">Mohon tunggu, komputasi spasial sedang berjalan...</div>
+            </div>
+          </div>
+        </transition>
+
         <!-- SVG Gamma Filter Definition for Leaflet Tile GPU Filtering -->
         <svg class="sr-only" aria-hidden="true" style="position: absolute; width: 0; height: 0; pointer-events: none; overflow: hidden;">
           <filter id="raster-gamma-filter" color-interpolation-filters="sRGB">
@@ -2654,6 +2679,30 @@
 
         <!-- Body -->
         <div class="p-6 overflow-y-auto space-y-3 divide-y divide-slate-100">
+          <!-- Cadangan Draf Offline Browser (Jika Tersedia) -->
+          <div v-if="localDraftStatus" class="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-3">
+            <div class="space-y-0.5">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md font-mono font-bold text-[10px] bg-amber-200 text-amber-900">
+                  Draf Browser
+                </span>
+                <span class="text-xs font-bold text-slate-800">Cadangan di IndexedDB</span>
+              </div>
+              <div class="text-[11px] text-slate-500">
+                Tersimpan {{ localDraftStatus.polygonCount }} poligon • {{ formatDateTime(localDraftStatus.updatedAt) }}
+              </div>
+            </div>
+            <button
+              type="button"
+              @click="restoreOfflineDraftFromModal"
+              class="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+              title="Pulihkan data poligon dari penyimpanan browser lokal"
+            >
+              <RotateCcw :size="12" />
+              <span>Pulihkan Draf</span>
+            </button>
+          </div>
+
           <div v-if="loadingSnapshots" class="py-12 flex flex-col items-center justify-center text-slate-400 gap-2">
             <RotateCw :size="24" class="animate-spin text-indigo-500" />
             <span class="text-xs">Memuat riwayat versi...</span>
@@ -3537,6 +3586,34 @@ const topologyLoading = ref(false)
 const currentTopologyErrorIndex = ref(0)
 const activeTopologyError = ref(null)
 
+const isGlobalProcessing = computed(() => {
+  return (
+    topologyLoading.value ||
+    isHealingTopology.value ||
+    annotationsStore.saving ||
+    restoringSnapshot.value ||
+    isCleaningSlivers.value
+  )
+})
+
+const globalProcessingTitle = computed(() => {
+  if (isHealingTopology.value) return 'Merapikan Topologi (Auto-Heal)'
+  if (topologyLoading.value) return 'Memvalidasi Topologi Spasial'
+  if (restoringSnapshot.value) return 'Memulihkan Versi Poligon'
+  if (annotationsStore.saving) return 'Menyimpan Anotasi ke Server'
+  if (isCleaningSlivers.value) return 'Membersihkan Sliver Poligon'
+  return 'Sedang Memproses'
+})
+
+const globalProcessingMessage = computed(() => {
+  if (isHealingTopology.value) return 'Sistem sedang memotong tumpang tindih dan merapikan celah mikro secara otomatis.'
+  if (topologyLoading.value) return 'Memeriksa validitas geometri, batas tumpang tindih, dan persentase cakupan grid.'
+  if (restoringSnapshot.value) return 'Mengembalikan struktur poligon dan kelas tutupan lahan ke snapshot yang dipilih.'
+  if (annotationsStore.saving) return 'Menyinkronkan poligon dan topologi ke database server.'
+  if (isCleaningSlivers.value) return 'Menggabungkan pecahan poligon kecil ke poligon tetangga terdekat.'
+  return 'Mohon tunggu, proses spasial sedang berjalan...'
+})
+
 // Active GIS Digitize Mode
 const activeTool = ref(null) // null | 'split_line' | 'split_poly' | 'draw_poly' | 'merge' | 'edit' | 'delete'
 const selectedForMerge = ref([]) // array of selected feature objects
@@ -4102,6 +4179,7 @@ const undo = async () => {
   historyIndex.value--
   const snapshot = JSON.parse(JSON.stringify(history.value[historyIndex.value]))
   restoreFeaturesToMap(snapshot)
+  hasUnsavedChanges.value = true
   showToast('Undo: Perubahan dibatalkan')
   queueOfflineDraftSave()
 }
@@ -4111,6 +4189,7 @@ const redo = async () => {
   historyIndex.value++
   const snapshot = JSON.parse(JSON.stringify(history.value[historyIndex.value]))
   restoreFeaturesToMap(snapshot)
+  hasUnsavedChanges.value = true
   showToast('Redo: Perubahan diterapkan kembali')
   queueOfflineDraftSave()
 }
@@ -5348,8 +5427,28 @@ const restoreOfflineDraft = () => {
   const draftFeats = pendingDraftToRestore.value.features || []
   restoreFeaturesToMap(draftFeats)
   pushHistory()
+  hasUnsavedChanges.value = true
   showDraftRestorePrompt.value = false
-  showToast(`✓ Draf lokal offline (${draftFeats.length} poligon) berhasil dipulihkan!`)
+  showToast(`✓ Draf lokal offline (${draftFeats.length} poligon) berhasil dipulihkan! Klik 'Simpan' untuk mengirim ke server.`)
+}
+
+const restoreOfflineDraftFromModal = async () => {
+  if (!selectedTaskId.value) return
+  try {
+    const draft = await getTaskDraft(selectedTaskId.value)
+    if (!draft || !draft.features || draft.features.length === 0) {
+      showToast('Tidak ada data draf lokal yang ditemukan di browser.')
+      return
+    }
+    restoreFeaturesToMap(draft.features)
+    pushHistory()
+    hasUnsavedChanges.value = true
+    showHistoryModal.value = false
+    showToast(`✅ Berhasil memulihkan ${draft.features.length} poligon dari draf lokal browser! Klik 'Simpan' untuk mengirim ke server.`)
+  } catch (err) {
+    console.error('Error restoring draft from modal:', err)
+    showToast('Gagal memulihkan draf browser.')
+  }
 }
 
 const discardOfflineDraftPrompt = () => {
