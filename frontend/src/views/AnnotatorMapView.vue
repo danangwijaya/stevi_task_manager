@@ -3313,7 +3313,8 @@ const tasksStore = useTasksStore()
 const annotationsStore = useAnnotationsStore()
 
 const selectedTaskId = ref(null)
-const currentLayer = ref('local_s2_rgb')
+const savedPreferredLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_preferred_layer') : null
+const currentLayer = ref(savedPreferredLayer || 'google_sat')
 const currentYear = ref(2025)
 const availableRasterYears = ref([2025, 2022])
 const polygonOpacity = ref(0.6)
@@ -4250,6 +4251,7 @@ const handleKeyup = (e) => {
 }
 
 let map = null
+let baseTileLayer = null
 let tileLayer = null
 let arcgisLayer = null
 let focusMaskLayer = null
@@ -4444,8 +4446,9 @@ const getArcgisRasterFunction = (layerId) => {
 }
 
 const layerOptions = [
-  { id: 'local_s2_rgb', name: 'Sentinel-2 Sumbar (Warna Asli RGB)', desc: 'Citra lokal komposit 10m Cloud-Optimized GeoTIFF — Acuan Utama Digitasi', icon: Satellite, colorClass: 'text-emerald-700 font-bold' },
-  { id: 'local_s2_cir', name: 'Sentinel-2 Sumbar (Infrared / NIR False Color)', desc: 'Citra lokal B8-B4-B3 (NIR) — Membedakan Hutan, Sawit, Sawah & Air', icon: Flame, colorClass: 'text-rose-600 font-bold' },
+  { id: 'google_sat', name: 'Google Satellite Ultra-HD', desc: 'Citra satelit resolusi sangat tinggi zoom 20+ — Rekomendasi Utama', icon: Globe2, colorClass: 'text-blue-600 font-bold' },
+  { id: 'true_color', name: 'Sentinel-2 EOX Cloudless (ESA)', desc: 'Komposit bebas awan tahunan ESA Copernicus EOX 10m', icon: Satellite, colorClass: 'text-emerald-700 font-bold' },
+  { id: 'esri_sat', name: 'Esri World Imagery', desc: 'Citra satelit global resolusi tinggi jernih', icon: Globe, colorClass: 'text-slate-600' },
   { id: 'arcgis_s2_natural', name: 'Sentinel-2 L2A (ArcGIS Natural Color DRA)', desc: 'Esri Living Atlas • Warna alami 10m BOA dengan Dynamic Range Adjustment', icon: Satellite, colorClass: 'text-emerald-700' },
   { id: 'arcgis_s2_nir', name: 'Sentinel-2 L2A (ArcGIS False Color NIR)', desc: 'Esri Living Atlas • B8-B4-B3 vegetasi merah menyala (Hutan vs Semak)', icon: Flame, colorClass: 'text-rose-600' },
   { id: 'arcgis_s2_agri', name: 'Sentinel-2 L2A (ArcGIS Agriculture SWIR)', desc: 'Esri Living Atlas • B11-B8-B2 pemilah sawah, kelapa sawit & tanah', icon: Sprout, colorClass: 'text-amber-600' },
@@ -4455,9 +4458,8 @@ const layerOptions = [
   { id: 'arcgis_s2_ndmi', name: 'Sentinel-2 L2A (ArcGIS NDMI Kelembaban)', desc: 'Esri Living Atlas • Indeks kelembaban kanopi & tanah basah', icon: Sprout, colorClass: 'text-cyan-600' },
   { id: 'arcgis_s2_ndwi', name: 'Sentinel-2 L2A (ArcGIS NDWI Air & Tambak)', desc: 'Esri Living Atlas • Indeks air pemisah tegas danau, sungai & tambak', icon: Globe2, colorClass: 'text-blue-600' },
   { id: 'arcgis_s2_scl', name: 'Sentinel-2 L2A (Scene Classification Map)', desc: 'Esri Living Atlas • Peta klasifikasi otomatis Sen2Cor ESA', icon: Palette, colorClass: 'text-purple-600' },
-  { id: 'true_color', name: 'Sentinel-2 EOX Cloudless (ESA)', desc: 'Komposit bebas awan tahunan ESA Copernicus EOX', icon: Satellite, colorClass: 'text-blue-700' },
-  { id: 'google_sat', name: 'Google Satellite Ultra-HD', desc: 'Citra satelit resolusi sangat tinggi zoom 20+', icon: Globe2, colorClass: 'text-blue-600' },
-  { id: 'esri_sat', name: 'Esri World Imagery', desc: 'Citra satelit global resolusi tinggi jernih', icon: Globe, colorClass: 'text-slate-600' },
+  { id: 'local_s2_rgb', name: 'Sentinel-2 Sumbar (Raster Lokal COG RGB)', desc: 'Citra lokal komposit 10m Cloud-Optimized GeoTIFF', icon: Satellite, colorClass: 'text-emerald-700' },
+  { id: 'local_s2_cir', name: 'Sentinel-2 Sumbar (Raster Lokal NIR False Color)', desc: 'Citra lokal B8-B4-B3 (NIR) — Membedakan Hutan, Sawit, Sawah & Air', icon: Flame, colorClass: 'text-rose-600' },
   { id: 'osm', name: 'OpenStreetMap Base', desc: 'Peta jalan & batas wilayah administrasi', icon: MapIcon, colorClass: 'text-slate-500' }
 ]
 
@@ -4488,15 +4490,18 @@ const getTileUrl = (layerType, year) => {
     case 'osm':
       return { url: osmUrl, maxNativeZoom: 19, filter: 'none', attr: '© OpenStreetMap contributors' }
     default:
-      return { url: s2Url, maxNativeZoom: 16, filter: 'none', attr: `Sentinel-2 (${year})` }
+      return { url: googleSat, maxNativeZoom: 20, filter: 'none', attr: 'Google Satellite' }
   }
 }
 
 const applyImageryFilter = () => {
-  const { brightness, contrast, saturation, opacity } = imagerySettings.value
-  const container = tileLayer?.getContainer?.() || arcgisLayer?.getContainer?.()
+  const { brightness, contrast, saturation, opacity, gamma } = imagerySettings.value
+  const targetLayer = tileLayer || arcgisLayer || baseTileLayer
+  const container = targetLayer?.getContainer?.()
   if (container) {
-    container.style.filter = `url(#raster-gamma-filter) brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`
+    const isGammaAltered = gamma && Math.abs(Number(gamma) - 1.0) > 0.01
+    const gammaStyle = isGammaAltered ? 'url(#raster-gamma-filter) ' : ''
+    container.style.filter = `${gammaStyle}brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`
     container.style.opacity = `${opacity / 100}`
   }
 }
@@ -4544,6 +4549,17 @@ watch(
 const updateTileLayer = async () => {
   if (!map) return
 
+  // 0. Always guarantee an underlying high-res base satellite layer is present
+  // This guarantees the map NEVER renders as a blank gray canvas
+  if (!baseTileLayer) {
+    baseTileLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+      maxZoom: 22,
+      maxNativeZoom: 20,
+      attribution: 'Google Satellite Ultra-HD'
+    }).addTo(map)
+    baseTileLayer.bringToBack()
+  }
+
   if (tileLayer) {
     map.removeLayer(tileLayer)
     tileLayer = null
@@ -4551,6 +4567,13 @@ const updateTileLayer = async () => {
   if (arcgisLayer) {
     map.removeLayer(arcgisLayer)
     arcgisLayer = null
+  }
+
+  // If user selected Google Satellite, baseTileLayer is our primary active layer
+  if (currentLayer.value === 'google_sat') {
+    baseTileLayer.bringToBack()
+    applyImageryFilter()
+    return
   }
 
   // 1. If user selected Local Sentinel-2 COG Raster Layer
@@ -4563,11 +4586,12 @@ const updateTileLayer = async () => {
       : api.getMosaicRasterTileUrl(yr, mode, imagerySettings.value.gamma)
 
     tileLayer = L.tileLayer(tileUrl, {
-      maxZoom: 16,
+      maxZoom: 22,
       maxNativeZoom: 16,
       attribution: `Citra Sentinel-2 Sumbar (${yr}) 10m Cloud-Optimized GeoTIFF`
     }).addTo(map)
     tileLayer.bringToBack()
+    baseTileLayer.bringToBack()
     applyImageryFilter()
     return
   }
@@ -4596,28 +4620,30 @@ const updateTileLayer = async () => {
           sortValue: '0'
         },
         format: 'jpgpng',
-        maxZoom: 16,
+        maxZoom: 18,
         attribution: `ArcGIS Sentinel-2 L2A ${yr} (10m) © European Space Agency & Esri Living Atlas`
       }).addTo(map)
 
       arcgisLayer.bringToBack()
+      baseTileLayer.bringToBack()
       applyImageryFilter()
       return
     } catch (err) {
-      console.warn('Failed to load ArcGIS Sentinel-2 layer, falling back to EOX Sentinel-2:', err)
-      showToast('Gagal memuat ArcGIS Sentinel-2, beralih ke EOX...')
+      console.warn('Failed to load ArcGIS Sentinel-2 layer, falling back to Google Satellite:', err)
+      showToast('Gagal memuat ArcGIS Sentinel-2, beralih ke Google Satellite...')
     }
   }
 
-  // 3. Standard Tile Layers (EOX Sentinel-2, Google Satellite, Esri World Imagery, OSM)
+  // 3. Standard Tile Layers (EOX Sentinel-2, Esri World Imagery, OSM)
   const conf = getTileUrl(currentLayer.value, currentYear.value)
   tileLayer = L.tileLayer(conf.url, {
-    maxZoom: 16,
+    maxZoom: 22,
     maxNativeZoom: conf.maxNativeZoom || 18,
     attribution: conf.attr
   }).addTo(map)
 
   tileLayer.bringToBack()
+  baseTileLayer.bringToBack()
   applyImageryFilter()
 }
 
@@ -4768,7 +4794,7 @@ function toggleSnapping() {
 const initMap = () => {
   if (map) return
 
-  const effectiveMaxZoom = 16 // Batasi zoom maksimal di skala 300 meter (Level 16)
+  const effectiveMaxZoom = 19 // Memungkinkan zoom detail hingga level 19 untuk digitasi presisi
   map = L.map('map-container', {
     center: [-0.947, 100.370],
     zoom: 13,
@@ -8769,6 +8795,9 @@ const setOpacityPreset = (val) => {
 
 const setLayer = (layerId) => {
   currentLayer.value = layerId
+  try {
+    localStorage.setItem('geostevia_preferred_layer', layerId)
+  } catch (e) {}
   updateTileLayer()
 }
 

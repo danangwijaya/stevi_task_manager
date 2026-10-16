@@ -2022,12 +2022,14 @@ const polygonSearch = ref('')
 
 // Live Map Variables
 let qcMap = null
+let qcBaseTileLayer = null
 let qcTileLayer = null
 let qcFeatureGroup = null
 let qcContextFeatureGroup = null
 let qcGridBoundingLayer = null
 
-const qcLayer = ref('local_s2_rgb')
+const savedQcLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_qc_layer') : null
+const qcLayer = ref(savedQcLayer || 'google_sat')
 const qcOpacity = ref(0.65)
 const isSpacePeeking = ref(false)
 let savedOpacityBeforePeek = 0.65
@@ -2050,10 +2052,10 @@ const activeQcInspectorBounds = ref(null)
 const isQcInspectorLoading = ref(false)
 
 const layerOptions = [
-  { id: 'local_s2_rgb', name: 'Sentinel-2 Lokal (RGB)', icon: Satellite },
-  { id: 'local_s2_cir', name: 'Sentinel-2 Lokal (NIR)', icon: Flame },
   { id: 'google_sat', name: 'Google Sat', icon: Globe2 },
   { id: 'esri_sat', name: 'Esri Sat', icon: Globe },
+  { id: 'local_s2_rgb', name: 'Sentinel-2 Lokal (RGB)', icon: Satellite },
+  { id: 'local_s2_cir', name: 'Sentinel-2 Lokal (NIR)', icon: Flame },
   { id: 'false_color_nir', name: 'False NIR', icon: Flame },
   { id: 'swir', name: 'SWIR', icon: Sprout },
   { id: 'ndvi', name: 'NDVI', icon: TrendingUp }
@@ -3395,7 +3397,26 @@ const fitMapBounds = () => {
 
 const updateQCTileLayer = (year = 2025) => {
   if (!qcMap) return
-  if (qcTileLayer) qcMap.removeLayer(qcTileLayer)
+
+  // Always ensure underlying high-res base satellite layer is present
+  if (!qcBaseTileLayer) {
+    qcBaseTileLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+      maxZoom: 22,
+      maxNativeZoom: 20,
+      attribution: 'Google Satellite Ultra-HD'
+    }).addTo(qcMap)
+    qcBaseTileLayer.bringToBack()
+  }
+
+  if (qcTileLayer) {
+    qcMap.removeLayer(qcTileLayer)
+    qcTileLayer = null
+  }
+
+  if (qcLayer.value === 'google_sat') {
+    qcBaseTileLayer.bringToBack()
+    return
+  }
 
   if (qcLayer.value === 'local_s2_rgb' || qcLayer.value === 'local_s2_cir') {
     const mode = qcLayer.value === 'local_s2_cir' ? 'cir' : 'rgb'
@@ -3410,6 +3431,7 @@ const updateQCTileLayer = (year = 2025) => {
       attribution: `Citra Sentinel-2 Sumbar (${year}) 10m COG`
     }).addTo(qcMap)
     qcTileLayer.bringToBack()
+    qcBaseTileLayer.bringToBack()
     return
   }
 
@@ -3425,10 +3447,14 @@ const updateQCTileLayer = (year = 2025) => {
   }
 
   qcTileLayer.bringToBack()
+  qcBaseTileLayer.bringToBack()
 }
 
 const setQCLayer = (layerId) => {
   qcLayer.value = layerId
+  try {
+    localStorage.setItem('geostevia_qc_layer', layerId)
+  } catch (e) {}
   updateQCTileLayer(selectedTask.value?.year || 2025)
 }
 
