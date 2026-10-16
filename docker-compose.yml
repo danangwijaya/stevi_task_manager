@@ -7,11 +7,11 @@ services:
     container_name: geoai_postgis
     restart: always
     environment:
-      POSTGRES_USER: postgres
+      POSTGRES_USER: geoai_user
       POSTGRES_PASSWORD: geoai_password_2026
       POSTGRES_DB: geoai_landcover
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgis_data:/var/lib/postgresql/data
 
@@ -23,7 +23,7 @@ services:
     container_name: geoai_backend
     restart: always
     environment:
-      DATABASE_URL: postgresql://postgres:geoai_password_2026@postgis:5432/geoai_landcover
+      DATABASE_URL: postgresql://geoai_user:geoai_password_2026@postgis:5432/geoai_landcover
       RASTER_BASE_DIR: /app/data/raster
       GEE_SERVICE_ACCOUNT: ${GEE_SERVICE_ACCOUNT:-}
       GEE_PRIVATE_KEY_PATH: ${GEE_PRIVATE_KEY_PATH:-}

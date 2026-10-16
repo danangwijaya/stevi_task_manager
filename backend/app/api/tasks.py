@@ -998,6 +998,15 @@ def update_task_status(
     new_status = status_update.status.upper()
     old_status = task.status
 
+    # Idempotent status update: if already in the desired status, succeed gracefully
+    if old_status == new_status:
+        if status_update.reviewer_notes is not None:
+            task.reviewer_notes = status_update.reviewer_notes
+            task.updated_at = datetime.utcnow()
+            db.commit()
+            db.refresh(task)
+        return task
+
     # Define valid transitions
     VALID_TRANSITIONS = {
         "UNASSIGNED": ["ASSIGNED", "IN_PROGRESS"],
@@ -1141,7 +1150,7 @@ def create_task_review_pin(
         raise HTTPException(status_code=404, detail="Task not found")
 
     role = (current_user.role or "").strip().lower()
-    if role not in ["admin", "dosen"] and task.assigned_user_id != current_user.id:
+    if role not in ["admin", "dosen", "supervisi", "reviewer"] and task.assigned_user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Hanya Reviewer/Dosen, Admin, atau Petugas Grid yang dapat menambahkan pin catatan")
 
     if pin_in.annotation_id:
@@ -1207,7 +1216,7 @@ def update_task_review_pin(
 
     if pin_update.note is not None:
         role = (current_user.role or "").strip().lower()
-        if role not in ["admin", "dosen"] and pin.reviewer_id != current_user.id:
+        if role not in ["admin", "dosen", "supervisi", "reviewer"] and pin.reviewer_id != current_user.id:
             raise HTTPException(status_code=403, detail="Hanya pembuat catatan atau Reviewer yang dapat mengubah teks catatan")
         pin.note = pin_update.note
 
@@ -1244,7 +1253,7 @@ def delete_task_review_pin(
         raise HTTPException(status_code=404, detail="Review pin not found")
 
     role = (current_user.role or "").strip().lower()
-    if role not in ["admin", "dosen"] and pin.reviewer_id != current_user.id:
+    if role not in ["admin", "dosen", "supervisi", "reviewer"] and pin.reviewer_id != current_user.id:
         raise HTTPException(status_code=403, detail="Hanya pembuat catatan atau Reviewer/Admin yang dapat menghapus catatan")
 
     db.delete(pin)

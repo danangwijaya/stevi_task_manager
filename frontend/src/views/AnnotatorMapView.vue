@@ -344,7 +344,7 @@
 
           <!-- Reset Grid Polygons Button -->
           <button
-            v-if="selectedTaskId && (authStore.isAdmin || tasksStore.currentTask?.assigned_user_id === authStore.user?.id)"
+            v-if="selectedTaskId && (authStore.isAdmin || authStore.isReviewer || tasksStore.currentTask?.assigned_user_id === authStore.user?.id)"
             @click="resetCurrentGridAnnotations"
             class="bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold px-3 py-1.5 rounded-xl border border-amber-300 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
             title="Hapus seluruh poligon pada grid ini dan mulai digitasi dari awal"
@@ -387,6 +387,19 @@
             </span>
           </div>
 
+          <!-- Cek Topologi Button -->
+          <button
+            v-if="selectedTaskId"
+            @click="runTopologyCheck(true)"
+            :disabled="topologyLoading"
+            class="bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-3.5 py-1.5 rounded-md border border-slate-300 transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            title="Periksa apakah ada poligon bertumpuk atau celah/lubang batas (Audit Topologi)"
+          >
+            <RotateCw v-if="topologyLoading" :size="13" class="animate-spin text-indigo-600" />
+            <ShieldCheck v-else :size="13" class="text-indigo-600" />
+            <span class="hidden sm:inline">Cek Topologi</span>
+          </button>
+
           <button
             @click="saveAnnotations"
             :disabled="annotationsStore.saving"
@@ -398,10 +411,20 @@
             <span class="hidden sm:inline">Simpan Draf</span>
           </button>
 
+          <div
+            v-if="tasksStore.currentTask && tasksStore.currentTask.status === 'SUBMITTED'"
+            class="bg-amber-500/10 border border-amber-500/30 text-amber-700 text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-2 select-none"
+            title="Tugas telah berhasil disubmit dan sedang menunggu peninjauan oleh Dosen / Tim QC"
+          >
+            <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+            <span>Menunggu Review QC</span>
+          </div>
+
           <button
-            v-if="tasksStore.currentTask && tasksStore.currentTask.status !== 'APPROVED'"
+            v-else-if="tasksStore.currentTask && tasksStore.currentTask.status !== 'APPROVED'"
             @click="submitForReview"
             class="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold px-4 py-1.5 rounded-md shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+            title="Kirim hasil digitasi untuk direview oleh Dosen / Supervisor"
           >
             <Send :size="13" />
             <span>Kirim Review QC</span>
@@ -3641,8 +3664,16 @@ const explodeGeoJsonFeature = (feat) => {
 }
 
 const selectableTasks = computed(() => {
-  if (authStore.isAdmin) return tasksStore.tasks
-  return tasksStore.tasks.filter(t => t.assigned_user_id === authStore.user?.id)
+  let list = []
+  if (authStore.isAdmin || authStore.isReviewer) {
+    list = [...tasksStore.tasks]
+  } else {
+    list = tasksStore.tasks.filter(t => t.assigned_user_id === authStore.user?.id)
+  }
+  if (tasksStore.currentTask && !list.some(t => t.id === tasksStore.currentTask.id)) {
+    list.unshift(tasksStore.currentTask)
+  }
+  return list
 })
 
 const selectedPolyUiIds = ref(new Set())
@@ -4652,8 +4683,8 @@ onMounted(async () => {
   if (queryTaskId) {
     selectedTaskId.value = queryTaskId
   } else if (tasksStore.tasks.length > 0) {
-    if (authStore.isAdmin) {
-      selectedTaskId.value = tasksStore.tasks[0].id
+    if (authStore.isAdmin || authStore.isReviewer) {
+      selectedTaskId.value = tasksStore.tasks[0]?.id || null
     } else {
       const myTask = tasksStore.tasks.find(t => t.assigned_user_id === authStore.user?.id)
       selectedTaskId.value = myTask ? myTask.id : null
@@ -5890,10 +5921,19 @@ const handleSplitByLine = async (lineGeom) => {
 
   try {
     const res = await api.splitByLine(selectedTaskId.value, lineGeom, targetAnnId, targetClassId, targetFeat, false)
-    showToast(res.data?.message || 'Poligon berhasil dipotong!')
     if (res.data?.deleted_ids || res.data?.created_features) {
-      const delUis = res.data.deleted_ui_id ? [res.data.deleted_ui_id] : (targetFeat?._uiId ? [targetFeat._uiId] : [])
-      applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [], delUis)
+      const delUis = new Set()
+      if (res.data?.deleted_ui_id) delUis.add(String(res.data.deleted_ui_id))
+      if (targetFeat?._uiId) delUis.add(String(targetFeat._uiId))
+      if (targetFeat?.properties?._uiId) delUis.add(String(targetFeat.properties._uiId))
+      if (targetFeat) delUis.add(String(getFeatureUiId(targetFeat)))
+
+      const delIds = new Set(res.data?.deleted_ids || [])
+      if (targetAnnId) delIds.add(targetAnnId)
+      if (targetFeat?.id) delIds.add(targetFeat.id)
+      if (targetFeat?.properties?.id) delIds.add(targetFeat.properties.id)
+
+      applyDeltaUpdate(Array.from(delIds), res.data?.created_features || [], res.data?.updated_features || [], Array.from(delUis))
       // Auto-select the newly created cut piece so user can see it and edit its class immediately
       if (res.data.created_features && res.data.created_features.length > 1) {
         const newSlice = res.data.created_features[1]
@@ -5931,10 +5971,19 @@ const handleSplitByPolygon = async (cuttingGeom) => {
 
   try {
     const res = await api.splitByPolygon(selectedTaskId.value, cuttingGeom, targetAnnId, targetClassId, targetFeat, false)
-    showToast(res.data?.message || 'Poligon berhasil dipisah menjadi bagian mandiri!')
     if (res.data?.deleted_ids || res.data?.created_features) {
-      const delUis = res.data.deleted_ui_id ? [res.data.deleted_ui_id] : (targetFeat?._uiId ? [targetFeat._uiId] : [])
-      applyDeltaUpdate(res.data.deleted_ids || [], res.data.created_features || [], res.data.updated_features || [], delUis)
+      const delUis = new Set()
+      if (res.data?.deleted_ui_id) delUis.add(String(res.data.deleted_ui_id))
+      if (targetFeat?._uiId) delUis.add(String(targetFeat._uiId))
+      if (targetFeat?.properties?._uiId) delUis.add(String(targetFeat.properties._uiId))
+      if (targetFeat) delUis.add(String(getFeatureUiId(targetFeat)))
+
+      const delIds = new Set(res.data?.deleted_ids || [])
+      if (targetAnnId) delIds.add(targetAnnId)
+      if (targetFeat?.id) delIds.add(targetFeat.id)
+      if (targetFeat?.properties?.id) delIds.add(targetFeat.properties.id)
+
+      applyDeltaUpdate(Array.from(delIds), res.data?.created_features || [], res.data?.updated_features || [], Array.from(delUis))
       // Auto-select the newly cut area piece
       if (res.data.created_features && res.data.created_features.length > 0) {
         const newFeat = res.data.created_features[res.data.created_features.length - 1]
@@ -8746,7 +8795,9 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
 
   if (task.year && currentYear.value !== task.year) {
     currentYear.value = task.year
+    tasksStore.selectedYear = task.year
     await updateTileLayer()
+    await tasksStore.fetchTasks()
   }
 
   clickedFeatureIdx.value = null
@@ -8864,12 +8915,16 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
       }
       const draftTime = draft.updatedAt ? new Date(draft.updatedAt).getTime() : 0
       const serverTime = task.updated_at ? new Date(task.updated_at).getTime() : 0
-      const isCountDifferent = draft.features.length !== fetchedFeatures.length
-      const isDraftNewer = draftTime > (serverTime + 30000) // 30s buffer
 
-      if (isCountDifferent || isDraftNewer) {
+      // Only prompt restore if draft is genuinely newer than server state (e.g. browser crashed before saving)
+      if (draftTime > (serverTime + 15000)) {
         pendingDraftToRestore.value = draft
         showDraftRestorePrompt.value = true
+      } else {
+        // Server state is newer or equal: safely clear outdated local draft to prevent corrupt cache resurrection
+        await clearTaskDraft(taskId)
+        localDraftStatus.value = null
+        showDraftRestorePrompt.value = false
       }
     } else {
       localDraftStatus.value = null
@@ -9319,7 +9374,9 @@ const coveragePercent = computed(() => {
 
 const syncFeaturesFromMap = () => {
   if (!featureGroup) return
-  const newFeatures = []
+  const rawFeatures = []
+  const layerMap = new Map()
+
   featureGroup.eachLayer((layer) => {
     const json = layer.toGeoJSON()
     if (!layer._uiId) {
@@ -9339,13 +9396,82 @@ const syncFeaturesFromMap = () => {
 
     // STRICT SINGLEPART: Explode any multi-part features
     const exploded = explodeGeoJsonFeature(json)
-    newFeatures.push(...exploded)
+    exploded.forEach(exp => {
+      rawFeatures.push(exp)
+      if (layer._uiId) layerMap.set(layer._uiId, layer)
+    })
   })
-  features.value = newFeatures
+
+  // Spatial Deduplication Guard:
+  // Sort so real classes (class_id > 0) are kept over class 0, and larger areas first
+  rawFeatures.sort((a, b) => {
+    const aClass = (a.properties?.class_id && a.properties.class_id > 0) ? 1 : 0
+    const bClass = (b.properties?.class_id && b.properties.class_id > 0) ? 1 : 0
+    if (aClass !== bClass) return bClass - aClass
+    return (b.properties?.area_sqm || 0) - (a.properties?.area_sqm || 0)
+  })
+
+  const accepted = []
+  const layersToRemove = []
+
+  rawFeatures.forEach(feat => {
+    let isDup = false
+    const fArea = feat.properties?.area_sqm || (feat.geometry?.coordinates ? turf.area(feat) : 0)
+    const fCid = feat.properties?.class_id || 0
+
+    if (accepted.length > 0 && fArea > 0) {
+      const fBbox = turf.bbox(feat)
+      for (const acc of accepted) {
+        const aBbox = turf.bbox(acc)
+        // Disjoint bbox check
+        if (fBbox[0] > aBbox[2] || fBbox[2] < aBbox[0] || fBbox[1] > aBbox[3] || fBbox[3] < aBbox[1]) {
+          continue
+        }
+        try {
+          const inter = turf.intersect(turf.featureCollection([feat, acc]))
+          if (inter) {
+            const interArea = turf.area(inter)
+            const aArea = acc.properties?.area_sqm || turf.area(acc)
+            const rF = interArea / (fArea + 1e-6)
+            const rA = interArea / (aArea + 1e-6)
+            if (rF > 0.85 && rA > 0.85) {
+              isDup = true
+              break
+            }
+            if (fCid === 0 && rF > 0.90) {
+              isDup = true
+              break
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!isDup) {
+      accepted.push(feat)
+    } else {
+      const uId = feat._uiId || feat.properties?._uiId
+      if (uId && layerMap.has(uId)) {
+        layersToRemove.push(layerMap.get(uId))
+      }
+    }
+  })
+
+  layersToRemove.forEach(l => {
+    try {
+      featureGroup.removeLayer(l)
+      if (map && map.hasLayer(l)) map.removeLayer(l)
+    } catch (_) {}
+  })
+
+  features.value = accepted
 }
 
 const saveAnnotations = async () => {
-  if (!selectedTaskId.value) return
+  if (!selectedTaskId.value) {
+    alert('Pilih grid tugas terlebih dahulu sebelum menyimpan.')
+    return
+  }
   if (annotationsStore.saving) return
   syncFeaturesFromMap()
 
@@ -9449,7 +9575,10 @@ const submitForReview = async () => {
 
   const ok = await tasksStore.updateStatus(selectedTaskId.value, 'SUBMITTED')
   if (ok) {
-    showToast('Tugas berhasil disubmit untuk review QC!')
+    showToast('🎉 Tugas berhasil disubmit untuk review QC!')
+    await tasksStore.fetchTaskDetail(selectedTaskId.value)
+  } else {
+    alert('⚠️ Gagal mengirim review QC. Pastikan tugas memiliki izin yang sesuai atau muat ulang halaman.')
   }
 }
 

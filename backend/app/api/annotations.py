@@ -416,13 +416,8 @@ def save_grid_annotations(
     if not task:
         raise HTTPException(status_code=404, detail="Task grid not found")
 
-    # Lock task row with row-level lock to prevent concurrent save race condition inflation
-    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).with_for_update().first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task grid not found")
-
     user_role = (current_user.role or "").strip().lower()
-    if task.assigned_user_id is not None and user_role not in ["admin", "dosen"] and task.assigned_user_id != current_user.id:
+    if task.assigned_user_id is not None and user_role not in ["admin", "dosen", "supervisi", "reviewer"] and task.assigned_user_id != current_user.id:
         raise HTTPException(
             status_code=403,
             detail=f"Grid ini telah ditugaskan ke {task.assignee.full_name if task.assignee else 'pengguna lain'}. Anda tidak dapat mengubah data pada grid ini."
@@ -447,12 +442,13 @@ def save_grid_annotations(
 
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
 
-    saved_annotations = []
+    candidates = []
     seen_geom_keys = set()
 
     for f in data.features:
-        class_id = int(f.properties.get("class_id", 1))
-        class_name = f.properties.get("class_name", classes_dict.get(class_id, "Unknown"))
+        props = f.properties if f.properties else {}
+        class_id = int(props.get("class_id", 0)) if "class_id" in props else 0
+        class_name = props.get("class_name", classes_dict.get(class_id, "Belum Teridentifikasi"))
         
         geom_dict = f.geometry
         try:
@@ -464,7 +460,7 @@ def save_grid_annotations(
                 continue
 
             # Safely extract existing feature ID without throwing AttributeError
-            raw_fid = getattr(f, "id", None) or (f.properties.get("id") if f.properties else None)
+            raw_fid = getattr(f, "id", None) or props.get("id")
             fid = None
             if isinstance(raw_fid, int):
                 fid = raw_fid
@@ -472,39 +468,109 @@ def save_grid_annotations(
                 fid = int(raw_fid)
 
             for poly_idx, poly_part in enumerate(extracted_polys):
-                # Ultra-fast C-level deduplication key (100x faster than json.dumps)
                 geom_key = poly_part.wkb
                 if geom_key in seen_geom_keys:
                     continue
                 seen_geom_keys.add(geom_key)
 
-                part_geojson = mapping(poly_part)
                 area_sqm = poly_part.area * (111320.0 ** 2)
-
-                # If first piece matches an existing ID and hasn't been claimed yet, update in-place to KEEP STABLE ID!
-                if poly_idx == 0 and fid is not None and fid in existing_map and fid not in retained_ids:
-                    ann = existing_map[fid]
-                    ann.class_id = class_id
-                    ann.class_name = class_name
-                    ann.geom_geojson = json.dumps(part_geojson)
-                    ann.area_sqm = area_sqm
-                    ann.user_id = current_user.id
-                    retained_ids.add(fid)
-                    saved_annotations.append(ann)
-                else:
-                    ann = Annotation(
-                        task_grid_id=task_grid_id,
-                        user_id=current_user.id,
-                        class_id=class_id,
-                        class_name=class_name,
-                        geom_geojson=json.dumps(part_geojson),
-                        area_sqm=area_sqm
-                    )
-                    db.add(ann)
-                    saved_annotations.append(ann)
+                candidates.append({
+                    "poly": poly_part,
+                    "class_id": class_id,
+                    "class_name": class_name,
+                    "fid": fid if poly_idx == 0 else None,
+                    "area_sqm": area_sqm
+                })
         except Exception as e:
             logger.warning(f"Error parsing feature in grid {task_grid_id}: {e}")
             continue
+
+    # Priority sorting:
+    # 1. Real labeled classes (class_id > 0) BEFORE unlabelled (class_id == 0)
+    # 2. Existing database ID preserved BEFORE new ones
+    # 3. Larger area BEFORE tiny slivers
+    candidates.sort(key=lambda c: (
+        1 if c["class_id"] > 0 else 0,
+        1 if (c["fid"] is not None and c["fid"] in existing_map) else 0,
+        c["area_sqm"]
+    ), reverse=True)
+
+    # SPATIAL COLLISION DEDUPLICATION GUARD:
+    # Never allow duplicate / stacked polygons into the database!
+    accepted = []
+    dropped_dups_count = 0
+
+    if candidates:
+        accepted_geoms = []
+        for cand in candidates:
+            c_poly = cand["poly"]
+            c_cid = cand["class_id"]
+            
+            is_dup = False
+            if accepted_geoms:
+                c_bounds = c_poly.bounds
+                for a_poly, a_cand in accepted:
+                    a_bounds = a_poly.bounds
+                    # BBox disjoint check
+                    if (c_bounds[0] > a_bounds[2] or c_bounds[2] < a_bounds[0] or
+                        c_bounds[1] > a_bounds[3] or c_bounds[3] < a_bounds[1]):
+                        continue
+                    
+                    if c_poly.intersects(a_poly):
+                        try:
+                            inter = c_poly.intersection(a_poly)
+                            inter_area = inter.area
+                            if inter_area > 0:
+                                ratio_c = inter_area / c_poly.area
+                                ratio_a = inter_area / a_poly.area
+                                # Mutual duplicate / stacked (>85% mutual overlap)
+                                if ratio_c > 0.85 and ratio_a > 0.85:
+                                    is_dup = True
+                                    dropped_dups_count += 1
+                                    break
+                                # Candidate is unlabelled (class_id == 0) and almost entirely inside an already accepted polygon (>90%)
+                                if c_cid == 0 and ratio_c > 0.90:
+                                    is_dup = True
+                                    dropped_dups_count += 1
+                                    break
+                        except Exception:
+                            pass
+            if not is_dup:
+                accepted.append((c_poly, cand))
+                accepted_geoms.append(c_poly)
+
+    if dropped_dups_count > 0:
+        logger.warning(f"Grid {task_grid_id}: Otomatis membuang {dropped_dups_count} poligon duplikat/tumpuk saat simpan.")
+
+    saved_annotations = []
+    for poly_part, cand in accepted:
+        part_geojson = mapping(poly_part)
+        fid = cand["fid"]
+        class_id = cand["class_id"]
+        class_name = cand["class_name"]
+        area_sqm = cand["area_sqm"]
+
+        # If matches an existing ID and hasn't been claimed yet, update in-place to KEEP STABLE ID!
+        if fid is not None and fid in existing_map and fid not in retained_ids:
+            ann = existing_map[fid]
+            ann.class_id = class_id
+            ann.class_name = class_name
+            ann.geom_geojson = json.dumps(part_geojson)
+            ann.area_sqm = area_sqm
+            ann.user_id = current_user.id
+            retained_ids.add(fid)
+            saved_annotations.append(ann)
+        else:
+            ann = Annotation(
+                task_grid_id=task_grid_id,
+                user_id=current_user.id,
+                class_id=class_id,
+                class_name=class_name,
+                geom_geojson=json.dumps(part_geojson),
+                area_sqm=area_sqm
+            )
+            db.add(ann)
+            saved_annotations.append(ann)
 
     # ABSOLUTE SAFETY GUARD: If client sent features, but none could be processed, ABORT TO PROTECT DATA!
     if len(data.features) > 0 and len(saved_annotations) == 0:
@@ -516,10 +582,13 @@ def save_grid_annotations(
 
     # Clean up annotations that were genuinely deleted by the user ONLY IF saved_annotations is non-empty
     if len(saved_annotations) > 0:
-        to_delete_ids = set(existing_map.keys()) - retained_ids
+        to_delete_ids = list(set(existing_map.keys()) - retained_ids)
         if to_delete_ids:
-            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(to_delete_ids)).update({"annotation_id": None}, synchronize_session=False)
-            db.query(Annotation).filter(Annotation.id.in_(to_delete_ids)).delete(synchronize_session=False)
+            chunk_size = 500
+            for i in range(0, len(to_delete_ids), chunk_size):
+                chunk = to_delete_ids[i:i + chunk_size]
+                db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(chunk)).update({"annotation_id": None}, synchronize_session=False)
+                db.query(Annotation).filter(Annotation.id.in_(chunk)).delete(synchronize_session=False)
 
     # Auto mark task as IN_PROGRESS if it was ASSIGNED or UNASSIGNED
     if task.status in ["ASSIGNED", "REVISION_NEEDED", "UNASSIGNED"]:
@@ -628,8 +697,8 @@ def restore_snapshot_endpoint(
         raise HTTPException(status_code=404, detail="Task grid not found")
 
     user_role = (current_user.role or "").strip().lower()
-    if task.assigned_user_id is not None and user_role not in ["admin", "dosen"] and task.assigned_user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Hanya penanggung jawab grid, dosen, atau admin yang dapat memulihkan versi.")
+    if task.assigned_user_id is not None and user_role not in ["admin", "dosen", "supervisi", "reviewer"] and task.assigned_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Hanya penanggung jawab grid, dosen, supervisi, atau admin yang dapat memulihkan versi.")
 
     try:
         result = restore_grid_snapshot(
@@ -696,7 +765,7 @@ def copy_annotations_from_task(
         raise HTTPException(status_code=404, detail="Source task grid not found")
         
     user_role = (current_user.role or "").strip().lower()
-    if user_role not in ["admin", "dosen"] and target_task.assigned_user_id != current_user.id:
+    if user_role not in ["admin", "dosen", "supervisi", "reviewer"] and target_task.assigned_user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to edit this task")
 
     source_annotations = db.query(Annotation).filter(Annotation.task_grid_id == source_task_id).all()
@@ -746,7 +815,7 @@ def init_base_polygon(
         raise HTTPException(status_code=404, detail="Task grid not found")
     
     user_role = (current_user.role or "").strip().lower()
-    if user_role not in ["admin", "dosen"] and task.assigned_user_id != current_user.id:
+    if user_role not in ["admin", "dosen", "supervisi", "reviewer"] and task.assigned_user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Grid ini bukan milik Anda")
 
     existing_count = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).count()
@@ -1073,12 +1142,17 @@ def auto_heal_topology(
                         inter_area = s_geom.intersection(sg).area
                         if (inter_area / s_geom.area) > 0.90 and (inter_area / sg.area) > 0.90:
                             is_dup = True
-                            # Priority: prefer specific class over generic "Belum Teridentifikasi" (id=0) or base "Hutan Lahan Kering" (id=1)
-                            if s_ann.class_id in [0, 1] and ann.class_id not in [0, 1]:
+                            # Priority: strictly prefer labeled class (class_id > 0) over unlabelled "Belum Teridentifikasi" (id=0)
+                            if s_ann.class_id == 0 and ann.class_id > 0:
                                 duplicate_ids.add(s_ann.id)
                                 seen_geoms[idx] = (s_geom, ann)
-                            else:
+                            elif ann.class_id == 0 and s_ann.class_id > 0:
                                 duplicate_ids.add(ann.id)
+                            elif ann.id > s_ann.id:  # keep earlier created stable polygon
+                                duplicate_ids.add(ann.id)
+                            else:
+                                duplicate_ids.add(s_ann.id)
+                                seen_geoms[idx] = (s_geom, ann)
                             break
                     except Exception:
                         pass
@@ -1087,8 +1161,11 @@ def auto_heal_topology(
                 seen_geoms.append((s_geom, ann))
 
         if duplicate_ids:
-            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(duplicate_ids)).update({"annotation_id": None}, synchronize_session=False)
-            db.query(Annotation).filter(Annotation.id.in_(duplicate_ids)).delete(synchronize_session=False)
+            dup_list = list(duplicate_ids)
+            for i in range(0, len(dup_list), 500):
+                chunk = dup_list[i:i + 500]
+                db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(chunk)).update({"annotation_id": None}, synchronize_session=False)
+                db.query(Annotation).filter(Annotation.id.in_(chunk)).delete(synchronize_session=False)
             duplicate_count = len(duplicate_ids)
             removed_count += duplicate_count
             annotations = [a for a in annotations if a.id not in duplicate_ids]
@@ -1235,11 +1312,11 @@ def auto_heal_topology(
     if options.clip_overlaps:
         # Priority sorting:
         if options.overlap_priority == "larger_first":
-            working_list.sort(key=lambda x: (1 if x["ann"].class_id in [0, 1] else 0, -x["area_sqm"]))
+            working_list.sort(key=lambda x: (1 if x["ann"].class_id == 0 else 0, -x["area_sqm"]))
         elif options.overlap_priority == "specific_class_first":
-            working_list.sort(key=lambda x: 1 if x["ann"].class_id in [0, 1] else 0)
-        else: # "smaller_first" (default)
-            working_list.sort(key=lambda x: (1 if x["ann"].class_id in [0, 1] else 0, x["area_sqm"]))
+            working_list.sort(key=lambda x: 1 if x["ann"].class_id == 0 else 0)
+        else: # "smaller_first" (default: smaller detailed foreground objects clip larger background polygons)
+            working_list.sort(key=lambda x: (1 if x["ann"].class_id == 0 else 0, x["area_sqm"]))
 
         clip_thresh = 2.0 / (111320.0 ** 2)
         for item in working_list:
@@ -1767,7 +1844,7 @@ def delete_annotation(
         raise HTTPException(status_code=404, detail="Annotation not found")
         
     role = (current_user.role or "").lower().strip()
-    if role not in ["admin", "dosen"] and ann.user_id != current_user.id:
+    if role not in ["admin", "dosen", "supervisi", "reviewer"] and ann.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this annotation")
         
     # Safeguard review pins before deleting annotation
@@ -2222,10 +2299,21 @@ def split_by_polygon(
                             "author_name": current_user.full_name or "Unknown",
                         }
                     })
+                del_ids = []
+                if target_id is not None:
+                    if isinstance(target_id, int):
+                        del_ids.append(target_id)
+                    elif isinstance(target_id, str):
+                        if target_id.isdigit():
+                            del_ids.append(int(target_id))
+                        del_ids.append(target_id)
+                if req.target_annotation_id and req.target_annotation_id not in del_ids:
+                    del_ids.append(req.target_annotation_id)
+
                 return {
                     "message": "Poligon berhasil dipisah menjadi bagian independen!",
                     "split_count": len(inter_polys),
-                    "deleted_ids": [target_id] if (target_id and isinstance(target_id, int)) else [],
+                    "deleted_ids": del_ids,
                     "deleted_ui_id": target_ui_id,
                     "created_features": created_features,
                     "updated_features": []
@@ -2427,10 +2515,12 @@ def split_by_polygon(
                                     "author_name": current_user.full_name or "Unknown",
                                 }
                             })
+                        target_ui = (req.target_feature.get("_uiId") or req.target_feature.get("properties", {}).get("_uiId")) if req.target_feature else None
                         return {
                             "message": "Poligon berhasil dipisah menjadi bagian independen!",
                             "split_count": len(inter_polys),
                             "deleted_ids": [ann.id],
+                            "deleted_ui_id": target_ui,
                             "created_features": created_features,
                             "updated_features": []
                         }
@@ -2659,9 +2749,20 @@ def split_by_line(
                             "author_name": current_user.full_name or "Unknown",
                         }
                     })
+                del_ids = []
+                if target_id is not None:
+                    if isinstance(target_id, int):
+                        del_ids.append(target_id)
+                    elif isinstance(target_id, str):
+                        if target_id.isdigit():
+                            del_ids.append(int(target_id))
+                        del_ids.append(target_id)
+                if req.target_annotation_id and req.target_annotation_id not in del_ids:
+                    del_ids.append(req.target_annotation_id)
+
                 return {
                     "message": "Poligon berhasil dipotong dengan garis pemisah!",
-                    "deleted_ids": [target_id] if (target_id and isinstance(target_id, int)) else [],
+                    "deleted_ids": del_ids,
                     "deleted_ui_id": target_ui_id,
                     "created_features": created_features
                 }
@@ -2916,9 +3017,11 @@ def split_by_line(
                                     "author_name": current_user.full_name or "Unknown",
                                 }
                             })
+                        target_ui = (req.target_feature.get("_uiId") or req.target_feature.get("properties", {}).get("_uiId")) if req.target_feature else None
                         return {
                             "message": "Poligon berhasil dipotong dengan garis pemisah!",
                             "deleted_ids": [ann.id],
+                            "deleted_ui_id": target_ui,
                             "created_features": created_features
                         }
 
