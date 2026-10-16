@@ -333,7 +333,7 @@
 
           <!-- Topology Check Button -->
           <button
-            @click="runTopologyCheck"
+            @click="runTopologyCheck(true)"
             :disabled="topologyLoading"
             class="bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold px-3 py-1.5 rounded-xl border border-purple-200 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
           >
@@ -341,6 +341,7 @@
             <ShieldCheck v-else :size="13" class="text-purple-500" />
             <span class="hidden sm:inline">Cek Topologi</span>
           </button>
+
 
           <!-- Reset Grid Polygons Button -->
           <button
@@ -401,12 +402,12 @@
           </button>
 
           <button
-            @click="saveAnnotations"
-            :disabled="annotationsStore.saving"
+            @click="saveAnnotations(true, true)"
+            :disabled="annotationsStore.saving || isExplicitSaving"
             class="bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-3.5 py-1.5 rounded-md border border-slate-300 transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
             title="Simpan perubahan poligon ke server (Ctrl+S)"
           >
-            <RotateCw v-if="annotationsStore.saving" :size="13" class="animate-spin text-slate-500" />
+            <RotateCw v-if="annotationsStore.saving || isExplicitSaving" :size="13" class="animate-spin text-emerald-600" />
             <Save v-else :size="13" class="text-slate-500" />
             <span class="hidden sm:inline">Simpan Draf</span>
           </button>
@@ -1382,7 +1383,7 @@
         <transition name="fade">
           <div
             v-if="isGlobalProcessing"
-            class="absolute inset-0 z-[1050] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 select-none pointer-events-auto"
+            class="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 select-none pointer-events-auto"
           >
             <div class="bg-white/95 text-slate-800 p-6 rounded-3xl shadow-2xl border border-slate-200/90 flex flex-col items-center gap-3.5 max-w-sm w-full text-center animate-in zoom-in-95 duration-150">
               <div class="relative flex items-center justify-center">
@@ -3583,6 +3584,11 @@ const showGuide = ref(false)
 const clickedFeatureIdx = ref(null)
 const topologyResult = ref(null)
 const topologyLoading = ref(false)
+const isHealingTopology = ref(false)
+const isApplyingRepairOptions = ref(false)
+const isCleaningSlivers = ref(false)
+const restoringSnapshot = ref(false)
+const isExplicitSaving = ref(false)
 const currentTopologyErrorIndex = ref(0)
 const activeTopologyError = ref(null)
 
@@ -3590,6 +3596,8 @@ const isGlobalProcessing = computed(() => {
   return (
     topologyLoading.value ||
     isHealingTopology.value ||
+    isApplyingRepairOptions.value ||
+    isExplicitSaving.value ||
     annotationsStore.saving ||
     restoringSnapshot.value ||
     isCleaningSlivers.value
@@ -3597,19 +3605,19 @@ const isGlobalProcessing = computed(() => {
 })
 
 const globalProcessingTitle = computed(() => {
-  if (isHealingTopology.value) return 'Merapikan Topologi (Auto-Heal)'
+  if (isHealingTopology.value || isApplyingRepairOptions.value) return 'Merapikan Topologi (Auto-Heal)'
   if (topologyLoading.value) return 'Memvalidasi Topologi Spasial'
   if (restoringSnapshot.value) return 'Memulihkan Versi Poligon'
-  if (annotationsStore.saving) return 'Menyimpan Anotasi ke Server'
+  if (isExplicitSaving.value || annotationsStore.saving) return 'Menyimpan Anotasi ke Server'
   if (isCleaningSlivers.value) return 'Membersihkan Sliver Poligon'
   return 'Sedang Memproses'
 })
 
 const globalProcessingMessage = computed(() => {
-  if (isHealingTopology.value) return 'Sistem sedang memotong tumpang tindih dan merapikan celah mikro secara otomatis.'
+  if (isHealingTopology.value || isApplyingRepairOptions.value) return 'Sistem sedang memotong tumpang tindih dan merapikan celah mikro secara otomatis.'
   if (topologyLoading.value) return 'Memeriksa validitas geometri, batas tumpang tindih, dan persentase cakupan grid.'
   if (restoringSnapshot.value) return 'Mengembalikan struktur poligon dan kelas tutupan lahan ke snapshot yang dipilih.'
-  if (annotationsStore.saving) return 'Menyinkronkan poligon dan topologi ke database server.'
+  if (isExplicitSaving.value || annotationsStore.saving) return 'Menyinkronkan poligon dan topologi ke database server.'
   if (isCleaningSlivers.value) return 'Menggabungkan pecahan poligon kecil ke poligon tetangga terdekat.'
   return 'Mohon tunggu, proses spasial sedang berjalan...'
 })
@@ -6382,7 +6390,6 @@ const cancelMerge = () => {
   refreshMapStyles()
 }
 
-const isHealingTopology = ref(false)
 const enableLiveAutoClip = ref(false) // Controlled: default false so editing is smooth without unexpected clipping
 
 // --- QC REPAIR TOOLBOX & INTERACTIVE ACTIONS ---
@@ -6397,7 +6404,6 @@ const repairOptions = ref({
   fill_gaps: false,
   fill_gap_class_id: 1
 })
-const isApplyingRepairOptions = ref(false)
 
 const openRepairToolboxModal = () => {
   if (!selectedTaskId.value) {
@@ -6409,16 +6415,19 @@ const openRepairToolboxModal = () => {
 
 const handleApplyRepairOptions = async () => {
   if (!selectedTaskId.value) return
-  if (hasUnsavedChanges.value) {
-    await saveAnnotations()
-  }
+  showRepairToolboxModal.value = false
   isApplyingRepairOptions.value = true
+  await nextTick()
+  await new Promise(r => setTimeout(r, 20))
+
   try {
+    if (hasUnsavedChanges.value) {
+      await saveAnnotations(false, false)
+    }
     const res = await api.autoHealTopology(selectedTaskId.value, repairOptions.value)
     showToast(res.data?.message || 'Pilihan perbaikan topologi berhasil diterapkan!')
-    showRepairToolboxModal.value = false
     await loadTaskData(selectedTaskId.value, true)
-    await runTopologyCheck()
+    await runTopologyCheck(false)
   } catch (err) {
     console.error('Apply repair options error:', err)
     alert(err.response?.data?.detail || 'Gagal menerapkan perbaikan topologi.')
@@ -6431,7 +6440,6 @@ const handleApplyRepairOptions = async () => {
 const showHistoryModal = ref(false)
 const snapshotsList = ref([])
 const loadingSnapshots = ref(false)
-const restoringSnapshot = ref(false)
 
 const openHistoryModal = async () => {
   if (!selectedTaskId.value) {
@@ -6459,12 +6467,16 @@ const handleRestoreSnapshot = async (snap) => {
   )
   if (!confirmed) return
 
+  showHistoryModal.value = false
   restoringSnapshot.value = true
+  await nextTick()
+  await new Promise(r => setTimeout(r, 20))
+
   try {
     await api.restoreGridSnapshot(selectedTaskId.value, snap.id)
     showToast(`✅ Berhasil memulihkan poligon ke versi v${snap.version_number}!`)
-    showHistoryModal.value = false
     await loadTaskData(selectedTaskId.value, true)
+    hasUnsavedChanges.value = true
   } catch (err) {
     console.error('Failed to restore snapshot:', err)
     alert(err.response?.data?.detail || 'Gagal memulihkan snapshot.')
@@ -7849,21 +7861,22 @@ const closeAndFinishVertexEdit = () => {
   showToast('✓ Edit titik simpul selesai dan poligon tertutup rapat.')
 }
 
-const isCleaningSlivers = ref(false)
-
 const handleCleanSlivers = async () => {
   if (!selectedTaskId.value) return
-  if (hasUnsavedChanges.value) {
-    await saveAnnotations()
-  }
   if (!confirm('Bersihkan dan serap semua sliver garis/pita tipis pada grid ini ke poligon tetangganya?')) return
 
   isCleaningSlivers.value = true
+  await nextTick()
+  await new Promise(r => setTimeout(r, 20))
+
   try {
+    if (hasUnsavedChanges.value) {
+      await saveAnnotations(false, false)
+    }
     const res = await api.cleanSlivers(selectedTaskId.value)
     showToast(res.data?.message || 'Sliver garis berhasil diserap!')
     await loadTaskData(selectedTaskId.value, true)
-    await runTopologyCheck()
+    await runTopologyCheck(false)
   } catch (err) {
     console.error('Clean slivers error:', err)
     alert(err.response?.data?.detail || 'Gagal membersihkan sliver.')
@@ -7874,17 +7887,20 @@ const handleCleanSlivers = async () => {
 
 const handleAutoHeal = async () => {
   if (!selectedTaskId.value) return
-  if (hasUnsavedChanges.value) {
-    await saveAnnotations()
-  }
   if (!confirm('Rapikan geometri grid ini? Sistem akan menggunakan konfigurasi perbaikan cepat standar.')) return
 
   isHealingTopology.value = true
+  await nextTick()
+  await new Promise(r => setTimeout(r, 20))
+
   try {
+    if (hasUnsavedChanges.value) {
+      await saveAnnotations(false, false)
+    }
     const res = await api.autoHealTopology(selectedTaskId.value)
     showToast(res.data?.message || 'Geometri poligon berhasil dirapikan!')
     await loadTaskData(selectedTaskId.value, true)
-    await runTopologyCheck()
+    await runTopologyCheck(false)
   } catch (err) {
     console.error('Auto heal error:', err)
     alert(err.response?.data?.detail || 'Gagal merapikan geometri.')
@@ -9633,18 +9649,20 @@ const runTopologyCheck = async (autoSave = true) => {
   if (!selectedTaskId.value) return
   topologyLoading.value = true
 
+  // Immediately yield execution to the browser render engine
+  // so the Loading Overlay paints INSTANTLY on screen (< 20ms)
+  await nextTick()
+  await new Promise(r => setTimeout(r, 20))
+
   try {
-    if (autoSave && !showTopologySurgeryModal.value) {
-      // Attempt auto-save first if editable and not inside surgery studio
+    if (autoSave && hasUnsavedChanges.value && !showTopologySurgeryModal.value) {
+      // Auto-save ONLY if there are genuine unsaved changes in memory
       try {
-        await saveAnnotations()
+        await saveAnnotations(false, false)
       } catch (saveErr) {
         console.warn('Could not auto-save before topology check:', saveErr)
       }
     }
-
-    // Yield to the browser event loop so UI paints the loading spinner smoothly
-    await new Promise(r => setTimeout(r, 60))
 
     const res = await api.validateTopology(selectedTaskId.value)
     topologyResult.value = res.data
@@ -9833,10 +9851,19 @@ const syncFeaturesFromMap = () => {
   features.value = accepted
 }
 
-const saveAnnotations = async () => {
+const saveAnnotations = async (reloadGeometry = true, isManual = true) => {
+  if (typeof reloadGeometry !== 'boolean') {
+    reloadGeometry = true
+    isManual = true
+  }
   if (!selectedTaskId.value) {
     alert('Pilih grid tugas terlebih dahulu sebelum menyimpan.')
-    return
+    return false
+  }
+  if (isManual) {
+    isExplicitSaving.value = true
+    await nextTick()
+    await new Promise(r => setTimeout(r, 20))
   }
   if (annotationsStore.saving) {
     let waitCount = 0
@@ -9845,43 +9872,53 @@ const saveAnnotations = async () => {
       waitCount++
     }
   }
-  syncFeaturesFromMap()
 
-  if (features.value.length === 0) {
-    const existingCount = tasksStore.currentTask?.annotation_count || 0
-    if (existingCount > 0) {
-      alert(`⚠️ Peringatan: Tidak ada poligon di kanvas peta, sementara grid memiliki ${existingCount} poligon tersimpan di server. Penyimpanan dibatalkan untuk mencegah hilangnya data secara tidak sengaja.`)
-      return
-    }
-  }
+  try {
+    syncFeaturesFromMap()
 
-  const ok = await annotationsStore.saveGridAnnotations(selectedTaskId.value, features.value)
-  if (ok) {
-    showToast('Semua poligon draf berhasil disimpan!')
-    hasUnsavedChanges.value = false
-    cloudSavedAt.value = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    if (serverAutoSaveTimer) {
-      clearTimeout(serverAutoSaveTimer)
-      serverAutoSaveTimer = null
+    if (features.value.length === 0) {
+      const existingCount = tasksStore.currentTask?.annotation_count || 0
+      if (existingCount > 0) {
+        alert(`⚠️ Peringatan: Tidak ada poligon di kanvas peta, sementara grid memiliki ${existingCount} poligon tersimpan di server. Penyimpanan dibatalkan untuk mencegah hilangnya data secara tidak sengaja.`)
+        return false
+      }
     }
-    if (draftAutoSaveTimer) {
-      clearTimeout(draftAutoSaveTimer)
-      draftAutoSaveTimer = null
+
+    const ok = await annotationsStore.saveGridAnnotations(selectedTaskId.value, features.value)
+    if (ok) {
+      showToast('Semua poligon draf berhasil disimpan!')
+      hasUnsavedChanges.value = false
+      cloudSavedAt.value = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      if (serverAutoSaveTimer) {
+        clearTimeout(serverAutoSaveTimer)
+        serverAutoSaveTimer = null
+      }
+      if (draftAutoSaveTimer) {
+        clearTimeout(draftAutoSaveTimer)
+        draftAutoSaveTimer = null
+      }
+      await tasksStore.fetchTaskDetail(selectedTaskId.value)
+      if (selectedTaskId.value) {
+        await clearTaskDraft(selectedTaskId.value)
+        localDraftStatus.value = null
+        showDraftRestorePrompt.value = false
+      }
+      if (reloadGeometry) {
+        try {
+          await loadTaskData(selectedTaskId.value, true)
+        } catch (reloadErr) {
+          console.warn('Could not reload features after save:', reloadErr)
+        }
+      }
+      return true
+    } else {
+      alert(`⚠️ Gagal Menyimpan Anotasi:\n${annotationsStore.lastSaveError || 'Terjadi kesalahan saat menyimpan ke server. Silakan periksa kembali koneksi atau izin akun.'}`)
+      return false
     }
-    await tasksStore.fetchTaskDetail(selectedTaskId.value)
-    if (selectedTaskId.value) {
-      await clearTaskDraft(selectedTaskId.value)
-      localDraftStatus.value = null
-      showDraftRestorePrompt.value = false
+  } finally {
+    if (isManual) {
+      isExplicitSaving.value = false
     }
-    // Reload features to ensure local Leaflet layers possess fresh DB IDs
-    try {
-      await loadTaskData(selectedTaskId.value, true)
-    } catch (reloadErr) {
-      console.warn('Could not reload features after save:', reloadErr)
-    }
-  } else {
-    alert(`⚠️ Gagal Menyimpan Anotasi:\n${annotationsStore.lastSaveError || 'Terjadi kesalahan saat menyimpan ke server. Silakan periksa kembali koneksi atau izin akun.'}`)
   }
 }
 
