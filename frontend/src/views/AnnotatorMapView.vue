@@ -802,7 +802,7 @@
                 <input
                   type="range"
                   min="0.0"
-                  max="0.8"
+                  max="1"
                   step="0.05"
                   v-model.number="outsideDimOpacity"
                   @input="updateOutsideMask"
@@ -3313,7 +3313,8 @@ const tasksStore = useTasksStore()
 const annotationsStore = useAnnotationsStore()
 
 const selectedTaskId = ref(null)
-const savedPreferredLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_preferred_layer') : null
+// v2: preferensi lama ('google_sat' dari versi sebelumnya) diabaikan agar Sentinel-2 COG lokal kembali menjadi default
+const savedPreferredLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_preferred_layer_v2') : null
 const currentLayer = ref(savedPreferredLayer || 'local_s2_rgb')
 const currentYear = ref(2025)
 const availableRasterYears = ref([2025, 2022])
@@ -4265,7 +4266,7 @@ let swipeRightTileLayer = null
 let aiCandidatePreviewLayer = null
 let draftAutoSaveTimer = null
 const features = ref([])
-const outsideDimOpacity = ref(0.12) // Default lembut agar citra grid sebelah terlihat jernih
+const outsideDimOpacity = ref(0.75) // Default 75%: wilayah di luar grid aktif tertutup; bisa diturunkan via slider untuk edge-matching
 const showNeighborPolygons = ref(false) // Default OFF agar kanvas bersih, mapper bisa aktifkan saat perlu edge-matching
 const neighborPolygonsOpacity = ref(0.4)
 const neighborFeaturesCount = ref(0)
@@ -4580,10 +4581,8 @@ const updateTileLayer = async () => {
   if (currentLayer.value === 'local_s2_rgb' || currentLayer.value === 'local_s2_cir') {
     const mode = currentLayer.value === 'local_s2_cir' ? 'cir' : 'rgb'
     const yr = currentYear.value || 2025
-    const currentGrid = tasksStore.currentTask?.grid_code
-    const tileUrl = currentGrid
-      ? api.getGridRasterTileUrl(yr, currentGrid, mode, imagerySettings.value.gamma)
-      : api.getMosaicRasterTileUrl(yr, mode, imagerySettings.value.gamma)
+    // Gunakan mosaic tile URL agar citra lokal COG mengalir kontinu menutupi grid aktif dan grid sebelah
+    const tileUrl = api.getMosaicRasterTileUrl(yr, mode, imagerySettings.value.gamma)
 
     tileLayer = L.tileLayer(tileUrl, {
       maxZoom: 22,
@@ -5317,13 +5316,8 @@ const initSwipeLayers = () => {
   if (!map) return
   destroySwipeLayers()
 
-  const currentGrid = tasksStore.currentTask?.grid_code
-  const leftUrl = currentGrid
-    ? api.getGridRasterTileUrl(swipeLeftYear.value, currentGrid, 'rgb', imagerySettings.value.gamma)
-    : api.getMosaicRasterTileUrl(swipeLeftYear.value, 'rgb', imagerySettings.value.gamma)
-  const rightUrl = currentGrid
-    ? api.getGridRasterTileUrl(swipeRightYear.value, currentGrid, 'rgb', imagerySettings.value.gamma)
-    : api.getMosaicRasterTileUrl(swipeRightYear.value, 'rgb', imagerySettings.value.gamma)
+  const leftUrl = api.getMosaicRasterTileUrl(swipeLeftYear.value, 'rgb', imagerySettings.value.gamma)
+  const rightUrl = api.getMosaicRasterTileUrl(swipeRightYear.value, 'rgb', imagerySettings.value.gamma)
 
   swipeLeftTileLayer = L.tileLayer(leftUrl, {
     maxZoom: 16,
@@ -8796,7 +8790,7 @@ const setOpacityPreset = (val) => {
 const setLayer = (layerId) => {
   currentLayer.value = layerId
   try {
-    localStorage.setItem('geostevia_preferred_layer', layerId)
+    localStorage.setItem('geostevia_preferred_layer_v2', layerId)
   } catch (e) {}
   updateTileLayer()
 }

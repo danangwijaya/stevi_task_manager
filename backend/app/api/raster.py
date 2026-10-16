@@ -125,12 +125,17 @@ def render_tile_from_raster(
     try:
         with rasterio.open(raster_path) as src:
             b = src.bounds
+            x_min = min(utm_min_x, utm_max_x)
+            x_max = max(utm_min_x, utm_max_x)
+            y_min = min(utm_min_y, utm_max_y)
+            y_max = max(utm_min_y, utm_max_y)
+
             # Quick check if bounding box intersects raster extent
-            if utm_max_x < b.left or utm_min_x > b.right or utm_max_y < b.bottom or utm_min_y > b.top:
+            if x_max < b.left or x_min > b.right or y_max < b.bottom or y_min > b.top:
                 return None
 
             # Calculate pixel window in native raster CRS
-            win = from_bounds(utm_min_x, utm_min_y, utm_max_x, utm_max_y, src.transform)
+            win = from_bounds(x_min, y_min, x_max, y_max, src.transform)
 
             # Band configuration:
             # 1: Blue, 2: Green, 3: Red, 4: NIR (or adapt if fewer bands)
@@ -259,14 +264,18 @@ def get_grid_tile_key(grid_code: str) -> Optional[str]:
     """Caches grid_code -> tile_key mapping in memory to eliminate database connection pooling bottlenecks on tile streaming."""
     if grid_code in _GRID_TILE_KEY_CACHE:
         return _GRID_TILE_KEY_CACHE[grid_code]
-    db = SessionLocal()
     try:
-        res = db.query(TaskGrid.tile_key).filter(TaskGrid.grid_code == grid_code).first()
-        tile_key = res[0] if res else None
-        _GRID_TILE_KEY_CACHE[grid_code] = tile_key
-        return tile_key
-    finally:
-        db.close()
+        db = SessionLocal()
+        try:
+            res = db.query(TaskGrid.tile_key).filter(TaskGrid.grid_code == grid_code).first()
+            tile_key = res[0] if res else None
+            _GRID_TILE_KEY_CACHE[grid_code] = tile_key
+            return tile_key
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Database query failed for grid_code '{grid_code}': {e}")
+        return None
 
 @router.get("/tiles/{year}/{grid_code}/{z}/{x}/{y}.png")
 def get_grid_tile(
@@ -284,6 +293,7 @@ def get_grid_tile(
     Serves a 256x256 PNG tile for a specific grid code and year.
     Fast dynamic reading directly from the tiled COG file with dynamic CRS support.
     Uses high-speed disk caching to serve repeated tile requests in <1ms without GDAL overhead.
+    Falls back seamlessly to mosaic search if tile is in a neighboring grid or if tile_key is missing.
     """
     # 1. Fast disk cache check
     cache_dir = os.path.join(settings.RASTER_BASE_DIR, "cache", "tiles", str(year), grid_code, str(z), str(x))
@@ -301,7 +311,8 @@ def get_grid_tile(
 
     tile_key = get_grid_tile_key(grid_code)
     if not tile_key:
-        return Response(content=TRANSPARENT_TILE_BYTES, media_type="image/png")
+        # Fallback seamlessly to mosaic raster tile search so neighboring grids & grids without tile_key load imagery!
+        return get_mosaic_tile(year, z, x, y, mode, stretch_min, stretch_max, gamma)
 
     year_index = get_year_raster_index(year)
     match = next((item for item in year_index if item["tile_key"] == tile_key), None)
@@ -321,7 +332,7 @@ def get_grid_tile(
                     break
 
     if not match:
-        return Response(content=TRANSPARENT_TILE_BYTES, media_type="image/png")
+        return get_mosaic_tile(year, z, x, y, mode, stretch_min, stretch_max, gamma)
 
     raster_path = match["path"]
     crs_str = str(match["crs"]) if match.get("crs") else "EPSG:32747"
@@ -345,7 +356,9 @@ def get_grid_tile(
     )
 
     if not tile_bytes:
-        tile_bytes = TRANSPARENT_TILE_BYTES
+        # Tile is outside this grid's single file footprint (e.g. in neighboring grid).
+        # Fallback seamlessly to mosaic tile to render the neighboring grid's COG!
+        return get_mosaic_tile(year, z, x, y, mode, stretch_min, stretch_max, gamma)
 
     # Save to disk cache for subsequent requests
     try:
@@ -396,10 +409,9 @@ def get_mosaic_tile(
 
     lon_min, lat_min, lon_max, lat_max = tile_to_lonlat_bounds(z, x, y)
 
-    # Find candidate raster files that intersect this tile
-    best_candidate = None
-    best_coords = None
-
+    # Find ALL candidate raster files that intersect this tile and composite them
+    # (tiles on file/grid borders need pixels from multiple COGs)
+    composite = None
     for item in year_index:
         try:
             crs_str = str(item["crs"]) if item.get("crs") else "EPSG:32747"
@@ -407,31 +419,40 @@ def get_mosaic_tile(
             t_min_x, t_min_y = trans.transform(lon_min, lat_min)
             t_max_x, t_max_y = trans.transform(lon_max, lat_max)
             b = item["bounds"]
-            if not (t_max_x < b.left or t_min_x > b.right or t_max_y < b.bottom or t_min_y > b.top):
-                best_candidate = item
-                best_coords = (t_min_x, t_min_y, t_max_x, t_max_y)
+            if (max(t_min_x, t_max_x) < b.left or min(t_min_x, t_max_x) > b.right or
+                    max(t_min_y, t_max_y) < b.bottom or min(t_min_y, t_max_y) > b.top):
+                continue
+            part = render_tile_from_raster(
+                raster_path=item["path"],
+                utm_min_x=t_min_x,
+                utm_min_y=t_min_y,
+                utm_max_x=t_max_x,
+                utm_max_y=t_max_y,
+                mode=mode,
+                stretch_min=stretch_min,
+                stretch_max=stretch_max,
+                gamma=gamma
+            )
+            if not part:
+                continue
+            part_img = Image.open(io.BytesIO(part)).convert("RGBA")
+            if composite is None:
+                composite = part_img
+            else:
+                # Fill only still-empty pixels of composite
+                composite = Image.alpha_composite(part_img, composite)
+            if np.all(np.asarray(composite)[:, :, 3] == 255):
                 break
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Mosaic candidate failed {item.get('path')}: {e}")
             continue
 
-    if not best_candidate:
+    if composite is None:
         return Response(content=TRANSPARENT_TILE_BYTES, media_type="image/png")
 
-    t_min_x, t_min_y, t_max_x, t_max_y = best_coords
-    tile_bytes = render_tile_from_raster(
-        raster_path=best_candidate["path"],
-        utm_min_x=t_min_x,
-        utm_min_y=t_min_y,
-        utm_max_x=t_max_x,
-        utm_max_y=t_max_y,
-        mode=mode,
-        stretch_min=stretch_min,
-        stretch_max=stretch_max,
-        gamma=gamma
-    )
-
-    if not tile_bytes:
-        return Response(content=TRANSPARENT_TILE_BYTES, media_type="image/png")
+    buf = io.BytesIO()
+    composite.save(buf, format="PNG", optimize=False)
+    tile_bytes = buf.getvalue()
 
     # Save to disk cache
     try:

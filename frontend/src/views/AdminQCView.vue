@@ -2028,7 +2028,7 @@ let qcFeatureGroup = null
 let qcContextFeatureGroup = null
 let qcGridBoundingLayer = null
 
-const savedQcLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_qc_layer') : null
+const savedQcLayer = typeof window !== 'undefined' ? localStorage.getItem('geostevia_qc_layer_v2') : null
 const qcLayer = ref(savedQcLayer || 'local_s2_rgb')
 const qcOpacity = ref(0.65)
 const isSpacePeeking = ref(false)
@@ -3420,10 +3420,8 @@ const updateQCTileLayer = (year = 2025) => {
 
   if (qcLayer.value === 'local_s2_rgb' || qcLayer.value === 'local_s2_cir') {
     const mode = qcLayer.value === 'local_s2_cir' ? 'cir' : 'rgb'
-    const gridCode = viewScope.value === 'single' ? selectedTask.value?.grid_code : null
-    const tileUrl = gridCode
-      ? api.getGridRasterTileUrl(year, gridCode, mode)
-      : api.getMosaicRasterTileUrl(year, mode)
+    // Gunakan mosaic tile URL agar citra COG lokal mengalir kontinu menutupi grid aktif dan grid tetangga
+    const tileUrl = api.getMosaicRasterTileUrl(year, mode)
 
     qcTileLayer = L.tileLayer(tileUrl, {
       maxZoom: 22,
@@ -3453,7 +3451,7 @@ const updateQCTileLayer = (year = 2025) => {
 const setQCLayer = (layerId) => {
   qcLayer.value = layerId
   try {
-    localStorage.setItem('geostevia_qc_layer', layerId)
+    localStorage.setItem('geostevia_qc_layer_v2', layerId)
   } catch (e) {}
   updateQCTileLayer(selectedTask.value?.year || 2025)
 }
