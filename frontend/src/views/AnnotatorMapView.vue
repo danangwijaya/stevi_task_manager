@@ -3598,7 +3598,6 @@ const isGlobalProcessing = computed(() => {
     isHealingTopology.value ||
     isApplyingRepairOptions.value ||
     isExplicitSaving.value ||
-    annotationsStore.saving ||
     restoringSnapshot.value ||
     isCleaningSlivers.value
   )
@@ -3608,7 +3607,7 @@ const globalProcessingTitle = computed(() => {
   if (isHealingTopology.value || isApplyingRepairOptions.value) return 'Merapikan Topologi (Auto-Heal)'
   if (topologyLoading.value) return 'Memvalidasi Topologi Spasial'
   if (restoringSnapshot.value) return 'Memulihkan Versi Poligon'
-  if (isExplicitSaving.value || annotationsStore.saving) return 'Menyimpan Anotasi ke Server'
+  if (isExplicitSaving.value) return 'Menyimpan Anotasi ke Server'
   if (isCleaningSlivers.value) return 'Membersihkan Sliver Poligon'
   return 'Sedang Memproses'
 })
@@ -3617,7 +3616,7 @@ const globalProcessingMessage = computed(() => {
   if (isHealingTopology.value || isApplyingRepairOptions.value) return 'Sistem sedang memotong tumpang tindih dan merapikan celah mikro secara otomatis.'
   if (topologyLoading.value) return 'Memeriksa validitas geometri, batas tumpang tindih, dan persentase cakupan grid.'
   if (restoringSnapshot.value) return 'Mengembalikan struktur poligon dan kelas tutupan lahan ke snapshot yang dipilih.'
-  if (isExplicitSaving.value || annotationsStore.saving) return 'Menyinkronkan poligon dan topologi ke database server.'
+  if (isExplicitSaving.value) return 'Menyinkronkan poligon dan topologi ke database server.'
   if (isCleaningSlivers.value) return 'Menggabungkan pecahan poligon kecil ke poligon tetangga terdekat.'
   return 'Mohon tunggu, proses spasial sedang berjalan...'
 })
@@ -9928,7 +9927,9 @@ const saveAnnotations = async (reloadGeometry = false, isManual = true) => {
 
     const ok = await annotationsStore.saveGridAnnotations(selectedTaskId.value, features.value)
     if (ok) {
-      showToast('Semua poligon draf berhasil disimpan!')
+      if (isManual) {
+        showToast('Semua poligon draf berhasil disimpan!')
+      }
       hasUnsavedChanges.value = false
       cloudSavedAt.value = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       if (serverAutoSaveTimer) {
