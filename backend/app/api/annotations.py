@@ -1065,14 +1065,20 @@ def validate_topology(
         geoms_list = [sp["geom"] for sp in valid_polys]
         bounds_list = [g.bounds for g in geoms_list]
         tree = STRtree(geoms_list)
-        candidate_pairs = tree.query(geoms_list, predicate="intersects")
+        idx_i, idx_j = tree.query(geoms_list, predicate="intersects")
+        mask = idx_i < idx_j
+        idx_i, idx_j = idx_i[mask], idx_j[mask]
+        if len(idx_i) > 0:
+            import shapely
+            not_touch = ~shapely.touches([geoms_list[i] for i in idx_i], [geoms_list[j] for j in idx_j])
+            idx_i, idx_j = idx_i[not_touch], idx_j[not_touch]
         MAX_DISPLAY_ERRORS = 100
         MAX_DISPLAY_WARNINGS = 50
         micro_overlap_count = 0
 
-        for i, j in zip(candidate_pairs[0], candidate_pairs[1]):
-            if i < j:
-                # Fast BBox overlap ratio guard: skips adjacent polygons sharing an edge in O(1)
+        for i, j in zip(idx_i, idx_j):
+            if True:
+                # Fast BBox overlap area guard
                 bi = bounds_list[i]
                 bj = bounds_list[j]
                 iw = min(bi[2], bj[2]) - max(bi[0], bj[0])
@@ -1462,7 +1468,10 @@ def auto_heal_topology(
     # PHASE 3: Auto-Clip Overlaps (Boundary Clashing & Subtraction)
     # ─────────────────────────────────────────────────────────────────────────
     accepted_list = []
-    if options.clip_overlaps:
+    if options.clip_overlaps and working_list:
+        import shapely
+        from shapely.strtree import STRtree
+
         # Priority sorting:
         if options.overlap_priority == "larger_first":
             working_list.sort(key=lambda x: (1 if x["ann"].class_id == 0 else 0, -x["area_sqm"]))
@@ -1472,33 +1481,56 @@ def auto_heal_topology(
             working_list.sort(key=lambda x: (1 if x["ann"].class_id == 0 else 0, x["area_sqm"]))
 
         clip_thresh = 2.0 / (111320.0 ** 2)
-        for item in working_list:
+        w_geoms = [w["geom"] for w in working_list]
+        tree = STRtree(w_geoms)
+        idx_i, idx_j = tree.query(w_geoms, predicate="intersects")
+        # Higher priority j < i clips current polygon i
+        mask = idx_j < idx_i
+        idx_i, idx_j = idx_i[mask], idx_j[mask]
+        if len(idx_i) > 0:
+            not_touch = ~shapely.touches([w_geoms[i] for i in idx_i], [w_geoms[j] for j in idx_j])
+            idx_i, idx_j = idx_i[not_touch], idx_j[not_touch]
+
+        overlap_cands_by_i = {}
+        for i_val, j_val in zip(idx_i, idx_j):
+            overlap_cands_by_i.setdefault(int(i_val), []).append(int(j_val))
+
+        accepted_by_w_idx = {}
+        for w_idx, item in enumerate(working_list):
             cur_geom = item["geom"]
             cur_ann = item["ann"]
             was_clipped = False
 
-            if not cur_geom.is_empty:
-                c_bounds = cur_geom.bounds
-                for accepted in accepted_list:
-                    a_bounds = accepted["geom"].bounds
-                    # Fast disjoint bounding box check (eliminates 95% of pairwise geometry calls)
-                    if (c_bounds[0] > a_bounds[2] or c_bounds[2] < a_bounds[0] or
-                        c_bounds[1] > a_bounds[3] or c_bounds[3] < a_bounds[1]):
+            cand_js = overlap_cands_by_i.get(w_idx)
+            if cand_js and not cur_geom.is_empty:
+                to_subtract = []
+                for j_idx in cand_js:
+                    acc_geoms = accepted_by_w_idx.get(j_idx)
+                    if not acc_geoms:
                         continue
-
-                    if cur_geom.intersects(accepted["geom"]) and not cur_geom.touches(accepted["geom"]):
+                    for a_geom in acc_geoms:
                         try:
-                            inter = cur_geom.intersection(accepted["geom"])
+                            inter = cur_geom.intersection(a_geom)
                             if inter.area > clip_thresh:
-                                cur_geom = cur_geom.difference(accepted["geom"])
-                                cur_geom = make_valid(cur_geom)
-                                c_bounds = cur_geom.bounds
+                                to_subtract.append(a_geom)
+                        except Exception:
+                            pass
+                if to_subtract:
+                    try:
+                        sub_union = unary_union(to_subtract) if len(to_subtract) > 1 else to_subtract[0]
+                        cur_geom = make_valid(cur_geom.difference(sub_union))
+                        was_clipped = True
+                        clipped_count += len(to_subtract)
+                    except Exception:
+                        for a_geom in to_subtract:
+                            try:
+                                cur_geom = make_valid(cur_geom.difference(a_geom))
                                 was_clipped = True
                                 clipped_count += 1
                                 if cur_geom.is_empty:
                                     break
-                        except Exception:
-                            pass
+                            except Exception:
+                                pass
 
             effective_min_sqm = max(3.0, options.min_sliver_area_sqm) if options.remove_slivers else 2.0
             extracted = _extract_polygons(cur_geom, min_area_sqm=effective_min_sqm)
@@ -1518,6 +1550,7 @@ def auto_heal_topology(
                     "geom": p0,
                     "area_sqm": p0.area * (111320.0 ** 2)
                 })
+                accepted_by_w_idx[w_idx] = [p0]
 
                 for extra_p in extracted[1:]:
                     extra_sqm = extra_p.area * (111320.0 ** 2)
@@ -1537,6 +1570,7 @@ def auto_heal_topology(
                             "geom": extra_p,
                             "area_sqm": extra_sqm
                         })
+                        accepted_by_w_idx[w_idx].append(extra_p)
     else:
         for item in working_list:
             if item["was_modified"]:
