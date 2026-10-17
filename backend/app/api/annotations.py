@@ -1318,93 +1318,83 @@ def auto_heal_topology(
     # ─────────────────────────────────────────────────────────────────────────
     # PHASE 2: Heal invalid geometries, micro-slivers, and degenerate holes
     # ─────────────────────────────────────────────────────────────────────────
-    ann_map = {a.id: a for a in annotations}
-    parsed_geom_map = {}
-    for ann in annotations:
-        try:
-            parsed_geom_map[ann.id] = shape(json.loads(ann.geom_geojson))
-        except Exception:
-            pass
-    working_list = []
+    from shapely.strtree import STRtree
+
+    regular_items = []
+    sliver_items = []
 
     for ann in annotations:
-        s_geom = parsed_geom_map.get(ann.id)
-        if s_geom is None:
-            # Unparseable geometry: detach pins and delete
+        try:
+            s_geom = shape(json.loads(ann.geom_geojson))
+        except Exception:
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann)
-            ann_map.pop(ann.id, None)
             removed_count += 1
             continue
 
-        # Check for zero area or sliver/thin ribbon
+        if s_geom.is_empty:
+            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
+            db.delete(ann)
+            removed_count += 1
+            continue
+
         area_sqm = s_geom.area * (111320.0 ** 2)
         perim_m = s_geom.length * 111320.0
         avg_thickness_m = area_sqm / (perim_m / 2.0) if perim_m > 0 else 0
         is_sliver = (options.remove_slivers and (s_geom.area < min_area_deg or (area_sqm < 60.0 and avg_thickness_m < 0.5)))
 
-        if s_geom.is_empty:
-            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
-            db.delete(ann)
-            ann_map.pop(ann.id, None)
-            parsed_geom_map.pop(ann.id, None)
-            removed_count += 1
-            continue
-
         if is_sliver:
-            # Instead of leaving a hole/void, absorb sliver into adjacent neighbor
-            s_buff = s_geom.buffer(1.5e-6)
-            sb = s_buff.bounds
-            best_neighbor = None
-            best_len = -1
-            for other_ann in annotations:
-                if other_ann.id == ann.id or other_ann.id not in ann_map:
-                    continue
-                o_geom = parsed_geom_map.get(other_ann.id)
-                if o_geom is None or o_geom.is_empty:
-                    continue
-                ob = o_geom.bounds
-                if sb[0] > ob[2] or sb[2] < ob[0] or sb[1] > ob[3] or sb[3] < ob[1]:
-                    continue
+            sliver_items.append((ann, s_geom))
+        else:
+            regular_items.append([ann, s_geom, False])
+
+    if sliver_items:
+        sliv_del_ids = []
+        if regular_items:
+            reg_geoms = [r[1] for r in regular_items]
+            tree = STRtree(reg_geoms)
+            sliv_buffs = [s[1].buffer(1.5e-6) for s in sliver_items]
+            idx_s, idx_r = tree.query(sliv_buffs, predicate="intersects")
+
+            best_reg_for_s = {}
+            best_score_for_s = {}
+            for s_i, r_i in zip(idx_s, idx_r):
+                s_i_int, r_i_int = int(s_i), int(r_i)
                 try:
-                    if s_geom.intersects(o_geom) or s_buff.intersects(o_geom):
-                        inter = s_buff.intersection(o_geom)
-                        score = inter.length if inter.length > 0 else inter.area
-                        if score > best_len:
-                            best_len = score
-                            best_neighbor = other_ann
+                    inter = sliv_buffs[s_i_int].intersection(reg_geoms[r_i_int])
+                    sc = inter.length if inter.length > 0 else inter.area
+                    if sc > best_score_for_s.get(s_i_int, -1):
+                        best_score_for_s[s_i_int] = sc
+                        best_reg_for_s[s_i_int] = r_i_int
                 except Exception:
                     pass
 
-            if best_neighbor:
+            grouped_slivers = {}
+            for s_i_int, r_i_int in best_reg_for_s.items():
+                grouped_slivers.setdefault(r_i_int, []).append(sliver_items[s_i_int][1].buffer(1e-7))
+
+            for r_i_int, s_geom_list in grouped_slivers.items():
                 try:
-                    o_geom = parsed_geom_map.get(best_neighbor.id)
-                    merged = unary_union([o_geom.buffer(1.5e-6), s_geom.buffer(1.5e-6)]).buffer(-1.5e-6)
-                    merged = make_valid(merged)
-                    extracted = _extract_polygons(merged)
-                    if extracted:
-                        parsed_geom_map[best_neighbor.id] = extracted[0]
-                        best_neighbor.geom_geojson = json.dumps(mapping(extracted[0]))
-                        best_neighbor.area_sqm = extracted[0].area * (111320.0 ** 2)
-                        db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
-                        db.delete(ann)
-                        ann_map.pop(ann.id, None)
-                        parsed_geom_map.pop(ann.id, None)
-                        removed_count += 1
-                        healed_count += 1
-                        continue
+                    merged = make_valid(unary_union([regular_items[r_i_int][1]] + s_geom_list))
+                    regular_items[r_i_int][1] = merged
+                    regular_items[r_i_int][2] = True
+                    healed_count += 1
                 except Exception:
                     pass
 
-            # If isolated floating sliver with no neighbor, delete it
-            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
-            db.delete(ann)
-            ann_map.pop(ann.id, None)
-            parsed_geom_map.pop(ann.id, None)
-            removed_count += 1
-            continue
+        for s_ann, _ in sliver_items:
+            sliv_del_ids.append(s_ann.id)
 
-        was_healed = False
+        if sliv_del_ids:
+            for i in range(0, len(sliv_del_ids), 500):
+                chunk = sliv_del_ids[i:i + 500]
+                db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(chunk)).update({"annotation_id": None}, synchronize_session=False)
+                db.query(Annotation).filter(Annotation.id.in_(chunk)).delete(synchronize_session=False)
+            removed_count += len(sliv_del_ids)
+
+    working_list = []
+    for ann, s_geom, absorbed_sliver in regular_items:
+        was_healed = absorbed_sliver
         # If invalid (e.g. self-intersection, too few points)
         if options.heal_geometries and not s_geom.is_valid:
             try:
@@ -1429,11 +1419,10 @@ def auto_heal_topology(
         if not extracted:
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann)
-            ann_map.pop(ann.id, None)
             removed_count += 1
             continue
 
-        if was_healed:
+        if was_healed and not absorbed_sliver:
             healed_count += 1
 
         working_list.append({
@@ -1699,38 +1688,50 @@ def clean_slivers_endpoint(
     if not slivers:
         return {"message": "Tidak ditemukan poligon sliver / garis tipis pada grid ini.", "absorbed_count": 0}
 
-    absorbed_count = 0
-    for s in slivers:
-        s_buff = s["geom"].buffer(1.5e-6)
-        best_r = None
-        best_score = -1
-        for r in regulars:
-            if s["geom"].intersects(r["geom"]) or s_buff.intersects(r["geom"]):
-                inter = s_buff.intersection(r["geom"])
-                score = inter.length if inter.length > 0 else inter.area
-                if score > best_score:
-                    best_score = score
-                    best_r = r
+    from shapely.strtree import STRtree
 
-        if best_r:
+    absorbed_count = len(slivers)
+    if regulars:
+        reg_geoms = [r["geom"] for r in regulars]
+        tree = STRtree(reg_geoms)
+        sliv_buffs = [s["geom"].buffer(1.5e-6) for s in slivers]
+        idx_s, idx_r = tree.query(sliv_buffs, predicate="intersects")
+
+        best_reg_for_s = {}
+        best_score_for_s = {}
+        for s_i, r_i in zip(idx_s, idx_r):
+            s_i_int, r_i_int = int(s_i), int(r_i)
             try:
-                merged = unary_union([best_r["geom"].buffer(1.5e-6), s["geom"].buffer(1.5e-6)]).buffer(-1.5e-6)
-                merged = make_valid(merged)
-                extracted = _extract_polygons(merged)
-                if extracted:
-                    best_r["geom"] = extracted[0]
-                    best_r["area"] = extracted[0].area * (111320.0 ** 2)
-                    best_r["ann"].geom_geojson = json.dumps(mapping(extracted[0]))
-                    best_r["ann"].area_sqm = best_r["area"]
-                    db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == s["ann"].id).update({"annotation_id": None}, synchronize_session=False)
-                    db.delete(s["ann"])
-                    absorbed_count += 1
+                inter = sliv_buffs[s_i_int].intersection(reg_geoms[r_i_int])
+                sc = inter.length if inter.length > 0 else inter.area
+                if sc > best_score_for_s.get(s_i_int, -1):
+                    best_score_for_s[s_i_int] = sc
+                    best_reg_for_s[s_i_int] = r_i_int
             except Exception:
                 pass
-        else:
-            db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == s["ann"].id).update({"annotation_id": None}, synchronize_session=False)
-            db.delete(s["ann"])
-            absorbed_count += 1
+
+        grouped_slivers = {}
+        for s_i_int, r_i_int in best_reg_for_s.items():
+            grouped_slivers.setdefault(r_i_int, []).append(slivers[s_i_int]["geom"].buffer(1e-7))
+
+        for r_i_int, s_geom_list in grouped_slivers.items():
+            try:
+                r = regulars[r_i_int]
+                merged = make_valid(unary_union([r["geom"]] + s_geom_list))
+                extracted = _extract_polygons(merged)
+                if extracted:
+                    r["geom"] = extracted[0]
+                    r["area"] = extracted[0].area * (111320.0 ** 2)
+                    r["ann"].geom_geojson = json.dumps(mapping(extracted[0]))
+                    r["ann"].area_sqm = r["area"]
+            except Exception:
+                pass
+
+    sliv_del_ids = [s["ann"].id for s in slivers]
+    for i in range(0, len(sliv_del_ids), 500):
+        chunk = sliv_del_ids[i:i + 500]
+        db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(chunk)).update({"annotation_id": None}, synchronize_session=False)
+        db.query(Annotation).filter(Annotation.id.in_(chunk)).delete(synchronize_session=False)
 
     db.commit()
 
