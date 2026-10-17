@@ -4165,7 +4165,7 @@ const MAX_HISTORY = 20
 const canUndo = computed(() => historyIndex.value > 0)
 const canRedo = computed(() => historyIndex.value < history.value.length - 1)
 
-const pushHistory = () => {
+const pushHistory = (markUnsaved = true) => {
   const snapshot = JSON.parse(JSON.stringify(features.value))
   
   // Truncate future redo stack if branched
@@ -4178,7 +4178,9 @@ const pushHistory = () => {
     history.value.shift()
   }
   historyIndex.value = history.value.length - 1
-  queueOfflineDraftSave()
+  if (markUnsaved) {
+    queueOfflineDraftSave()
+  }
 }
 
 const undo = async () => {
@@ -6472,10 +6474,15 @@ const handleRestoreSnapshot = async (snap) => {
   await new Promise(r => setTimeout(r, 20))
 
   try {
+    if (serverAutoSaveTimer) { clearTimeout(serverAutoSaveTimer); serverAutoSaveTimer = null }
+    if (draftAutoSaveTimer) { clearTimeout(draftAutoSaveTimer); draftAutoSaveTimer = null }
     await api.restoreGridSnapshot(selectedTaskId.value, snap.id)
+    await clearTaskDraft(selectedTaskId.value)
+    localDraftStatus.value = null
+    showDraftRestorePrompt.value = false
     showToast(`✅ Berhasil memulihkan poligon ke versi v${snap.version_number}!`)
-    await loadTaskData(selectedTaskId.value, true)
-    hasUnsavedChanges.value = true
+    await loadTaskData(selectedTaskId.value, false)
+    hasUnsavedChanges.value = false
   } catch (err) {
     console.error('Failed to restore snapshot:', err)
     alert(err.response?.data?.detail || 'Gagal memulihkan snapshot.')
@@ -9327,7 +9334,7 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
 
   // 7. Manage History Stack for Undo/Redo
   if (preserveHistory) {
-    pushHistory()
+    pushHistory(false)
   } else {
     history.value = [JSON.parse(JSON.stringify(features.value))]
     historyIndex.value = 0

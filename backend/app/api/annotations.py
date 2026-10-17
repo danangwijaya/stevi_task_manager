@@ -1269,8 +1269,12 @@ def auto_heal_topology(
             if s_geom.is_empty or s_geom.area < min_area_deg:
                 continue
 
+            s_bounds = s_geom.bounds
             is_dup = False
-            for idx, (sg, s_ann) in enumerate(seen_geoms):
+            for idx, (sg, s_ann, sg_bounds) in enumerate(seen_geoms):
+                if (s_bounds[0] > sg_bounds[2] or s_bounds[2] < sg_bounds[0] or
+                    s_bounds[1] > sg_bounds[3] or s_bounds[3] < sg_bounds[1]):
+                    continue
                 area_ratio = min(ann.area_sqm, s_ann.area_sqm) / max(ann.area_sqm, s_ann.area_sqm) if max(ann.area_sqm, s_ann.area_sqm) > 0 else 0
                 if area_ratio > 0.85:
                     try:
@@ -1280,20 +1284,20 @@ def auto_heal_topology(
                             # Priority: strictly prefer labeled class (class_id > 0) over unlabelled "Belum Teridentifikasi" (id=0)
                             if s_ann.class_id == 0 and ann.class_id > 0:
                                 duplicate_ids.add(s_ann.id)
-                                seen_geoms[idx] = (s_geom, ann)
+                                seen_geoms[idx] = (s_geom, ann, s_bounds)
                             elif ann.class_id == 0 and s_ann.class_id > 0:
                                 duplicate_ids.add(ann.id)
                             elif ann.id > s_ann.id:  # keep earlier created stable polygon
                                 duplicate_ids.add(ann.id)
                             else:
                                 duplicate_ids.add(s_ann.id)
-                                seen_geoms[idx] = (s_geom, ann)
+                                seen_geoms[idx] = (s_geom, ann, s_bounds)
                             break
                     except Exception:
                         pass
 
             if not is_dup:
-                seen_geoms.append((s_geom, ann))
+                seen_geoms.append((s_geom, ann, s_bounds))
 
         if duplicate_ids:
             dup_list = list(duplicate_ids)
@@ -1309,13 +1313,17 @@ def auto_heal_topology(
     # PHASE 2: Heal invalid geometries, micro-slivers, and degenerate holes
     # ─────────────────────────────────────────────────────────────────────────
     ann_map = {a.id: a for a in annotations}
+    parsed_geom_map = {}
+    for ann in annotations:
+        try:
+            parsed_geom_map[ann.id] = shape(json.loads(ann.geom_geojson))
+        except Exception:
+            pass
     working_list = []
 
     for ann in annotations:
-        try:
-            geom_dict = json.loads(ann.geom_geojson)
-            s_geom = shape(geom_dict)
-        except Exception:
+        s_geom = parsed_geom_map.get(ann.id)
+        if s_geom is None:
             # Unparseable geometry: detach pins and delete
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann)
@@ -1333,19 +1341,26 @@ def auto_heal_topology(
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann)
             ann_map.pop(ann.id, None)
+            parsed_geom_map.pop(ann.id, None)
             removed_count += 1
             continue
 
         if is_sliver:
             # Instead of leaving a hole/void, absorb sliver into adjacent neighbor
             s_buff = s_geom.buffer(1.5e-6)
+            sb = s_buff.bounds
             best_neighbor = None
             best_len = -1
             for other_ann in annotations:
                 if other_ann.id == ann.id or other_ann.id not in ann_map:
                     continue
+                o_geom = parsed_geom_map.get(other_ann.id)
+                if o_geom is None or o_geom.is_empty:
+                    continue
+                ob = o_geom.bounds
+                if sb[0] > ob[2] or sb[2] < ob[0] or sb[1] > ob[3] or sb[3] < ob[1]:
+                    continue
                 try:
-                    o_geom = shape(json.loads(other_ann.geom_geojson))
                     if s_geom.intersects(o_geom) or s_buff.intersects(o_geom):
                         inter = s_buff.intersection(o_geom)
                         score = inter.length if inter.length > 0 else inter.area
@@ -1357,16 +1372,18 @@ def auto_heal_topology(
 
             if best_neighbor:
                 try:
-                    o_geom = shape(json.loads(best_neighbor.geom_geojson))
+                    o_geom = parsed_geom_map.get(best_neighbor.id)
                     merged = unary_union([o_geom.buffer(1.5e-6), s_geom.buffer(1.5e-6)]).buffer(-1.5e-6)
                     merged = make_valid(merged)
                     extracted = _extract_polygons(merged)
                     if extracted:
+                        parsed_geom_map[best_neighbor.id] = extracted[0]
                         best_neighbor.geom_geojson = json.dumps(mapping(extracted[0]))
                         best_neighbor.area_sqm = extracted[0].area * (111320.0 ** 2)
                         db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
                         db.delete(ann)
                         ann_map.pop(ann.id, None)
+                        parsed_geom_map.pop(ann.id, None)
                         removed_count += 1
                         healed_count += 1
                         continue
@@ -1377,6 +1394,7 @@ def auto_heal_topology(
             db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id == ann.id).update({"annotation_id": None}, synchronize_session=False)
             db.delete(ann)
             ann_map.pop(ann.id, None)
+            parsed_geom_map.pop(ann.id, None)
             removed_count += 1
             continue
 
@@ -1416,7 +1434,7 @@ def auto_heal_topology(
             "ann": ann,
             "geom": extracted[0],
             "area_sqm": extracted[0].area * (111320.0 ** 2),
-            "was_modified": was_healed or (extracted[0].wkt != s_geom.wkt)
+            "was_modified": was_healed or (len(extracted) > 1) or (s_geom.geom_type != "Polygon")
         })
 
         for extra_p in extracted[1:]:
@@ -1468,7 +1486,7 @@ def auto_heal_topology(
                         c_bounds[1] > a_bounds[3] or c_bounds[3] < a_bounds[1]):
                         continue
 
-                    if cur_geom.intersects(accepted["geom"]):
+                    if cur_geom.intersects(accepted["geom"]) and not cur_geom.touches(accepted["geom"]):
                         try:
                             inter = cur_geom.intersection(accepted["geom"])
                             if inter.area > clip_thresh:
@@ -1491,7 +1509,7 @@ def auto_heal_topology(
                 removed_count += 1
             else:
                 p0 = extracted[0]
-                if was_clipped or item["was_modified"] or p0.wkt != item["geom"].wkt:
+                if was_clipped or item["was_modified"] or len(extracted) > 1:
                     cur_ann.geom_geojson = json.dumps(mapping(p0))
                     cur_ann.area_sqm = p0.area * (111320.0 ** 2)
 
