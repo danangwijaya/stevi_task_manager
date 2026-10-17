@@ -2298,6 +2298,24 @@ def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=1.5):
     if len(valid_geoms) == 1:
         return valid_geoms[0]
 
+    # Collect pre-existing interior holes that are not being filled by another polygon in valid_geoms
+    preserved_holes = None
+    try:
+        orig_holes = []
+        for g in valid_geoms:
+            if g.geom_type == 'Polygon':
+                orig_holes.extend(SPolygon(h) for h in g.interiors if SPolygon(h).area * (111320.0 ** 2) > min_hole_sqm)
+            elif g.geom_type == 'MultiPolygon':
+                for sub_g in g.geoms:
+                    orig_holes.extend(SPolygon(h) for h in sub_g.interiors if SPolygon(h).area * (111320.0 ** 2) > min_hole_sqm)
+        if orig_holes:
+            raw_union = unary_union(valid_geoms)
+            diff_holes = unary_union(orig_holes).difference(raw_union)
+            if diff_holes and not diff_holes.is_empty:
+                preserved_holes = diff_holes
+    except Exception:
+        preserved_holes = None
+
     # Iterative snapping along shared borders to prevent MultiPolygon fracturing
     current = valid_geoms[0]
     for g in valid_geoms[1:]:
@@ -2317,6 +2335,8 @@ def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=1.5):
     try:
         closed = current.buffer(snap_tol, join_style=2).buffer(-snap_tol, join_style=2)
         if closed and not closed.is_empty:
+            if preserved_holes is not None:
+                closed = closed.difference(preserved_holes)
             if not closed.is_valid:
                 closed = make_valid(closed)
             if closed.is_valid and abs(closed.area - current.area) / (current.area + 1e-12) < 0.05:
@@ -2328,6 +2348,8 @@ def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=1.5):
     if current.geom_type == 'MultiPolygon':
         try:
             dissolved = unary_union([g.buffer(snap_tol * 1.5, join_style=2) for g in valid_geoms]).buffer(-snap_tol * 1.5, join_style=2)
+            if preserved_holes is not None and dissolved and not dissolved.is_empty:
+                dissolved = dissolved.difference(preserved_holes)
             dissolved_polys = _extract_polygons(dissolved, min_area_sqm=0.1)
             if len(dissolved_polys) == 1:
                 current = dissolved_polys[0]
