@@ -9730,6 +9730,17 @@ const coveragePercent = computed(() => {
   return Math.min(pct, 100)
 })
 
+const roundCoords = (coords) => {
+  if (!Array.isArray(coords)) return coords
+  if (typeof coords[0] === 'number') {
+    return [
+      Math.round(coords[0] * 1e6) / 1e6,
+      Math.round(coords[1] * 1e6) / 1e6
+    ]
+  }
+  return coords.map(roundCoords)
+}
+
 const syncFeaturesFromMap = () => {
   if (!featureGroup) return
   const rawFeatures = []
@@ -9737,6 +9748,9 @@ const syncFeaturesFromMap = () => {
 
   featureGroup.eachLayer((layer) => {
     const json = layer.toGeoJSON()
+    if (json.geometry && json.geometry.coordinates) {
+      json.geometry.coordinates = roundCoords(json.geometry.coordinates)
+    }
     if (!layer._uiId) {
       layer._uiId = layer.feature?._uiId || getFeatureUiId(layer.feature)
     }
