@@ -1409,7 +1409,7 @@ def auto_heal_topology(
 
         # If it has degenerate holes, clean them
         if options.heal_geometries and s_geom.geom_type == 'Polygon' and len(s_geom.interiors) > 0:
-            cleaned_holes = [h for h in s_geom.interiors if Polygon(h).area > 1e-9]
+            cleaned_holes = [h for h in s_geom.interiors if Polygon(h).area > 8e-11]
             if len(cleaned_holes) != len(s_geom.interiors):
                 s_geom = Polygon(s_geom.exterior, cleaned_holes)
                 was_healed = True
@@ -1933,7 +1933,7 @@ def repair_single_annotation_geometry(
             pass
             
     if s_geom.geom_type == 'Polygon' and len(s_geom.interiors) > 0:
-        cleaned_holes = [h for h in s_geom.interiors if Polygon(h).area > 1e-9]
+        cleaned_holes = [h for h in s_geom.interiors if Polygon(h).area > 8e-11]
         if len(cleaned_holes) != len(s_geom.interiors):
             s_geom = Polygon(s_geom.exterior, cleaned_holes)
             
@@ -2117,7 +2117,7 @@ def _clean_spikes_and_holes(poly):
                 if h_area_sqm > 1.0 and avg_thickness_m > 0.15:
                     cleaned_holes.append(h)
             except Exception:
-                if SPolygon(h).area > 1e-9:
+                if SPolygon(h).area > 8e-11:
                     cleaned_holes.append(h)
 
     # 2. Clean foldback turnaround spikes on exterior ring:
@@ -2256,6 +2256,13 @@ def _extract_polygons(geom, min_area_sqm=3.0):
         if geom.geom_type in ('MultiPolygon', 'GeometryCollection'):
             return _extract_polygons(geom, min_area_sqm=min_area_sqm)
         if geom.is_valid and geom.area >= min_area_deg:
+            if min_area_sqm >= 1.0:
+                area_sqm = geom.area * (111320.0 ** 2)
+                if area_sqm < 60.0:
+                    perim_m = geom.length * 111320.0
+                    avg_thickness_m = (2.0 * area_sqm / perim_m) if perim_m > 0 else 0.0
+                    if avg_thickness_m <= 0.15:
+                        return []
             return [geom]
         return []
     elif geom.geom_type == 'MultiPolygon':
