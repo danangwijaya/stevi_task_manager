@@ -2203,9 +2203,6 @@ def _extract_polygons(geom, min_area_sqm=3.0):
         if geom.geom_type in ('MultiPolygon', 'GeometryCollection'):
             return _extract_polygons(geom, min_area_sqm=min_area_sqm)
         if geom.is_valid and geom.area >= min_area_deg:
-            if len(geom.interiors) > 15:
-                sub_parts = _subdivide_multihole_polygon(geom, max_holes=15)
-                return [sp for sp in sub_parts if sp.is_valid and sp.area >= min_area_deg]
             return [geom]
         return []
     elif geom.geom_type == 'MultiPolygon':
@@ -3417,11 +3414,22 @@ def merge_polygons(
             )
 
         merged_polys = _extract_polygons(merged_geom, min_area_sqm=0.1)
-        if not merged_polys or len(merged_polys) > 1:
+        if not merged_polys:
             raise HTTPException(
                 status_code=400,
                 detail="Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bersentuhan yang dapat digabungkan."
             )
+
+        if len(merged_polys) > 1:
+            merged_polys.sort(key=lambda p: p.area, reverse=True)
+            total_merged_area = sum(p.area for p in merged_polys)
+            second_area_sqm = merged_polys[1].area * (111320.0 ** 2)
+            # Only fail if the second polygon is genuinely significant (> 5 sqm and > 2% of total area)
+            if second_area_sqm > 5.0 and (merged_polys[1].area / total_merged_area) > 0.02:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bersentuhan yang dapat digabungkan."
+                )
 
         final_merged = merged_polys[0]
         created_feat = {
@@ -3503,11 +3511,22 @@ def merge_polygons(
         raise HTTPException(status_code=400, detail="Gagal menggabungkan geometri poligon terpilih.")
 
     merged_polys = _extract_polygons(merged_geom, min_area_sqm=0.1)
-    if not merged_polys or len(merged_polys) > 1:
+    if not merged_polys:
         raise HTTPException(
             status_code=400,
             detail="Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bertampalan atau berbatasan langsung yang dapat digabungkan."
         )
+
+    if len(merged_polys) > 1:
+        merged_polys.sort(key=lambda p: p.area, reverse=True)
+        total_merged_area = sum(p.area for p in merged_polys)
+        second_area_sqm = merged_polys[1].area * (111320.0 ** 2)
+        # Only fail if the second polygon is genuinely significant (> 5 sqm and > 2% of total area)
+        if second_area_sqm > 5.0 and (merged_polys[1].area / total_merged_area) > 0.02:
+            raise HTTPException(
+                status_code=400,
+                detail="Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bertampalan atau berbatasan langsung yang dapat digabungkan."
+            )
 
     # Strictly 1 singlepart merged polygon
     final_merged_poly = merged_polys[0]
