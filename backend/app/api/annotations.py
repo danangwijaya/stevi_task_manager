@@ -2278,7 +2278,7 @@ def _extract_polygons(geom, min_area_sqm=3.0):
     return []
 
 
-def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=50.0):
+def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=1.5):
     """
     Robustly merges a list of Shapely geometries:
     1. Snaps adjacent polygons to resolve vertex misalignments and shared edge slivers
@@ -2352,7 +2352,7 @@ def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=50.0):
                 h_area_sqm = h_poly.area * (111320.0 ** 2)
                 h_perim_m = h.length * 111320.0
                 avg_thickness_m = (2.0 * h_area_sqm / h_perim_m) if h_perim_m > 0 else 0.0
-                if h_area_sqm > min_hole_sqm and avg_thickness_m >= 1.2:
+                if h_area_sqm > min_hole_sqm and avg_thickness_m >= 0.25:
                     cleaned_holes.append(h)
             p = SPolygon(p.exterior, cleaned_holes)
         p = _clean_spikes_and_holes(p)
@@ -2566,29 +2566,40 @@ def split_by_polygon(
         poly_for_inter = poly
         try:
             if poly.geom_type == 'Polygon' and len(poly.interiors) > 0:
-                other_anns = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
-                other_geoms = []
-                for oa in other_anns:
-                    if target_id is not None and str(oa.id) == str(target_id):
-                        continue
-                    try:
-                        og = shape(json.loads(oa.geom_geojson))
-                        if og and not og.is_empty and og.intersects(cutter_in_grid):
-                            other_geoms.append(og)
-                    except Exception:
-                        pass
-                other_union = unary_union(other_geoms) if other_geoms else None
-                void_pieces = []
+                c_minx, c_miny, c_maxx, c_maxy = cutter_in_grid.bounds
+                intersecting_holes = []
                 for h in poly.interiors:
+                    h_minx, h_miny, h_maxx, h_maxy = h.bounds
+                    if h_minx > c_maxx or h_maxx < c_minx or h_miny > c_maxy or h_maxy < c_miny:
+                        continue
                     h_poly = Polygon(h)
                     if h_poly.intersects(cutter_in_grid):
+                        intersecting_holes.append(h_poly)
+                if intersecting_holes:
+                    other_anns = db.query(Annotation).filter(Annotation.task_grid_id == req.task_grid_id).all()
+                    other_geoms = []
+                    for oa in other_anns:
+                        if target_id is not None and str(oa.id) == str(target_id):
+                            continue
+                        try:
+                            og = shape(json.loads(oa.geom_geojson))
+                            if og and not og.is_empty:
+                                o_minx, o_miny, o_maxx, o_maxy = og.bounds
+                                if o_minx <= c_maxx and o_maxx >= c_minx and o_miny <= c_maxy and o_maxy >= c_miny:
+                                    if og.intersects(cutter_in_grid):
+                                        other_geoms.append(og)
+                        except Exception:
+                            pass
+                    other_union = unary_union(other_geoms) if other_geoms else None
+                    void_pieces = []
+                    for h_poly in intersecting_holes:
                         empty_h = h_poly.difference(other_union) if other_union else h_poly
                         if empty_h and not empty_h.is_empty:
                             void_cut = empty_h.intersection(cutter_in_grid)
                             if void_cut and not void_cut.is_empty and void_cut.area > 1e-11:
                                 void_pieces.append(void_cut)
-                if void_pieces:
-                    poly_for_inter = unary_union([poly] + void_pieces)
+                    if void_pieces:
+                        poly_for_inter = unary_union([poly] + void_pieces)
         except Exception:
             poly_for_inter = poly
 
@@ -3713,12 +3724,22 @@ def smart_delete_polygon(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Geometri poligon target tidak valid: {str(e)}")
 
+    t_minx, t_miny, t_maxx, t_maxy = t_poly.bounds
+    pad_deg = 2e-4
+    buffered_t = t_poly.buffer(1e-6)
     neighbor_candidates = []
+    fallback_candidates = []
     for o in other_annotations:
         try:
             o_poly = shape(json.loads(o.geom_geojson))
             if not o_poly.is_valid:
                 o_poly = o_poly.buffer(0)
+
+            o_minx, o_miny, o_maxx, o_maxy = o_poly.bounds
+            is_near = not (o_minx > t_maxx + pad_deg or o_maxx < t_minx - pad_deg or o_miny > t_maxy + pad_deg or o_maxy < t_miny - pad_deg)
+            if not is_near and o.id != req.absorb_into_id:
+                fallback_candidates.append((o, o_poly))
+                continue
 
             # Check adjacency (touching or buffered intersection to handle micro gaps)
             shared_boundary_len = 0.0
@@ -3726,21 +3747,30 @@ def smart_delete_polygon(
             if is_touching:
                 inter = t_poly.intersection(o_poly)
                 shared_boundary_len = inter.length if inter.length > 0 else inter.area
-            else:
-                # Slight buffer for micro-precision gaps from snapping
-                buffered_t = t_poly.buffer(1e-6)
-                if buffered_t.intersects(o_poly):
-                    inter = buffered_t.intersection(o_poly)
-                    shared_boundary_len = inter.area
+            elif buffered_t.intersects(o_poly):
+                inter = buffered_t.intersection(o_poly)
+                shared_boundary_len = inter.area
 
             neighbor_candidates.append({
                 "annotation": o,
                 "geom": o_poly,
                 "shared_len": shared_boundary_len,
-                "distance": t_poly.distance(o_poly)
+                "distance": 0.0 if shared_boundary_len > 0 else t_poly.distance(o_poly)
             })
         except Exception:
             continue
+
+    if not neighbor_candidates and fallback_candidates:
+        for o, o_poly in fallback_candidates:
+            try:
+                neighbor_candidates.append({
+                    "annotation": o,
+                    "geom": o_poly,
+                    "shared_len": 0.0,
+                    "distance": t_poly.distance(o_poly)
+                })
+            except Exception:
+                continue
 
     if not neighbor_candidates:
         raise HTTPException(status_code=400, detail="Tidak ditemukan poligon tetangga yang valid.")
@@ -3759,8 +3789,10 @@ def smart_delete_polygon(
     target_neighbor_ann = chosen_neighbor["annotation"]
     neighbor_poly = chosen_neighbor["geom"]
 
-    # Union the two geometries
-    merged_geom = unary_union([neighbor_poly, t_poly])
+    # Robustly merge the two geometries (bridging micro-gaps and welding internal seam lines)
+    merged_geom = _merge_polygons_robust([neighbor_poly, t_poly])
+    if not merged_geom or merged_geom.is_empty:
+        merged_geom = unary_union([neighbor_poly, t_poly])
     merged_polys = _extract_polygons(merged_geom)
 
     if not merged_polys:
