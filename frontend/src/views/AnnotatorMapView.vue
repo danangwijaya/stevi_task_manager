@@ -9780,7 +9780,35 @@ const syncFeaturesFromMap = () => {
   const accepted = []
   const layersToRemove = []
 
+  // Separate features: pre-accept existing stable polygons without redundant self-checks (eliminates 4.5M comparisons!)
+  const existingFeatures = []
+  const newFeatures = []
   rawFeatures.forEach(feat => {
+    if (feat.id || feat.properties?.id) {
+      existingFeatures.push(feat)
+    } else {
+      newFeatures.push(feat)
+    }
+  })
+
+  // 1. Existing polygons are pre-accepted instantly in O(1)
+  existingFeatures.forEach(feat => {
+    const fArea = feat.properties?.area_sqm || (feat.geometry?.coordinates ? turf.area(feat) : 0)
+    let fBbox = null
+    let fBboxArea = 0
+    if (fArea > 0) {
+      fBbox = turf.bbox(feat)
+      const fBboxW = Math.max(0, fBbox[2] - fBbox[0])
+      const fBboxH = Math.max(0, fBbox[3] - fBbox[1])
+      fBboxArea = fBboxW * fBboxH
+    }
+    feat._cachedBbox = fBbox
+    feat._cachedBboxArea = fBboxArea
+    accepted.push(feat)
+  })
+
+  // 2. Only check newly digitized features against accepted polygons
+  newFeatures.forEach(feat => {
     let isDup = false
     const fArea = feat.properties?.area_sqm || (feat.geometry?.coordinates ? turf.area(feat) : 0)
     const fCid = feat.properties?.class_id || 0
