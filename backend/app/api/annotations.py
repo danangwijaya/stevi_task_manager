@@ -336,14 +336,22 @@ def get_neighbors_annotations(
     if not task:
         raise HTTPException(status_code=404, detail="Task grid not found")
 
-    # Buffer around current task's bbox (1.5x grid extent to catch all surrounding neighbors)
-    d_lat = abs(task.max_lat - task.min_lat) * 1.5 if (task.max_lat and task.min_lat) else 0.05
-    d_lon = abs(task.max_lon - task.min_lon) * 1.5 if (task.max_lon and task.min_lon) else 0.05
+    # Query immediately adjacent neighboring grids (0.15x grid extent catches all 8 touching neighbors without grabbing 2nd-ring grids)
+    grid_h = abs(task.max_lat - task.min_lat) if (task.max_lat and task.min_lat) else 0.03
+    grid_w = abs(task.max_lon - task.min_lon) if (task.max_lon and task.min_lon) else 0.03
+    d_lat = grid_h * 0.15
+    d_lon = grid_w * 0.15
 
     min_lat_b = task.min_lat - d_lat
     max_lat_b = task.max_lat + d_lat
     min_lon_b = task.min_lon - d_lon
     max_lon_b = task.max_lon + d_lon
+
+    # Edge-matching border strip (12% of grid width/height ~ 120m around active grid's 4 borders)
+    strip_min_lat = task.min_lat - (grid_h * 0.12)
+    strip_max_lat = task.max_lat + (grid_h * 0.12)
+    strip_min_lon = task.min_lon - (grid_w * 0.12)
+    strip_max_lon = task.max_lon + (grid_w * 0.12)
 
     # Query neighboring grids in the same study area and year
     neighbor_tasks = db.query(TaskGrid).filter(
@@ -377,6 +385,25 @@ def get_neighbors_annotations(
     for ann in annotations:
         try:
             geom = json.loads(ann.geom_geojson)
+            # Fast bounding-box check on exterior ring so only border/near-border polygons are sent to browser
+            g_type = geom.get("type")
+            coords = geom.get("coordinates")
+            if coords:
+                ring = coords[0] if g_type == "Polygon" else (coords[0][0] if (g_type == "MultiPolygon" and coords[0]) else None)
+                if ring:
+                    xs = [pt[0] for pt in ring]
+                    ys = [pt[1] for pt in ring]
+                    if max(xs) < strip_min_lon or min(xs) > strip_max_lon or max(ys) < strip_min_lat or min(ys) > strip_max_lat:
+                        continue
+                if g_type == "Polygon" and len(coords) > 1:
+                    kept_holes = [coords[0]]
+                    for h_ring in coords[1:]:
+                        if h_ring:
+                            hxs = [pt[0] for pt in h_ring]
+                            hys = [pt[1] for pt in h_ring]
+                            if not (max(hxs) < strip_min_lon or min(hxs) > strip_max_lon or max(hys) < strip_min_lat or min(hys) > strip_max_lat):
+                                kept_holes.append(h_ring)
+                    geom["coordinates"] = kept_holes
             c_meta = classes_meta.get(ann.class_id, {})
             features.append({
                 "type": "Feature",
@@ -2818,9 +2845,18 @@ def split_by_polygon(
         if not candidate_anns_with_area:
             raise HTTPException(status_code=400, detail="Area pemotong tidak membelah poligon manapun. Pastikan melintasi batas poligon target.")
 
-        # Sort candidates by coverage ratio (inter_area / poly.area) descending so foreground polygons take priority over giant background polygons
-        candidate_anns_with_area.sort(key=lambda x: (x[2] / (x[1].area + 1e-12), -x[1].area), reverse=True)
         cutter_area = cutter.area
+        # Sort candidates so a polygon containing >= 20% of the cutter takes priority over accidental border grazes,
+        # and among valid targets foreground polygons take priority over giant background polygons
+        candidate_anns_with_area.sort(
+            key=lambda x: (
+                1 if x[2] >= 0.20 * cutter_area else 0,
+                (x[2] / (x[1].area + 1e-12)) if x[2] >= 0.20 * cutter_area else x[2],
+                x[2],
+                -x[1].area
+            ),
+            reverse=True
+        )
 
         # Determine target polygons:
         # If user explicitly requested target_ann AND it has significant overlap (> 5% of cutter), prioritize it

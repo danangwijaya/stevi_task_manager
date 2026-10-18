@@ -703,15 +703,17 @@ def get_tasks(
         
     tasks = query.all()
     
-    # Batch query annotation count to avoid N+1 query loop
+    # Batch query annotation count to avoid N+1 query loop and avoid SQLite >999 IN-parameter limit
     ann_counts = {}
     if tasks:
         task_ids = [t.id for t in tasks]
-        # Query count grouped by task_grid_id in a single database roundtrip
-        counts_res = db.query(
+        q_cnt = db.query(
             Annotation.task_grid_id,
             func.count(Annotation.id)
-        ).filter(Annotation.task_grid_id.in_(task_ids)).group_by(Annotation.task_grid_id).all()
+        )
+        if len(task_ids) <= 500:
+            q_cnt = q_cnt.filter(Annotation.task_grid_id.in_(task_ids))
+        counts_res = q_cnt.group_by(Annotation.task_grid_id).all()
         ann_counts = {grid_id: count for grid_id, count in counts_res}
     
     result = []

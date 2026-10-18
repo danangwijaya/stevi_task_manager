@@ -5132,32 +5132,43 @@ const onMapMouseUp = async (e) => {
       const dLng = Math.abs(ne.lng - sw.lng)
 
       if (dLat > 0.00005 && dLng > 0.00005) {
-        const boxPoly = turf.bboxPolygon([
-          Math.min(sw.lng, ne.lng),
-          Math.min(sw.lat, ne.lat),
-          Math.max(sw.lng, ne.lng),
-          Math.max(sw.lat, ne.lat)
-        ])
+        const bMinX = Math.min(sw.lng, ne.lng)
+        const bMinY = Math.min(sw.lat, ne.lat)
+        const bMaxX = Math.max(sw.lng, ne.lng)
+        const bMaxY = Math.max(sw.lat, ne.lat)
+        const boxPoly = turf.bboxPolygon([bMinX, bMinY, bMaxX, bMaxY])
+        const boxArea = Math.max(1.0, turf.area(boxPoly))
 
-        const next = new Set(selectedPolyUiIds.value)
-        let newlySelectedCount = 0
+        const foregroundUiIds = []
+        const backgroundUiIds = []
         features.value.forEach(feat => {
           try {
             const fcId = feat.properties?.class_id
             if (fcId !== undefined && hiddenClassIds.value.has(fcId)) return
+            if (!feat.geometry) return
+            const [fMinX, fMinY, fMaxX, fMaxY] = turf.bbox(feat.geometry)
+            if (fMaxX < bMinX || fMinX > bMaxX || fMaxY < bMinY || fMinY > bMaxY) return
             const fPoly = turf.feature(feat.geometry)
             if (turf.booleanIntersects(fPoly, boxPoly)) {
               const uId = feat._uiId || getFeatureUiId(feat)
-              next.add(uId)
-              newlySelectedCount++
+              const fArea = Number(feat.properties?.area_sqm) || turf.area(fPoly)
+              if (fArea > boxArea * 6.0 && fMinX < bMinX && fMaxX > bMaxX && fMinY < bMinY && fMaxY > bMaxY) {
+                backgroundUiIds.push(uId)
+              } else {
+                foregroundUiIds.push(uId)
+              }
             }
           } catch (_) {}
         })
 
+        const chosenUiIds = foregroundUiIds.length > 0 ? foregroundUiIds : backgroundUiIds
+        const next = new Set(selectedPolyUiIds.value)
+        chosenUiIds.forEach(uId => next.add(uId))
+
         selectedPolyUiIds.value = next
         refreshMapStyles()
 
-        if (newlySelectedCount > 0) {
+        if (chosenUiIds.length > 0) {
           showToast(`📌 ${selectedPolyUiIds.value.size} poligon terseleksi`)
           rightTab.value = 'polygons'
         }
@@ -6036,6 +6047,7 @@ const findTargetPolygonForCut = (cutGeom) => {
       }
     } else {
       // Polygon / Cookie cutter:
+      const cutterArea = Math.max(0.1, turf.area(cutFeat))
       const candidates = []
       const holeFallbackCandidates = []
       for (let i = 0; i < features.value.length; i++) {
@@ -6078,19 +6090,27 @@ const findTargetPolygonForCut = (cutGeom) => {
         }
 
         const coverageRatio = interArea / (featArea + 1e-6)
+        const cutterShare = interArea / cutterArea
         candidates.push({
           feat,
           annId: extractNumericId(feat),
           interArea,
           featArea,
-          coverageRatio
+          coverageRatio,
+          cutterShare
         })
       }
 
       if (candidates.length > 0) {
         candidates.sort((a, b) => {
-          if (Math.abs(a.coverageRatio - b.coverageRatio) > 0.05) {
+          const aMajor = a.cutterShare >= 0.20 ? 1 : 0
+          const bMajor = b.cutterShare >= 0.20 ? 1 : 0
+          if (aMajor !== bMajor) return bMajor - aMajor
+          if (aMajor && bMajor && Math.abs(a.coverageRatio - b.coverageRatio) > 0.05) {
             return b.coverageRatio - a.coverageRatio
+          }
+          if (Math.abs(a.interArea - b.interArea) > 0.5) {
+            return b.interArea - a.interArea
           }
           return a.featArea - b.featArea
         })
@@ -8039,46 +8059,63 @@ const applyAutoClipAndHealOnEdit = (editedLayer) => {
 
     // 1. AUTO-CLIP OVERLAPS:
     // When edited polygon expands over neighbor, clip that neighbor: neighbor = neighbor - newPoly
-    featureGroup.eachLayer((neighborLayer) => {
-      if (neighborLayer === editedLayer) return
-      const neighborUiId = neighborLayer._uiId || neighborLayer.feature?._uiId
-      if (neighborUiId && neighborUiId === editedUiId) return
-
-      // Ultra-fast bounding box pre-check to eliminate 95% of distant polygons instantly
-      if (neighborLayer.getBounds && editedBounds) {
-        const nB = neighborLayer.getBounds()
-        if (nB && !nB.intersects(editedBounds)) {
-          return
+    let clipSearchBounds = editedBounds
+    let shouldRunAutoClip = true
+    if (oldPoly) {
+      try {
+        const expanded = turf.difference(turf.featureCollection([newPoly, oldPoly]))
+        if (expanded && expanded.geometry && turf.area(expanded) > 0.05) {
+          clipSearchBounds = L.geoJSON(expanded).getBounds().pad(0.05)
+        } else {
+          shouldRunAutoClip = false
         }
-      }
-
-      const nFeat = neighborLayer.toGeoJSON()
-      if (!nFeat || !nFeat.geometry) return
-      let nPoly = null
-      try {
-        nPoly = turf.cleanCoords(turf.feature(nFeat.geometry))
       } catch (_) {
-        return
+        clipSearchBounds = editedBounds
       }
+    }
 
-      try {
-        if (turf.booleanIntersects(nPoly, newPoly)) {
-          const inter = turf.intersect(turf.featureCollection([nPoly, newPoly]))
-          if (inter && turf.area(inter) > 0.05) {
-            const clipped = turf.difference(turf.featureCollection([nPoly, newPoly]))
-            if (clipped && clipped.geometry && turf.area(clipped) > 3.0) {
-              updateLayerGeometry(neighborLayer, clipped.geometry)
-              anyModified = true
-            } else {
-              layersToRemove.push(neighborLayer)
-              anyModified = true
-            }
+    if (shouldRunAutoClip) {
+      featureGroup.eachLayer((neighborLayer) => {
+        if (neighborLayer === editedLayer) return
+        const neighborUiId = neighborLayer._uiId || neighborLayer.feature?._uiId
+        if (neighborUiId && neighborUiId === editedUiId) return
+
+        // Ultra-fast bounding box pre-check against only the expanded delta region
+        if (neighborLayer.getBounds && clipSearchBounds) {
+          const nB = neighborLayer.getBounds()
+          if (nB && !nB.intersects(clipSearchBounds)) {
+            return
           }
         }
-      } catch (clipErr) {
-        console.warn('Auto-clip error on neighbor:', clipErr)
-      }
-    })
+
+        const nFeat = neighborLayer.toGeoJSON()
+        if (!nFeat || !nFeat.geometry) return
+        let nPoly = null
+        try {
+          nPoly = turf.cleanCoords(turf.feature(nFeat.geometry))
+        } catch (_) {
+          return
+        }
+
+        try {
+          if (turf.booleanIntersects(nPoly, newPoly)) {
+            const inter = turf.intersect(turf.featureCollection([nPoly, newPoly]))
+            if (inter && turf.area(inter) > 0.05) {
+              const clipped = turf.difference(turf.featureCollection([nPoly, newPoly]))
+              if (clipped && clipped.geometry && turf.area(clipped) > 3.0) {
+                updateLayerGeometry(neighborLayer, clipped.geometry)
+                anyModified = true
+              } else {
+                layersToRemove.push(neighborLayer)
+                anyModified = true
+              }
+            }
+          }
+        } catch (clipErr) {
+          console.warn('Auto-clip error on neighbor:', clipErr)
+        }
+      })
+    }
 
     layersToRemove.forEach(l => featureGroup.removeLayer(l))
 
@@ -8091,12 +8128,15 @@ const applyAutoClipAndHealOnEdit = (editedLayer) => {
           let bestNeighbor = null
           let maxShared = -1
 
-          const vacatedBounds = editedBounds ? editedBounds.pad(0.08) : null
+          let vacatedBounds = editedBounds ? editedBounds.pad(0.08) : null
+          try {
+            vacatedBounds = L.geoJSON(vacated).getBounds().pad(0.08)
+          } catch (_) {}
 
           featureGroup.eachLayer((neighborLayer) => {
             if (neighborLayer === editedLayer || layersToRemove.includes(neighborLayer)) return
 
-            // Ultra-fast bounding box pre-check
+            // Ultra-fast bounding box pre-check against only the vacated delta region
             if (neighborLayer.getBounds && vacatedBounds) {
               const nB = neighborLayer.getBounds()
               if (nB && !nB.intersects(vacatedBounds)) {
@@ -8349,7 +8389,7 @@ const bindLayerEvents = (layer) => {
             const last = ring[ring.length - 1]
             if (Math.abs(first.lat - last.lat) < 1e-7 && Math.abs(first.lng - last.lng) < 1e-7) {
               ring.pop()
-              layer.setLatLngs([ring])
+              layer.setLatLngs(latlngs)
             }
           }
         }
@@ -8646,15 +8686,25 @@ const closeSelectedPolygonHoles = () => {
   const g = JSON.parse(JSON.stringify(targetFeat.geometry))
   let removedHoles = 0
 
-  const otherFeats = features.value.filter((_, i) => i !== clickedFeatureIdx.value)
+  const otherFeatsWithBbox = []
+  for (let i = 0; i < features.value.length; i++) {
+    if (i === clickedFeatureIdx.value) continue
+    const of = features.value[i]
+    if (!of || !of.geometry) continue
+    try {
+      otherFeatsWithBbox.push({ feat: of, bbox: turf.bbox(of.geometry) })
+    } catch (_) {}
+  }
   const isHoleOccupied = (holeRingCoords) => {
     try {
       const holePoly = turf.polygon([holeRingCoords])
       const holeArea = turf.area(holePoly)
       if (holeArea <= 0) return false
-      for (const of of otherFeats) {
-        if (!of || !of.geometry) continue
-        const ofGeom = turf.feature(of.geometry)
+      const [hMinX, hMinY, hMaxX, hMaxY] = turf.bbox(holePoly)
+      for (const item of otherFeatsWithBbox) {
+        const [oMinX, oMinY, oMaxX, oMaxY] = item.bbox
+        if (oMaxX < hMinX || oMinX > hMaxX || oMaxY < hMinY || oMinY > hMaxY) continue
+        const ofGeom = turf.feature(item.feat.geometry)
         if (turf.booleanIntersects(holePoly, ofGeom)) {
           const inter = turf.intersect(turf.featureCollection([holePoly, ofGeom]))
           if (inter && turf.area(inter) > 0.05 * holeArea) {
@@ -8812,23 +8862,28 @@ const handleSmartDeleteSelected = () => {
 
 const executeSmartDelete = async (targetFeat, targetIdx) => {
   if (!selectedTaskId.value) return
-  if (hasUnsavedChanges.value) {
-    await saveAnnotations()
-  }
   if (features.value.length <= 1) {
     alert('⚠️ Poligon ini adalah satu-satunya poligon di dalam grid tile.\n\nTidak dapat dihapus karena akan membuat seluruh grid kosong bolong!\nJika ingin mengganti tutupan lahan, silakan gunakan menu Ubah Kelas atau Potong Poligon.')
     return
   }
 
-  // Find neighbor candidates using Turf.js
+  // Find neighbor candidates using Turf.js with fast bounding-box pre-filter
   const otherFeats = features.value.filter((f, i) => i !== targetIdx)
   const targetPoly = targetFeat.type === 'Feature' ? targetFeat : turf.feature(targetFeat.geometry || targetFeat)
+  const [tMinX, tMinY, tMaxX, tMaxY] = turf.bbox(targetPoly)
+  const padDeg = 0.0004
+  let bufferedTarget = null
 
   let bestNeighbor = null
   let maxSharedScore = -1
 
   for (const other of otherFeats) {
     try {
+      if (!other || !other.geometry) continue
+      const [oMinX, oMinY, oMaxX, oMaxY] = turf.bbox(other.geometry)
+      if (oMaxX < tMinX - padDeg || oMinX > tMaxX + padDeg || oMaxY < tMinY - padDeg || oMinY > tMaxY + padDeg) {
+        continue
+      }
       const otherPoly = other.type === 'Feature' ? other : turf.feature(other.geometry || other)
       
       let sharedScore = 0
@@ -8850,8 +8905,10 @@ const executeSmartDelete = async (targetFeat, targetIdx) => {
         }
       } else {
         // Test with tiny buffer (~0.5m) to catch vertices touching with snapping tolerance
-        const buffered = turf.buffer(targetPoly, 0.000005, { units: 'kilometers' })
-        if (turf.booleanIntersects(buffered, otherPoly)) {
+        if (!bufferedTarget) {
+          bufferedTarget = turf.buffer(targetPoly, 0.000005, { units: 'kilometers' })
+        }
+        if (bufferedTarget && turf.booleanIntersects(bufferedTarget, otherPoly)) {
           sharedScore = 0.1
         }
       }
@@ -8868,10 +8925,11 @@ const executeSmartDelete = async (targetFeat, targetIdx) => {
   // Fallback: if no direct touching neighbor detected due to precision, pick closest neighbor
   if (!bestNeighbor && otherFeats.length > 0) {
     let minDist = Infinity
+    const tCenter = turf.centroid(targetPoly)
     for (const other of otherFeats) {
       try {
         const otherPoly = other.type === 'Feature' ? other : turf.feature(other.geometry || other)
-        const d = turf.distance(turf.centroid(targetPoly), turf.centroid(otherPoly))
+        const d = turf.distance(tCenter, turf.centroid(otherPoly))
         if (d < minDist) {
           minDist = d
           bestNeighbor = other
@@ -8891,6 +8949,9 @@ const executeSmartDelete = async (targetFeat, targetIdx) => {
   if (!confirmed) return
 
   showToast(`Menghapus poligon [${targetClassName}]...`)
+  if (hasUnsavedChanges.value) {
+    await saveAnnotations()
+  }
 
   try {
     const targetId = targetFeat.id || targetFeat.properties?.id
