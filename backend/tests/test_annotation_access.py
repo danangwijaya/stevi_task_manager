@@ -101,3 +101,126 @@ def test_save_keeps_rows_modified_after_client_sync(db):
     assert old_id not in ids            # seen and removed by client -> deleted
     assert res["preserved_ids"] == [foreign_id]
     assert res["server_time"].endswith("Z")
+
+
+# ─── Shapefile round trip (grid_transfer) ───────────────────────────────────
+
+def _grid_with_polys(db):
+    owner = _user(db, "own", "annotator")
+    g = _grid(db, assigned_user_id=owner.id, status="IN_PROGRESS")
+    g.min_lon, g.min_lat, g.max_lon, g.max_lat = 100.0, 0.0, 100.01, 0.01
+    from app.db.models import Annotation
+    a = Annotation(task_grid_id=g.id, user_id=owner.id, class_id=1, class_name="x",
+                   geom_geojson=json.dumps({"type": "Polygon", "coordinates": [[[100.0, 0.0], [100.005, 0.0], [100.005, 0.01], [100.0, 0.01], [100.0, 0.0]]]}),
+                   area_sqm=1.0)
+    b = Annotation(task_grid_id=g.id, user_id=owner.id, class_id=2, class_name="y",
+                   geom_geojson=json.dumps({"type": "Polygon", "coordinates": [[[100.005, 0.0], [100.01, 0.0], [100.01, 0.01], [100.005, 0.01], [100.005, 0.0]]]}),
+                   area_sqm=1.0)
+    db.add_all([a, b])
+    db.commit()
+    return owner, g
+
+
+def _zip_gdf(gdf, tmp_path):
+    import zipfile, os
+    shp = tmp_path / "t.shp"
+    gdf.to_file(shp, driver="ESRI Shapefile")
+    zp = tmp_path / "t.zip"
+    with zipfile.ZipFile(zp, "w") as zf:
+        for ext in (".shp", ".shx", ".dbf", ".prj", ".cpg"):
+            f = tmp_path / ("t" + ext)
+            if f.exists():
+                zf.write(f, "t" + ext)
+    return zp
+
+
+def _upload(zp):
+    from fastapi import UploadFile
+    return UploadFile(file=open(zp, "rb"), filename="t.zip")
+
+
+def test_shapefile_export_import_roundtrip(db, tmp_path):
+    import geopandas as gpd
+    from fastapi import BackgroundTasks
+    from app.api.grid_transfer import export_grid_shapefile, import_grid_shapefile
+    from app.db.models import Annotation
+
+    owner, g = _grid_with_polys(db)
+    resp = export_grid_shapefile(g.id, BackgroundTasks(), db, owner)
+    import zipfile
+    zf = zipfile.ZipFile(resp.path)
+    zf.extractall(tmp_path / "ex")
+    shp = next((tmp_path / "ex").glob("*.shp"))
+    gdf = gpd.read_file(shp)
+    assert set(gdf["KODE_PL"]) == {1, 2} and len(gdf) == 2
+
+    # edit offline: reclassify one polygon, keep ids
+    gdf.loc[gdf["KODE_PL"] == 2, "KODE_PL"] = 3
+    zp = _zip_gdf(gdf, tmp_path)
+
+    preview = import_grid_shapefile(g.id, _upload(zp), True, False, db, owner)
+    assert preview["dry_run"] and preview["file_polygons"] == 2 and preview["kept_ids"] == 2
+    assert {a.class_id for a in db.query(Annotation).filter(Annotation.task_grid_id == g.id)} == {1, 2}  # untouched
+
+    done = import_grid_shapefile(g.id, _upload(zp), False, False, db, owner)
+    assert not done["dry_run"] and done["saved_count"] == 2
+    anns = db.query(Annotation).filter(Annotation.task_grid_id == g.id).all()
+    assert {a.class_id for a in anns} == {1, 3}
+
+
+def test_import_rejects_unknown_class_and_foreign_user(db, tmp_path):
+    import geopandas as gpd
+    from app.api.grid_transfer import import_grid_shapefile
+    from shapely.geometry import box as sbox
+
+    owner, g = _grid_with_polys(db)
+    bad = gpd.GeoDataFrame({"KODE_PL": [999]}, geometry=[sbox(100.0, 0.0, 100.005, 0.005)], crs="EPSG:4326")
+    zp = _zip_gdf(bad, tmp_path)
+    with pytest.raises(HTTPException) as e:
+        import_grid_shapefile(g.id, _upload(zp), True, False, db, owner)
+    assert e.value.status_code == 400
+
+    other = _user(db, "oth", "annotator")
+    with pytest.raises(HTTPException) as e:
+        import_grid_shapefile(g.id, _upload(zp), True, False, db, other)
+    assert e.value.status_code == 403
+
+
+def test_import_matches_grid_identity(db, tmp_path):
+    import geopandas as gpd
+    from app.api.grid_transfer import import_grid_shapefile, _base_code
+    from shapely.geometry import box as sbox
+
+    owner, g = _grid_with_polys(db)           # grid_code "G1"
+    g.grid_code = "SB_R00_C00_2025"
+    db.commit()
+    geom = [sbox(100.0, 0.0, 100.005, 0.005)]
+
+    def up(code):
+        gdf = gpd.GeoDataFrame({"KODE_PL": [1], "GRID_CODE": [code]}, geometry=geom, crs="EPSG:4326")
+        return _upload(_zip_gdf(gdf, tmp_path))
+
+    assert _base_code("SB_R00_C00_2025") == "SB_R00_C00" and _base_code("G1") == "G1"
+    assert import_grid_shapefile(g.id, up("SB_R00_C00_2025"), True, False, db, owner)["match"] == "exact"
+    assert import_grid_shapefile(g.id, up("SB_R00_C00_2022"), True, False, db, owner)["match"] == "other_year"
+    with pytest.raises(HTTPException) as e:                      # other cell: always rejected
+        import_grid_shapefile(g.id, up("SB_R09_C09_2025"), True, False, db, owner)
+    assert e.value.status_code == 400
+    with pytest.raises(HTTPException) as e:                      # other year needs explicit consent
+        import_grid_shapefile(g.id, up("SB_R00_C00_2022"), False, False, db, owner)
+    assert e.value.status_code == 409
+    done = import_grid_shapefile(g.id, up("SB_R00_C00_2022"), False, True, db, owner)
+    assert done["saved_count"] == 1
+
+
+def test_import_rejects_file_mostly_outside_grid(db, tmp_path):
+    import geopandas as gpd
+    from app.api.grid_transfer import import_grid_shapefile
+    from shapely.geometry import box as sbox
+
+    owner, g = _grid_with_polys(db)
+    far = [sbox(110, 5, 110.001, 5.001), sbox(111, 5, 111.001, 5.001), sbox(100.0, 0.0, 100.001, 0.001)]
+    gdf = gpd.GeoDataFrame({"KODE_PL": [1, 1, 1]}, geometry=far, crs="EPSG:4326")
+    with pytest.raises(HTTPException) as e:
+        import_grid_shapefile(g.id, _upload(_zip_gdf(gdf, tmp_path)), True, False, db, owner)
+    assert e.value.status_code == 400

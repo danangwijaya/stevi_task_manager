@@ -365,6 +365,17 @@
             <span class="hidden sm:inline">Riwayat Versi</span>
           </button>
 
+          <!-- Data Offline (SHP / COG / Impor) -->
+          <button
+            v-if="selectedTaskId && (authStore.isAdmin || authStore.isReviewer || tasksStore.currentTask?.assigned_user_id === authStore.user?.id)"
+            @click="openOfflineModal"
+            class="bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-3 py-1.5 rounded-md border border-slate-300 transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            title="Unduh SHP & citra Sentinel-2 grid ini untuk dikerjakan offline di QGIS/ArcGIS, lalu unggah kembali hasilnya"
+          >
+            <Download :size="13" class="text-slate-500" />
+            <span class="hidden sm:inline">Data Offline</span>
+          </button>
+
           <!-- Cloud Auto-Save Status Badge -->
           <div
             v-if="selectedTaskId"
@@ -2653,6 +2664,169 @@
       </div>
     </div>
 
+    <!-- MODAL: Data Offline (unduh SHP/COG, impor SHP) -->
+    <div
+      v-if="showOfflineModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in"
+    >
+      <div class="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-100 space-y-4 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+        <!-- Header -->
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-md">
+              <Download :size="18" />
+            </div>
+            <div>
+              <h3 class="font-extrabold text-slate-900 text-sm tracking-tight">Data Offline (QGIS / ArcGIS)</h3>
+              <p class="text-[11px] text-slate-500 font-mono">Grid {{ tasksStore.currentTask?.grid_code }} • {{ tasksStore.currentTask?.year }}</p>
+            </div>
+          </div>
+          <button
+            @click="showOfflineModal = false"
+            class="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 cursor-pointer"
+          >
+            <X :size="16" />
+          </button>
+        </div>
+
+        <div class="space-y-4 text-xs">
+          <!-- Tahun: menentukan grid target untuk semua aksi di bawah -->
+          <div class="space-y-1.5">
+            <label class="font-bold text-slate-700">Tahun</label>
+            <select
+              v-model="offlineYear"
+              @change="resetOfflineImport(); setOfflineMessage('')"
+              class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option v-for="y in offlineYears" :key="y" :value="y">{{ y }}</option>
+            </select>
+            <div
+              class="p-2.5 rounded-xl border text-[11px] flex items-center justify-between gap-2"
+              :class="offlineTarget ? 'bg-slate-50 border-slate-200 text-slate-600' : 'bg-amber-50 border-amber-200 text-amber-900'"
+            >
+              <span v-if="offlineTarget">
+                Grid target: <b class="font-mono text-slate-800">{{ offlineTarget.grid_code }}</b>
+                <span class="px-1.5 py-0.5 ml-1 rounded-md font-mono font-bold text-[10px] bg-slate-200 text-slate-700">{{ offlineTarget.status }}</span>
+              </span>
+              <span v-else>Belum ada grid tahun {{ offlineYear }} untuk lokasi ini. Hanya citra yang dapat diunduh.</span>
+            </div>
+          </div>
+
+          <!-- 1. Unduh -->
+          <div class="space-y-2 border-t border-slate-100 pt-4">
+            <label class="font-bold text-slate-700">1. Unduh data</label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                @click="downloadGridShapefile"
+                :disabled="offlineBusy || !offlineTarget"
+                class="p-3 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-2xl text-left transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-start gap-2.5"
+              >
+                <Layers :size="16" class="text-blue-600 mt-0.5 shrink-0" />
+                <span>
+                  <span class="block font-bold text-slate-800">Poligon Penutupan Lahan</span>
+                  <span class="block text-[11px] text-slate-500">Shapefile (.zip)</span>
+                </span>
+              </button>
+              <button
+                @click="downloadGridRasterCog"
+                :disabled="offlineBusy || !offlineRasterAvailable"
+                class="p-3 bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-2xl text-left transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-start gap-2.5"
+              >
+                <MapIcon :size="16" class="text-emerald-600 mt-0.5 shrink-0" />
+                <span>
+                  <span class="block font-bold text-slate-800">Citra Sentinel-2 {{ offlineYear }}</span>
+                  <span class="block text-[11px] text-slate-500">
+                    {{ offlineRasterAvailable ? 'GeoTIFF COG, 4 band' : 'Citra tahun ini tidak tersedia' }}
+                  </span>
+                </span>
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-500 leading-relaxed">
+              Kolom <b class="font-mono">KODE_PL</b> menentukan kelas. Jangan hapus kolom <b class="font-mono">ID</b> agar poligon lama tetap terhubung dengan catatan review.
+            </p>
+          </div>
+
+          <!-- 2. Unggah -->
+          <div class="space-y-2 border-t border-slate-100 pt-4">
+            <label class="font-bold text-slate-700">2. Unggah hasil edit offline <span class="font-medium text-slate-500">(menimpa poligon grid)</span></label>
+            <label
+              class="flex items-center gap-2.5 p-3 bg-slate-50 hover:bg-blue-50 border border-dashed border-slate-300 hover:border-blue-400 rounded-2xl transition-all cursor-pointer"
+              :class="(offlineBusy || !offlineTarget) ? 'opacity-50 pointer-events-none' : ''"
+            >
+              <Upload :size="16" class="text-blue-600 shrink-0" />
+              <span class="flex-1 min-w-0 truncate font-bold text-slate-700">
+                {{ offlineFileName || 'Pilih berkas Shapefile (.zip)' }}
+              </span>
+              <input ref="offlineFileInput" type="file" accept=".zip" :disabled="!offlineTarget" @change="onOfflineFileChosen" class="hidden" />
+            </label>
+
+            <div v-if="offlinePreview" class="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 space-y-2">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md font-mono font-bold text-[10px] bg-amber-200 text-amber-900">Peringatan</span>
+                <span class="font-bold text-slate-800">Semua poligon grid ini akan ditimpa</span>
+              </div>
+              <div class="text-slate-700">
+                Server saat ini <b class="font-mono">{{ offlinePreview.current_polygons }}</b> poligon →
+                diganti <b class="font-mono">{{ offlinePreview.file_polygons }}</b> poligon dari berkas.
+              </div>
+              <ul v-if="offlinePreview.warnings?.length" class="list-disc pl-5 text-[11px] text-amber-900 space-y-0.5">
+                <li v-for="w in offlinePreview.warnings" :key="w">{{ w }}</li>
+              </ul>
+              <div v-if="offlinePreview.match === 'other_year'" class="p-2.5 rounded-xl bg-rose-50 border border-rose-200 space-y-1.5">
+                <div class="text-[11px] font-bold text-rose-700">
+                  Berkas ini berasal dari tahun lain ({{ offlinePreview.source_grid_code }}), sedangkan target adalah {{ offlinePreview.target_grid_code }} ({{ offlinePreview.target_year }}).
+                </div>
+                <label class="flex items-start gap-2 text-[11px] text-slate-700 cursor-pointer">
+                  <input type="checkbox" v-model="offlineAllowOtherYear" class="mt-0.5" />
+                  <span>Saya sadar, tetap timpa grid {{ offlinePreview.target_year }} dengan poligon dari berkas ini.</span>
+                </label>
+              </div>
+              <div v-if="offlineTargetIsCurrent && hasUnsavedChanges" class="text-[11px] font-bold text-rose-700">
+                Perubahan di layar yang belum tersimpan juga akan hilang.
+              </div>
+              <div class="text-[11px] text-slate-500">
+                Versi sekarang otomatis dicadangkan di <b>Riwayat Versi</b> dan bisa dikembalikan.
+              </div>
+            </div>
+
+            <div
+              v-if="offlineMessage"
+              class="p-2.5 rounded-xl border text-[11px] font-bold"
+              :class="offlineError ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'"
+            >
+              {{ offlineMessage }}
+              <button
+                v-if="offlineOpenTargetId"
+                @click="openOfflineTarget"
+                class="ml-2 underline cursor-pointer"
+              >Buka grid {{ offlineYear }}</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+          <button
+            @click="offlinePreview ? resetOfflineImport() : (showOfflineModal = false)"
+            :disabled="offlineBusy"
+            class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer disabled:opacity-50"
+          >
+            {{ offlinePreview ? 'Batal' : 'Tutup' }}
+          </button>
+          <button
+            v-if="offlinePreview"
+            @click="confirmOfflineImport"
+            :disabled="offlineBusy || (offlinePreview.match === 'other_year' && !offlineAllowOtherYear)"
+            class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RotateCw v-if="offlineBusy" :size="13" class="animate-spin" />
+            <Upload v-else :size="13" />
+            <span>{{ offlineBusy ? 'Menimpa...' : 'Timpa Sekarang' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- MODAL 6: Riwayat Versi & Snapshot Pemulihan (Rollback) -->
     <div
       v-if="showHistoryModal"
@@ -3353,6 +3527,8 @@ import {
   Wand2,
   Tag,
   History,
+  Download,
+  Upload,
   ChevronLeft,
   ChevronRight,
   Maximize2,
@@ -6510,6 +6686,194 @@ const handleApplyRepairOptions = async () => {
 const showHistoryModal = ref(false)
 const snapshotsList = ref([])
 const loadingSnapshots = ref(false)
+
+// ─── DATA OFFLINE: unduh SHP/COG, impor SHP (menimpa) ─────────────────────
+const showOfflineModal = ref(false)
+const offlineBusy = ref(false)
+const offlineMessage = ref('')
+const offlineError = ref(false)
+const offlinePreview = ref(null)
+const offlineFileInput = ref(null)
+const offlineYear = ref(null)
+const offlineAllowOtherYear = ref(false)
+const offlineOpenTargetId = ref(null)
+const offlineFileName = ref('')
+let offlineChosenFile = null
+
+// `SB_R00_C00_2025` -> `SB_R00_C00`: the same spatial cell across years
+const baseGridCode = (code) => {
+  const m = (code || '').match(/^(.*)_(\d{4})$/)
+  return m ? m[1] : (code || '')
+}
+
+// Grid of the selected year for the same cell (current grid, or the sibling of that year)
+const offlineTarget = computed(() => {
+  const cur = tasksStore.currentTask
+  if (!cur) return null
+  if (offlineYear.value === cur.year) return cur
+  return taskSiblings.value.find(
+    s => s.year === offlineYear.value && baseGridCode(s.grid_code) === baseGridCode(cur.grid_code)
+  ) || null
+})
+const offlineTargetIsCurrent = computed(() => !!offlineTarget.value && offlineTarget.value.id === tasksStore.currentTask?.id)
+
+const offlineYears = computed(() => {
+  const cur = tasksStore.currentTask
+  const years = new Set(availableRasterYears.value || [])
+  if (cur?.year) years.add(cur.year)
+  taskSiblings.value.forEach(s => {
+    if (cur && baseGridCode(s.grid_code) === baseGridCode(cur.grid_code)) years.add(s.year)
+  })
+  return [...years].sort((a, b) => b - a)
+})
+const offlineRasterAvailable = computed(() => (availableRasterYears.value || []).includes(offlineYear.value))
+
+const setOfflineMessage = (msg, isError = false) => {
+  offlineMessage.value = msg
+  offlineError.value = isError
+}
+
+// Blob responses carry errors as a Blob too; read the FastAPI `detail` out of it.
+const offlineErrorText = async (err) => {
+  const data = err.response?.data
+  try {
+    const text = data instanceof Blob ? await data.text() : null
+    const detail = text ? JSON.parse(text).detail : data?.detail
+    if (detail) return typeof detail === 'string' ? detail : JSON.stringify(detail)
+  } catch (_) {}
+  return err.message || 'Terjadi kesalahan.'
+}
+
+const saveBlobAs = (blob, filename) => {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+const filenameFromResponse = (res, fallback) => {
+  const cd = res.headers?.['content-disposition'] || ''
+  const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)
+  return m ? decodeURIComponent(m[1]) : fallback
+}
+
+const resetOfflineImport = () => {
+  offlinePreview.value = null
+  offlineChosenFile = null
+  offlineFileName.value = ''
+  offlineAllowOtherYear.value = false
+  if (offlineFileInput.value) offlineFileInput.value.value = ''
+}
+
+const openOfflineModal = () => {
+  setOfflineMessage('')
+  offlineOpenTargetId.value = null
+  resetOfflineImport()
+  offlineYear.value = tasksStore.currentTask?.year || offlineYears.value[0] || null
+  showOfflineModal.value = true
+}
+
+const downloadGridShapefile = async () => {
+  if (!offlineTarget.value) return
+  offlineBusy.value = true
+  setOfflineMessage('')
+  try {
+    // Export what is on the server: flush on-screen edits first so the file is current
+    if (offlineTargetIsCurrent.value && !(await flushUnsavedChanges())) return
+    const res = await api.downloadGridShp(offlineTarget.value.id)
+    saveBlobAs(res.data, filenameFromResponse(res, `${offlineTarget.value.grid_code}_shp.zip`))
+    setOfflineMessage('Shapefile berhasil diunduh.')
+  } catch (err) {
+    setOfflineMessage(await offlineErrorText(err), true)
+  } finally {
+    offlineBusy.value = false
+  }
+}
+
+const downloadGridRasterCog = async () => {
+  if (!selectedTaskId.value) return
+  offlineBusy.value = true
+  setOfflineMessage('')
+  try {
+    const res = await api.downloadGridRaster(selectedTaskId.value, offlineYear.value)
+    saveBlobAs(res.data, filenameFromResponse(res, `${tasksStore.currentTask?.grid_code || 'grid'}_${offlineYear.value}_sentinel2.tif`))
+    setOfflineMessage('Citra Sentinel-2 (COG) berhasil diunduh.')
+  } catch (err) {
+    setOfflineMessage(await offlineErrorText(err), true)
+  } finally {
+    offlineBusy.value = false
+  }
+}
+
+const onOfflineFileChosen = async (e) => {
+  const file = e.target.files?.[0]
+  offlinePreview.value = null
+  setOfflineMessage('')
+  if (!file || !offlineTarget.value) return
+  offlineChosenFile = file
+  offlineFileName.value = file.name
+  offlineBusy.value = true
+  try {
+    const res = await api.importGridShp(offlineTarget.value.id, file, true)
+    offlinePreview.value = res.data
+  } catch (err) {
+    resetOfflineImport()
+    setOfflineMessage(await offlineErrorText(err), true)
+  } finally {
+    offlineBusy.value = false
+  }
+}
+
+const confirmOfflineImport = async () => {
+  const target = offlineTarget.value
+  if (!offlineChosenFile || !target) return
+  const isCurrent = offlineTargetIsCurrent.value
+  offlineBusy.value = true
+  setOfflineMessage('')
+  try {
+    if (isCurrent) {
+      // The import replaces everything: stop pending autosaves so stale on-screen data cannot overwrite it afterwards
+      if (serverAutoSaveTimer) { clearTimeout(serverAutoSaveTimer); serverAutoSaveTimer = null }
+      if (draftAutoSaveTimer) { clearTimeout(draftAutoSaveTimer); draftAutoSaveTimer = null }
+    }
+    const res = await api.importGridShp(target.id, offlineChosenFile, false, offlineAllowOtherYear.value)
+    const dropped = res.data.dropped_duplicates ? ` (${res.data.dropped_duplicates} poligon tumpuk dibuang)` : ''
+    const doneText = `${res.data.saved_count} poligon dari Shapefile menimpa grid ${target.grid_code}${dropped}.`
+    resetOfflineImport()
+    if (isCurrent) {
+      await clearTaskDraft(target.id)
+      localDraftStatus.value = null
+      showDraftRestorePrompt.value = false
+      hasUnsavedChanges.value = false
+      await loadTaskData(target.id)
+      showToast(`✅ ${doneText}`)
+      showOfflineModal.value = false
+    } else {
+      // Another year's grid: the open map is untouched; offer to switch to it
+      offlineOpenTargetId.value = target.id
+      setOfflineMessage(`✅ ${doneText}`)
+    }
+  } catch (err) {
+    setOfflineMessage(await offlineErrorText(err), true)
+  } finally {
+    offlineBusy.value = false
+  }
+}
+
+const openOfflineTarget = async () => {
+  const id = offlineOpenTargetId.value
+  if (!id) return
+  if (!(await flushUnsavedChanges())) return
+  showOfflineModal.value = false
+  offlineOpenTargetId.value = null
+  selectedTaskId.value = id
+  await onTaskChange()
+}
+
 
 const openHistoryModal = async () => {
   if (!selectedTaskId.value) {

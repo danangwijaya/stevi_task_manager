@@ -98,6 +98,18 @@ export default {
   getAnnotationsOverview: (params) => api.get('/annotations/overview', { params }),
   getAllAnnotationsFeatures: (params) => api.get('/annotations/all-features', { params }),
   getGridAnnotations: (taskGridId) => api.get(`/annotations/grid/${taskGridId}`),
+  // Offline round trip (QGIS/ArcGIS): SHP + clipped Sentinel-2 COG per grid, SHP import (preview, then overwrite)
+  downloadGridShp: (taskGridId) => api.get(`/annotations/grid/${taskGridId}/export/shp`, { responseType: 'blob', timeout: 120000 }),
+  downloadGridRaster: (taskGridId, year) => api.get(`/annotations/grid/${taskGridId}/export/raster`, { params: { year }, responseType: 'blob', timeout: 180000 }),
+  importGridShp: (taskGridId, file, dryRun, allowOtherYear = false) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post(`/annotations/grid/${taskGridId}/import/shp`, form, {
+      params: { dry_run: dryRun, allow_other_year: allowOtherYear },
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 180000
+    })
+  },
   getNeighborAnnotations: (taskGridId) => api.get(`/annotations/grid/${taskGridId}/neighbors-features`),
   saveGridAnnotations: (taskGridId, features, syncedAt = null) => api.post(`/annotations/grid/${taskGridId}`, {
     task_grid_id: taskGridId,
