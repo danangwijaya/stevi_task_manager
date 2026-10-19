@@ -3480,7 +3480,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch, toRaw } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import L from 'leaflet'
 import '@geoman-io/leaflet-geoman-free'
@@ -4355,7 +4355,9 @@ const canUndo = computed(() => historyIndex.value > 0)
 const canRedo = computed(() => historyIndex.value < history.value.length - 1)
 
 const pushHistory = (markUnsaved = true) => {
-  const snapshot = JSON.parse(JSON.stringify(features.value))
+  // Snapshots are kept as JSON strings (one stringify of the raw data, parsed only on undo/redo):
+  // deep-cloning the whole grid through reactive proxies on every edit froze large grids
+  const snapshot = JSON.stringify(toRaw(features.value))
   
   // Truncate future redo stack if branched
   if (historyIndex.value < history.value.length - 1) {
@@ -4375,7 +4377,7 @@ const pushHistory = (markUnsaved = true) => {
 const undo = async () => {
   if (!canUndo.value) return
   historyIndex.value--
-  const snapshot = JSON.parse(JSON.stringify(history.value[historyIndex.value]))
+  const snapshot = JSON.parse(history.value[historyIndex.value])
   restoreFeaturesToMap(snapshot)
   markDirty()
   showToast('Undo: Perubahan dibatalkan')
@@ -4385,7 +4387,7 @@ const undo = async () => {
 const redo = async () => {
   if (!canRedo.value) return
   historyIndex.value++
-  const snapshot = JSON.parse(JSON.stringify(history.value[historyIndex.value]))
+  const snapshot = JSON.parse(history.value[historyIndex.value])
   restoreFeaturesToMap(snapshot)
   markDirty()
   showToast('Redo: Perubahan diterapkan kembali')
@@ -6122,8 +6124,25 @@ const findTargetPolygonForCut = (cutGeom) => {
       return null
     }
 
+    // Cheap bounding-box rejection first: booleanIntersects/buffer on every polygon of the grid
+    // (some have tens of thousands of vertices) was the main cause of multi-second freezes per cut.
+    const cutBbox = turf.bbox(cutFeat)
+    const bboxMargin = 1e-5 // ~1 m, covers the 0.5 m buffer used below
+    const featBboxCache = new WeakMap()
+    const featBbox = (feat) => {
+      const raw = toRaw(feat.geometry)
+      let b = featBboxCache.get(raw)
+      if (!b) { b = turf.bbox(raw); featBboxCache.set(raw, b) }
+      return b
+    }
+
     const testIntersects = (feat) => {
       if (!feat || !feat.geometry) return false
+      try {
+        const fb = featBbox(feat)
+        if (fb[0] > cutBbox[2] + bboxMargin || fb[2] < cutBbox[0] - bboxMargin ||
+            fb[1] > cutBbox[3] + bboxMargin || fb[3] < cutBbox[1] - bboxMargin) return false
+      } catch (_) {}
       try {
         if (turf.booleanIntersects(cutFeat, feat)) return true
       } catch (_) {}
@@ -9125,74 +9144,49 @@ const selectedPolygonHoleCount = computed(() => {
   return 0
 })
 
-const closeSelectedPolygonHoles = () => {
+// Holes are classified on the server (empty vs occupied by other polygons): checking them in the browser
+// compared every pair of segments and froze the page for minutes on grids with very detailed polygons.
+const fetchHoleOccupancy = async (targetFeat) => {
+  const targetId = targetFeat.id ?? targetFeat.properties?.id
+  const res = await api.holeOccupancy(selectedTaskId.value, targetFeat.geometry, targetId ?? null)
+  const occupied = new Set()
+  ;(res.data?.holes || []).forEach(h => { if (h.occupied) occupied.add(`${h.polygon}:${h.ring}`) })
+  return occupied
+}
+
+// Splits a Polygon/MultiPolygon into its parts so rings can be addressed as (part index, ring index)
+const polygonParts = (geom) => geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates]
+
+const closeSelectedPolygonHoles = async () => {
   if (clickedFeatureIdx.value === null) return
   const targetFeat = features.value[clickedFeatureIdx.value]
   if (!targetFeat || !targetFeat.geometry) return
+  if (targetFeat.geometry.type !== 'Polygon' && targetFeat.geometry.type !== 'MultiPolygon') return
+
+  let occupied
+  try {
+    occupied = await fetchHoleOccupancy(targetFeat)
+  } catch (err) {
+    alert(err.response?.data?.detail || 'Gagal memeriksa lubang pada poligon ini. Coba lagi.')
+    return
+  }
 
   const g = JSON.parse(JSON.stringify(targetFeat.geometry))
   let removedHoles = 0
-
-  const otherFeatsWithBbox = []
-  for (let i = 0; i < features.value.length; i++) {
-    if (i === clickedFeatureIdx.value) continue
-    const of = features.value[i]
-    if (!of || !of.geometry) continue
-    try {
-      otherFeatsWithBbox.push({ feat: of, bbox: turf.bbox(of.geometry) })
-    } catch (_) {}
-  }
-  const isHoleOccupied = (holeRingCoords) => {
-    try {
-      const holePoly = turf.polygon([holeRingCoords])
-      const holeArea = turf.area(holePoly)
-      if (holeArea <= 0) return false
-      const [hMinX, hMinY, hMaxX, hMaxY] = turf.bbox(holePoly)
-      for (const item of otherFeatsWithBbox) {
-        const [oMinX, oMinY, oMaxX, oMaxY] = item.bbox
-        if (oMaxX < hMinX || oMinX > hMaxX || oMaxY < hMinY || oMinY > hMaxY) continue
-        const ofGeom = turf.feature(item.feat.geometry)
-        if (turf.booleanIntersects(holePoly, ofGeom)) {
-          const inter = turf.intersect(turf.featureCollection([holePoly, ofGeom]))
-          if (inter && turf.area(inter) > 0.05 * holeArea) {
-            return true
-          }
-        }
-      }
-    } catch (_) {}
-    return false
-  }
-
-  if (g.type === 'Polygon' && Array.isArray(g.coordinates) && g.coordinates.length > 1) {
-    const extRing = g.coordinates[0]
-    const keptHoles = []
-    for (let i = 1; i < g.coordinates.length; i++) {
-      if (isHoleOccupied(g.coordinates[i])) {
-        keptHoles.push(g.coordinates[i])
-      } else {
-        removedHoles++
-      }
+  const parts = polygonParts(g)
+  parts.forEach((rings, pi) => {
+    if (!Array.isArray(rings) || rings.length < 2) return
+    const kept = [rings[0]]
+    for (let ri = 1; ri < rings.length; ri++) {
+      if (occupied.has(`${pi}:${ri}`)) kept.push(rings[ri])
+      else removedHoles++
     }
-    g.coordinates = [extRing, ...keptHoles]
-  } else if (g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) {
-    for (let i = 0; i < g.coordinates.length; i++) {
-      if (Array.isArray(g.coordinates[i]) && g.coordinates[i].length > 1) {
-        const extRing = g.coordinates[i][0]
-        const keptHoles = []
-        for (let h = 1; h < g.coordinates[i].length; h++) {
-          if (isHoleOccupied(g.coordinates[i][h])) {
-            keptHoles.push(g.coordinates[i][h])
-          } else {
-            removedHoles++
-          }
-        }
-        g.coordinates[i] = [extRing, ...keptHoles]
-      }
-    }
-  }
+    if (g.type === 'MultiPolygon') g.coordinates[pi] = kept
+    else g.coordinates = kept
+  })
 
   if (removedHoles === 0) {
-    showToast('ℹ️ Seluruh lubang pada poligon ini telah terisi poligon lain, tidak ada lubang kosong yang perlu ditutup.')
+    showToast('Semua lubang pada poligon ini terisi poligon lain, tidak ada lubang kosong yang perlu ditutup.')
     return
   }
 
@@ -9222,34 +9216,42 @@ const closeSelectedPolygonHoles = () => {
 
   syncFeaturesFromMap()
   pushHistory()
-  showToast(`✨ Berhasil menutup ${removedHoles} lubang pada poligon #${clickedFeatureIdx.value + 1}!`)
+  showToast(`Berhasil menutup ${removedHoles} lubang kosong pada poligon #${clickedFeatureIdx.value + 1}`)
 }
 
-const extractSelectedPolygonHolesAsNewFeatures = () => {
+const extractSelectedPolygonHolesAsNewFeatures = async () => {
   if (clickedFeatureIdx.value === null) return
   const targetFeat = features.value[clickedFeatureIdx.value]
   if (!targetFeat || !targetFeat.geometry) return
+  if (targetFeat.geometry.type !== 'Polygon' && targetFeat.geometry.type !== 'MultiPolygon') return
+
+  // Only genuinely empty holes become polygons. A hole that holds another polygon stays a hole,
+  // otherwise the new class-0 polygon would be stacked on top of it.
+  let occupied
+  try {
+    occupied = await fetchHoleOccupancy(targetFeat)
+  } catch (err) {
+    alert(err.response?.data?.detail || 'Gagal memeriksa lubang pada poligon ini. Coba lagi.')
+    return
+  }
 
   const g = JSON.parse(JSON.stringify(targetFeat.geometry))
   const extractedHoles = []
+  polygonParts(g).forEach((rings, pi) => {
+    if (!Array.isArray(rings) || rings.length < 2) return
+    const kept = [rings[0]]
+    for (let ri = 1; ri < rings.length; ri++) {
+      if (occupied.has(`${pi}:${ri}`)) kept.push(rings[ri])
+      else extractedHoles.push(rings[ri])
+    }
+    if (g.type === 'MultiPolygon') g.coordinates[pi] = kept
+    else g.coordinates = kept
+  })
 
-  if (g.type === 'Polygon' && Array.isArray(g.coordinates) && g.coordinates.length > 1) {
-    for (let i = 1; i < g.coordinates.length; i++) {
-      extractedHoles.push(g.coordinates[i])
-    }
-    g.coordinates = [g.coordinates[0]]
-  } else if (g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) {
-    for (let p = 0; p < g.coordinates.length; p++) {
-      if (Array.isArray(g.coordinates[p]) && g.coordinates[p].length > 1) {
-        for (let i = 1; i < g.coordinates[p].length; i++) {
-          extractedHoles.push(g.coordinates[p][i])
-        }
-        g.coordinates[p] = [g.coordinates[p][0]]
-      }
-    }
+  if (extractedHoles.length === 0) {
+    showToast('Semua lubang pada poligon ini terisi poligon lain, tidak ada lubang kosong untuk diekstrak.')
+    return
   }
-
-  if (extractedHoles.length === 0) return
 
   let newAreaM2 = 0
   try {
@@ -9296,7 +9298,7 @@ const extractSelectedPolygonHolesAsNewFeatures = () => {
 
   syncFeaturesFromMap()
   pushHistory()
-  showToast(`✨ Berhasil mengekstrak ${newFeatures.length} lubang menjadi poligon baru!`)
+  showToast(`Berhasil mengekstrak ${newFeatures.length} lubang kosong menjadi poligon baru`)
 }
 
 const handleSmartDeleteSelected = () => {
@@ -9852,7 +9854,7 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
   if (preserveHistory) {
     pushHistory(false)
   } else {
-    history.value = [JSON.parse(JSON.stringify(features.value))]
+    history.value = [JSON.stringify(toRaw(features.value))]
     historyIndex.value = 0
   }
 

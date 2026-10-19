@@ -134,6 +134,13 @@ export default {
       new_class_id: newClassId,
       persist: persist
     }),
+  // Which interior rings of a polygon are empty vs occupied by other polygons (server-side, indexed)
+  holeOccupancy: (taskGridId, geometry, excludeAnnotationId = null) =>
+    api.post('/annotations/hole-occupancy', {
+      task_grid_id: taskGridId,
+      geometry,
+      exclude_annotation_id: excludeAnnotationId
+    }),
   splitByLine: (taskGridId, lineGeom, targetAnnId = null, newClassId = 0, targetFeature = null, persist = false) =>
     api.post('/annotations/split-by-line', {
       task_grid_id: taskGridId,

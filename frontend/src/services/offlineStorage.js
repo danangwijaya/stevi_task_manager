@@ -1,3 +1,4 @@
+import { toRaw } from 'vue'
 /**
  * GeoStevia Offline & Local Draft Storage Service
  * Uses HTML5 IndexedDB to persist in-progress polygon annotations locally
@@ -53,7 +54,8 @@ export async function saveTaskDraft(taskId, features, meta = {}) {
       const now = Date.now()
       const draftRecord = {
         taskId: Number(taskId),
-        features: JSON.parse(JSON.stringify(features)),
+        // One JSON string: far cheaper to store than an object tree with hundreds of thousands of vertices
+        featuresJson: JSON.stringify(toRaw(features)),
         polygonCount: features.length,
         savedAt: now,
         updatedAt: new Date(now).toISOString(),
@@ -81,7 +83,13 @@ export async function getTaskDraft(taskId) {
       const req = store.get(Number(taskId))
 
       req.onsuccess = (e) => {
-        resolve(e.target.result || null)
+        const rec = e.target.result || null
+        // Drafts written by this version keep the features as a JSON string; older ones hold the objects
+        if (rec && typeof rec.featuresJson === 'string') {
+          try { rec.features = JSON.parse(rec.featuresJson) } catch (_) { rec.features = [] }
+          delete rec.featuresJson
+        }
+        resolve(rec)
       }
       req.onerror = () => resolve(null)
     })
