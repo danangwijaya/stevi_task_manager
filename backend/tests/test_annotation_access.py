@@ -316,3 +316,54 @@ def test_merge_keeps_hole_that_other_polygon_occupies():
     merged = _merge(outer, neighbour)
     assert merged.geom_type == "Polygon" and len(merged.interiors) == 1
     assert P(merged.interiors[0]).area > 0.9 * hole.area
+
+
+def _rough_disc(cx, cy, r_m, n=3000, jitter_m=1.5, seed=7):
+    import math, random
+    from shapely.geometry import Polygon as P
+    rnd = random.Random(seed)
+    deg = 1.0 / 111320.0
+    pts = []
+    for i in range(n):
+        a = 2 * math.pi * i / n
+        r = (r_m + rnd.uniform(-jitter_m, jitter_m)) * deg
+        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return P(pts).buffer(0)
+
+
+def test_merge_does_not_rewrite_large_polygon_away_from_the_seam(merge=None):
+    """Merging a large, detailed polygon with a small neighbour must only touch the area around their seam."""
+    from shapely.geometry import box as sbox
+    merge = merge or _merge
+    big = _rough_disc(0.0, 0.0, 500.0)
+    deg = 1.0 / 111320.0
+    nb = sbox(500 * deg - 1e-5, -50 * deg, 500 * deg + 80 * deg, 50 * deg)   # touches the east edge
+    merged = merge(big, nb)
+    union = big.union(nb)
+    far = sbox(-600 * deg, -600 * deg, 400 * deg, 600 * deg)                  # everything >100 m from the seam
+    changed = merged.symmetric_difference(union).intersection(far).area * (111320.0 ** 2)
+    assert changed < 1.0, f"{changed:.1f} m2 of the polygon was rewritten far from the seam"
+
+
+def test_hole_occupancy_separates_empty_holes_from_islands(db):
+    from shapely.geometry import box as sbox, Polygon as P, mapping
+    from app.api.annotations import hole_occupancy, HoleOccupancyRequest
+    from app.db.models import Annotation
+
+    owner = _user(db, "own", "annotator")
+    g = _grid(db, assigned_user_id=owner.id, status="IN_PROGRESS")
+    outer = P(sbox(0, 0, 0.01, 0.01).exterior.coords,
+              [sbox(0.001, 0.001, 0.003, 0.003).exterior.coords,     # hole 1: an island polygon sits in it
+               sbox(0.006, 0.006, 0.008, 0.008).exterior.coords])    # hole 2: nothing in it
+    island = sbox(0.0012, 0.0012, 0.0028, 0.0028)
+    db.add(Annotation(task_grid_id=g.id, user_id=owner.id, class_id=2, class_name="island",
+                      geom_geojson=json.dumps(mapping(island)), area_sqm=1.0))
+    own = Annotation(task_grid_id=g.id, user_id=owner.id, class_id=1, class_name="outer",
+                     geom_geojson=json.dumps(mapping(outer)), area_sqm=1.0)
+    db.add(own)
+    db.commit()
+
+    res = hole_occupancy(HoleOccupancyRequest(task_grid_id=g.id, geometry=mapping(outer), exclude_annotation_id=own.id), db, owner)
+    by_ring = {h["ring"]: h["occupied"] for h in res["holes"]}
+    assert by_ring == {1: True, 2: False}
+    assert res["empty_count"] == 1 and res["occupied_count"] == 1

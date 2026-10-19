@@ -2369,13 +2369,50 @@ def _extract_polygons(geom, min_area_sqm=3.0):
     return []
 
 
+def _weld_seams(current, geoms, tol, preserved_holes=None):
+    """Closes cracks and slivers only where two input polygons meet, and leaves everything else untouched.
+
+    A morphological closing of the whole union rewrites the entire boundary of large, detailed polygons
+    (scattered lost pieces, changed vertex counts). Here the closing runs on a small window around each
+    pair of neighbours and only its result inside their shared seam zone is added to `current`.
+    """
+    from shapely.geometry import box as sbox
+    out = current
+    for i in range(len(geoms)):
+        for j in range(i + 1, len(geoms)):
+            ax0, ay0, ax1, ay1 = geoms[i].bounds
+            bx0, by0, bx1, by1 = geoms[j].bounds
+            pad = 12 * tol
+            x0, y0 = max(ax0, bx0) - pad, max(ay0, by0) - pad
+            x1, y1 = min(ax1, bx1) + pad, min(ay1, by1) + pad
+            if x0 >= x1 or y0 >= y1:
+                continue
+            window = sbox(x0, y0, x1, y1)
+            part_i = geoms[i].intersection(window)
+            part_j = geoms[j].intersection(window)
+            if part_i.is_empty or part_j.is_empty:
+                continue
+            zone = part_i.buffer(2 * tol, join_style=2).intersection(part_j.buffer(2 * tol, join_style=2))
+            if zone.is_empty:
+                continue
+            # thin pockets beside the seam (bounded by only one of the two polygons) must be welded too
+            zone = zone.buffer(8 * tol, join_style=2)
+            local = out.intersection(window)
+            closed = local.buffer(tol, join_style=2).buffer(-tol, join_style=2)
+            added = closed.intersection(zone).intersection(window)
+            if preserved_holes is not None:
+                added = added.difference(preserved_holes)
+            if not added.is_empty:
+                out = out.union(added)
+    return out
+
+
 def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=1.5):
     """
     Robustly merges a list of Shapely geometries:
-    1. Snaps adjacent polygons to resolve vertex misalignments and shared edge slivers
-    2. Unions geometries into a single Polygon without internal seams
-    3. Applies morphological mitre closing to weld seam cracks & micro-gaps
-    4. Removes degenerate slit holes from the interior ring
+    1. Unions the polygons (no global snapping or closing: they rewrite large polygons everywhere)
+    2. Welds cracks and slivers only along the seams between the merged polygons (_weld_seams)
+    3. Removes degenerate slit holes from the interior rings
     """
     from shapely.ops import unary_union, snap
     from shapely.geometry import Polygon as SPolygon, MultiPolygon as SMultiPolygon
@@ -2412,13 +2449,14 @@ def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=1.5):
     except Exception:
         preserved_holes = None
 
-    # Iterative snapping along shared borders to prevent MultiPolygon fracturing
-    current = valid_geoms[0]
-    for g in valid_geoms[1:]:
-        try:
-            g_snapped = snap(g, current, tolerance=snap_tol)
-            current = unary_union([current, g_snapped])
-        except Exception:
+    # Plain union. No global snapping: snapping moves vertices of large polygons everywhere within the
+    # tolerance (including along their borders with unrelated polygons) and opens gaps there; the seam
+    # welding below closes the cracks between the merged polygons locally instead.
+    try:
+        current = unary_union(valid_geoms)
+    except Exception:
+        current = valid_geoms[0]
+        for g in valid_geoms[1:]:
             current = unary_union([current, g])
 
     if not current.is_valid:
@@ -2427,26 +2465,21 @@ def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=1.5):
         except Exception:
             pass
 
-    # Always attempt morphological mitre-closing to eliminate internal seam lines and micro-cracks
+    # Weld seam cracks/slivers locally (never rewrite the rest of a large polygon)
     try:
-        closed = current.buffer(snap_tol, join_style=2).buffer(-snap_tol, join_style=2)
-        if closed and not closed.is_empty:
-            if preserved_holes is not None:
-                closed = closed.difference(preserved_holes)
-            if not closed.is_valid:
-                closed = make_valid(closed)
-            if closed.is_valid and abs(closed.area - current.area) / (current.area + 1e-12) < 0.05:
-                current = closed
+        welded = _weld_seams(current, valid_geoms, snap_tol, preserved_holes)
+        if not welded.is_valid:
+            welded = make_valid(welded)
+        if welded.is_valid and not welded.is_empty:
+            current = welded
     except Exception:
         pass
 
-    # If still MultiPolygon, attempt slightly wider micro-buffer dissolve to bridge seam slivers
+    # If still MultiPolygon, try again with a slightly wider seam tolerance
     if current.geom_type == 'MultiPolygon':
         try:
-            dissolved = unary_union([g.buffer(snap_tol * 1.5, join_style=2) for g in valid_geoms]).buffer(-snap_tol * 1.5, join_style=2)
-            if preserved_holes is not None and dissolved and not dissolved.is_empty:
-                dissolved = dissolved.difference(preserved_holes)
-            dissolved_polys = _extract_polygons(dissolved, min_area_sqm=0.1)
+            welded = _weld_seams(current, valid_geoms, snap_tol * 1.5, preserved_holes)
+            dissolved_polys = _extract_polygons(welded, min_area_sqm=0.1)
             if len(dissolved_polys) == 1:
                 current = dissolved_polys[0]
         except Exception:
@@ -2480,6 +2513,73 @@ def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=1.5):
     if not cleaned_parts:
         return polys[0]
     return cleaned_parts[0] if len(cleaned_parts) == 1 else SMultiPolygon(cleaned_parts)
+
+
+class HoleOccupancyRequest(BaseModel):
+    task_grid_id: int
+    geometry: Dict[str, Any]
+    exclude_annotation_id: Optional[Union[int, str]] = None
+    occupied_ratio: float = 0.05
+
+
+@router.post("/hole-occupancy")
+def hole_occupancy(
+    req: HoleOccupancyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Classifies every interior ring (hole) of a polygon as empty or occupied by other polygons of the grid.
+
+    A hole is occupied when other annotations cover more than `occupied_ratio` of its area. Used by the
+    "close holes" and "extract holes" tools so they only touch genuinely empty holes. Read-only.
+    """
+    from shapely.prepared import prep
+
+    _require_grid_edit_access(db, req.task_grid_id, current_user)
+    try:
+        target = shape(req.geometry)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Geometri tidak valid: {e}")
+    parts = list(target.geoms) if target.geom_type == "MultiPolygon" else [target]
+
+    query = db.query(Annotation.id, Annotation.geom_geojson).filter(Annotation.task_grid_id == req.task_grid_id)
+    exclude = None
+    if req.exclude_annotation_id is not None and str(req.exclude_annotation_id).isdigit():
+        exclude = int(req.exclude_annotation_id)
+    others = []
+    for ann_id, geojson in query.all():
+        if exclude is not None and ann_id == exclude:
+            continue
+        try:
+            g = shape(json.loads(geojson))
+            if not g.is_empty:
+                others.append(g)
+        except Exception:
+            continue
+    tree = STRtree(others) if others else None
+
+    holes = []
+    for pi, part in enumerate(parts):
+        if part.geom_type != "Polygon":
+            continue
+        for ri, ring in enumerate(part.interiors, start=1):
+            hole = Polygon(ring)
+            if not hole.is_valid:
+                hole = hole.buffer(0)
+            occupied = False
+            if tree is not None and not hole.is_empty and hole.area > 0:
+                prepared = prep(hole)
+                for idx in tree.query(hole):
+                    other = others[idx]
+                    if prepared.intersects(other) and hole.intersection(other).area > req.occupied_ratio * hole.area:
+                        occupied = True
+                        break
+            holes.append({"polygon": pi, "ring": ri, "occupied": occupied})
+    return {
+        "holes": holes,
+        "empty_count": sum(1 for h in holes if not h["occupied"]),
+        "occupied_count": sum(1 for h in holes if h["occupied"]),
+    }
 
 
 @router.put("/{annotation_id}/class")
