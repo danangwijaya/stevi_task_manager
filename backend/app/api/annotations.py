@@ -2,8 +2,10 @@ from typing import Any, List, Dict, Optional, Union
 import json
 import os
 import math
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from shapely.geometry import shape, mapping, Polygon, MultiPolygon, box
 from shapely.ops import unary_union
@@ -624,6 +626,11 @@ def save_grid_annotations(
                                 break
                             # Candidate is unlabelled (class_id == 0) and almost entirely inside an already accepted polygon (>90%)
                             if c_cid == 0 and ratio_c > 0.90:
+                                is_dup = True
+                                dropped_dups_count += 1
+                                break
+                            # Redundant sub-slice / stale tab slice of same class (>85% inside accepted polygon of same class)
+                            if (c_cid == a_cand["class_id"]) and ratio_c > 0.85:
                                 is_dup = True
                                 dropped_dups_count += 1
                                 break

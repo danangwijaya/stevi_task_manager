@@ -10015,18 +10015,42 @@ const saveAnnotations = async (reloadGeometry = false, isManual = true) => {
         showDraftRestorePrompt.value = false
       }
 
-      // In-place ID update on existing Leaflet layers without re-rendering the DOM!
-      if (ok.id_map && typeof ok.id_map === 'object' && featureGroup) {
-        featureGroup.eachLayer(l => {
-          const uId = l._uiId || l.feature?._uiId
-          if (uId && ok.id_map[uId]) {
-            const dbId = ok.id_map[uId]
-            if (l.feature) {
-              l.feature.id = dbId
-              if (l.feature.properties) l.feature.properties.id = dbId
+      // In-place ID update on existing Leaflet layers, features.value, and selectedForMerge without re-rendering the DOM!
+      if (ok.id_map && typeof ok.id_map === 'object') {
+        if (featureGroup) {
+          featureGroup.eachLayer(l => {
+            const uId = l._uiId || l.feature?._uiId
+            if (uId && ok.id_map[uId]) {
+              const dbId = ok.id_map[uId]
+              if (l.feature) {
+                l.feature.id = dbId
+                if (l.feature.properties) l.feature.properties.id = dbId
+              }
             }
-          }
-        })
+          })
+        }
+        if (Array.isArray(features.value)) {
+          features.value.forEach(f => {
+            if (!f) return
+            const uId = f._uiId || f.properties?._uiId
+            if (uId && ok.id_map[uId]) {
+              const dbId = ok.id_map[uId]
+              f.id = dbId
+              if (f.properties) f.properties.id = dbId
+            }
+          })
+        }
+        if (Array.isArray(selectedForMerge.value)) {
+          selectedForMerge.value.forEach(f => {
+            if (!f) return
+            const uId = f._uiId || f.properties?._uiId
+            if (uId && ok.id_map[uId]) {
+              const dbId = ok.id_map[uId]
+              f.id = dbId
+              if (f.properties) f.properties.id = dbId
+            }
+          })
+        }
       }
 
       if (reloadGeometry) {
