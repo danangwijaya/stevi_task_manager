@@ -171,11 +171,11 @@ def get_annotations_overview(
                 }
             grid_classes[c_id]["count"] += 1
             ha = (a.area_sqm or 0) / 10000.0
-            grid_classes[c_id]["area_ha"] += round(ha, 2)
+            grid_classes[c_id]["area_ha"] += ha
 
             if c_id in by_class_dict:
                 by_class_dict[c_id]["count"] += 1
-                by_class_dict[c_id]["total_area_ha"] += round(ha, 2)
+                by_class_dict[c_id]["total_area_ha"] += ha
 
             # mapper aggregation
             u_id = a.user_id or (grid.assigned_user_id if grid.assigned_user_id else 0)
@@ -194,7 +194,7 @@ def get_annotations_overview(
                 }
             by_mapper_dict[u_id]["grids"].add(grid.grid_code)
             by_mapper_dict[u_id]["polygon_count"] += 1
-            by_mapper_dict[u_id]["total_area_ha"] += round(ha, 2)
+            by_mapper_dict[u_id]["total_area_ha"] += ha
 
         by_grid.append({
             "task_id": grid.id,
@@ -215,7 +215,10 @@ def get_annotations_overview(
             "max_lon": grid.max_lon,
             "bounds": [[grid.min_lat, grid.min_lon], [grid.max_lat, grid.max_lon]],
             "center": [(grid.min_lat + grid.max_lat)/2.0, (grid.min_lon + grid.max_lon)/2.0],
-            "classes": sorted(list(grid_classes.values()), key=lambda x: x["count"], reverse=True)
+            "classes": sorted(
+                ({**c, "area_ha": round(c["area_ha"], 2)} for c in grid_classes.values()),
+                key=lambda x: x["count"], reverse=True
+            )
         })
 
     by_mapper = []
@@ -236,6 +239,7 @@ def get_annotations_overview(
     for c_id, c in by_class_dict.items():
         if c["count"] > 0:
             c["percentage"] = round((c["count"] / total_polygons * 100.0), 1) if total_polygons > 0 else 0
+            c["total_area_ha"] = round(c["total_area_ha"], 2)
             by_class.append(c)
     by_class.sort(key=lambda x: x["count"], reverse=True)
 
@@ -441,10 +445,16 @@ def get_neighbors_annotations(
             g_type = geom.get("type")
             coords = geom.get("coordinates")
             if coords:
-                ring = coords[0] if g_type == "Polygon" else (coords[0][0] if (g_type == "MultiPolygon" and coords[0]) else None)
-                if ring:
-                    xs = [pt[0] for pt in ring]
-                    ys = [pt[1] for pt in ring]
+                if g_type == "Polygon":
+                    outer_rings = [coords[0]] if coords else []
+                elif g_type == "MultiPolygon":
+                    outer_rings = [poly[0] for poly in coords if poly]
+                else:
+                    outer_rings = []
+                if outer_rings:
+                    pts = [pt for r in outer_rings for pt in r]
+                    xs = [pt[0] for pt in pts]
+                    ys = [pt[1] for pt in pts]
                     if max(xs) < strip_min_lon or min(xs) > strip_max_lon or max(ys) < strip_min_lat or min(ys) > strip_max_lat:
                         continue
                 if g_type == "Polygon" and len(coords) > 1:
@@ -808,6 +818,7 @@ def save_grid_annotations(
         "count": len(saved_annotations),
         "id_map": id_map,
         "preserved_ids": preserved_ids,
+        "dropped_duplicates": dropped_dups_count,
         "server_time": _utc_iso(datetime.utcnow()),
         "saved_features": []
     }
@@ -4043,28 +4054,32 @@ def ai_segment_proposal(
     import rasterio.features
     from rasterio.windows import Window
     import numpy as np
+    from collections import deque
 
     # Find matching raster file
     year_index = get_year_raster_index(target_year)
     match = next((item for item in year_index if item["tile_key"] == grid.tile_key), None)
     if not match:
+        import glob
         base_dir = settings.RASTER_BASE_DIR
-        if os.path.exists(base_dir):
+        if grid.tile_key and os.path.exists(base_dir):
             for entry in os.listdir(base_dir):
-                if str(target_year) in entry:
-                    cand = os.path.join(base_dir, entry, f"sentinel2_sumbar_{target_year}_10m-{grid.tile_key}.tif")
-                    if os.path.exists(cand):
-                        try:
-                            with rasterio.open(cand) as src:
-                                match = {"path": cand, "crs": src.crs}
-                        except Exception:
-                            pass
-                        break
+                if str(target_year) not in entry:
+                    continue
+                hits = sorted(glob.glob(os.path.join(base_dir, entry, f"*{target_year}*{grid.tile_key}*.tif")))
+                if hits:
+                    try:
+                        with rasterio.open(hits[0]) as src:
+                            match = {"path": hits[0], "crs": src.crs}
+                    except Exception as e:
+                        logger.warning(f"ai-segment: cannot open raster {hits[0]}: {e}")
+                    break
 
     candidate_polygon = None
     suggested_class_id = 1
     suggested_class_name = "Hutan Lahan Kering"
     confidence = 0.85
+    source = "raster"
 
     if match and os.path.exists(match["path"]):
         try:
@@ -4113,8 +4128,9 @@ def ai_segment_proposal(
                     visited[local_y, local_x] = 1
                     max_pixels = 1200
                     count = 0
+                    queue = deque(queue)
                     while queue and count < max_pixels:
-                        cy, cx = queue.pop(0)
+                        cy, cx = queue.popleft()
                         count += 1
                         for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
                             ny, nx = cy + dy, cx + dx
@@ -4187,12 +4203,17 @@ def ai_segment_proposal(
                                         suggested_class_name = "Semak & Belukar"
                                         confidence = 0.80
         except Exception as e:
-            pass
+            logger.warning(f"ai-segment failed for grid {grid.id} at ({req.lat}, {req.lon}): {e}")
 
     # Fallback to smooth polygon (~20m radius) if raster processing was unavailable
     if not candidate_polygon:
         delta = 0.00018 # ~20 meters
         candidate_polygon = box(req.lon - delta, req.lat - delta, req.lon + delta, req.lat + delta).buffer(0.00004)
+        # Not a prediction: do not present a guessed class with confidence
+        source = "fallback"
+        suggested_class_id = 0
+        suggested_class_name = "Belum Teridentifikasi"
+        confidence = 0.0
 
     area_sqm = candidate_polygon.area * (111320.0 ** 2)
 
@@ -4203,6 +4224,7 @@ def ai_segment_proposal(
             "suggested_class_id": suggested_class_id,
             "suggested_class_name": suggested_class_name,
             "confidence": round(confidence, 2),
+            "source": source,
             "area_sqm": round(area_sqm, 2),
             "area_ha": round(area_sqm / 10000.0, 3)
         }

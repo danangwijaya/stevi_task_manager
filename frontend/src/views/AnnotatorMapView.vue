@@ -5672,6 +5672,9 @@ const onMapClickForAiWand = async (e) => {
         }
       }).addTo(map)
 
+      if (feat.properties?.source === 'fallback') {
+        showToast('⚠️ Citra tidak dapat dibaca untuk lokasi ini; poligon hanyalah kotak perkiraan tanpa kelas (bukan hasil AI). Tekan Enter untuk menerima atau Esc untuk batal.')
+      } else
       showToast(`🪄 AI Segmentasi terdeteksi: ${feat.properties?.class_name || 'Poligon'} (${feat.properties?.area_ha || 0} ha, ${Math.round((feat.properties?.confidence || 0.8) * 100)}% yakin). Tekan Enter untuk menerima.`)
     } else {
       showToast('AI tidak menemukan batas area homogen yang cukup jelas. Coba klik di lokasi lain.')
@@ -6490,9 +6493,7 @@ const handleApplyRepairOptions = async () => {
   await new Promise(r => setTimeout(r, 20))
 
   try {
-    if (hasUnsavedChanges.value) {
-      await saveAnnotations(false, false)
-    }
+    if (!(await flushUnsavedChanges())) return
     const res = await api.autoHealTopology(selectedTaskId.value, repairOptions.value)
     showToast(res.data?.message || 'Pilihan perbaikan topologi berhasil diterapkan!')
     await loadTaskData(selectedTaskId.value, true)
@@ -6608,9 +6609,7 @@ const openResolveOverlapModal = (err) => {
 
 const executeResolveOverlap = async (action, targetClassId = null) => {
   if (!selectedTaskId.value) return
-  if (hasUnsavedChanges.value) {
-    await saveAnnotations()
-  }
+  if (!(await flushUnsavedChanges())) return
   overlapModalData.value.isResolving = true
   try {
     const res = await api.resolveOverlap({
@@ -6634,11 +6633,16 @@ const executeResolveOverlap = async (action, targetClassId = null) => {
 
 // Single Geometry Repair
 const isRepairingSingleGeom = ref({})
+// Server-side operations act on persisted data and are usually followed by a reload that replaces the map.
+// Flush local edits first; if that fails the caller must abort, or the reload would discard them.
+const flushUnsavedChanges = async () => {
+  if (!hasUnsavedChanges.value) return true
+  return await saveAnnotations(false, false)
+}
+
 const handleRepairSingleGeometry = async (annId) => {
   if (!annId) return
-  if (hasUnsavedChanges.value) {
-    await saveAnnotations()
-  }
+  if (!(await flushUnsavedChanges())) return
   isRepairingSingleGeom.value[annId] = true
   try {
     const res = await api.repairAnnotationGeometry(annId)
@@ -6672,9 +6676,7 @@ const openAssignClassModal = (annId, currentClassId = 0) => {
 
 const executeAssignClass = async () => {
   if (!assignClassModalData.value.annotation_id) return
-  if (hasUnsavedChanges.value) {
-    await saveAnnotations()
-  }
+  if (!(await flushUnsavedChanges())) return
   assignClassModalData.value.isAssigning = true
   try {
     await api.updateAnnotationClass(
@@ -6713,9 +6715,7 @@ const openFillGapsModal = () => {
 
 const executeFillGaps = async () => {
   if (!selectedTaskId.value) return
-  if (hasUnsavedChanges.value) {
-    await saveAnnotations()
-  }
+  if (!(await flushUnsavedChanges())) return
   fillGapsModalData.value.isFilling = true
   try {
     const res = await api.fillGridGaps(
@@ -7697,7 +7697,7 @@ const saveSurgeryVertexEdits = async () => {
       }
     })
 
-    await saveAnnotations()
+    if (!(await saveAnnotations())) return // keep vertex-edit state so the user can retry
     showToast('✅ Koordinat simpul poligon berhasil diperbarui!')
     hasSurgeryVertexEdits.value = false
     surgeryVertexModeActive.value = false
@@ -7734,6 +7734,7 @@ const executeSurgeryClip = async (action) => {
   }
 
   try {
+    if (!(await flushUnsavedChanges())) return
     const res = await api.resolveOverlap({
       task_grid_id: selectedTaskId.value,
       ann_id_a: idA,
@@ -7775,6 +7776,7 @@ const executeSurgeryMerge = async () => {
   const targetClassId = surgeryInvolvedPolygons.value[0]?.geojson?.properties?.class_id || annotationsStore.classes[0]?.id
 
   try {
+    if (!(await flushUnsavedChanges())) return
     // CRITICAL: persist = true so the merged polygon is saved into database!
     const res = await api.mergePolygons(selectedTaskId.value, ids, targetClassId, null, true)
     await loadTaskData(selectedTaskId.value, true)
@@ -7819,6 +7821,7 @@ const executeSurgeryDelete = async (polyId) => {
   surgeryIsProcessing.value = true
 
   try {
+    if (!(await flushUnsavedChanges())) return
     await api.deleteAnnotation(polyId)
     showToast(`Poligon #${polyId} berhasil dihapus.`)
     await loadTaskData(selectedTaskId.value, true)
@@ -7944,9 +7947,7 @@ const handleCleanSlivers = async () => {
   await new Promise(r => setTimeout(r, 20))
 
   try {
-    if (hasUnsavedChanges.value) {
-      await saveAnnotations(false, false)
-    }
+    if (!(await flushUnsavedChanges())) return
     const res = await api.cleanSlivers(selectedTaskId.value)
     showToast(res.data?.message || 'Sliver garis berhasil diserap!')
     await loadTaskData(selectedTaskId.value, true)
@@ -7968,9 +7969,7 @@ const handleAutoHeal = async () => {
   await new Promise(r => setTimeout(r, 20))
 
   try {
-    if (hasUnsavedChanges.value) {
-      await saveAnnotations(false, false)
-    }
+    if (!(await flushUnsavedChanges())) return
     const res = await api.autoHealTopology(selectedTaskId.value)
     showToast(res.data?.message || 'Geometri poligon berhasil dirapikan!')
     await loadTaskData(selectedTaskId.value, true)
@@ -8997,9 +8996,7 @@ const executeSmartDelete = async (targetFeat, targetIdx) => {
   if (!confirmed) return
 
   showToast(`Menghapus poligon [${targetClassName}]...`)
-  if (hasUnsavedChanges.value) {
-    await saveAnnotations()
-  }
+  if (!(await flushUnsavedChanges())) return
 
   try {
     const targetId = targetFeat.id || targetFeat.properties?.id
@@ -9780,13 +9777,9 @@ const runTopologyCheck = async (autoSave = true) => {
   await new Promise(r => setTimeout(r, 20))
 
   try {
-    if (autoSave && hasUnsavedChanges.value && !showTopologySurgeryModal.value) {
-      // Auto-save ONLY if there are genuine unsaved changes in memory
-      try {
-        await saveAnnotations(false, false)
-      } catch (saveErr) {
-        console.warn('Could not auto-save before topology check:', saveErr)
-      }
+    if (autoSave && !showTopologySurgeryModal.value) {
+      // Validation runs on server data: flush genuine unsaved edits first, otherwise it reports on stale state
+      if (!(await flushUnsavedChanges())) return
     }
 
     const res = await api.validateTopology(selectedTaskId.value)
@@ -10116,6 +10109,10 @@ const saveAnnotations = async (reloadGeometry = false, isManual = true) => {
         }
       }
 
+      if (ok.dropped_duplicates > 0) {
+        showToast(`ℹ️ ${ok.dropped_duplicates} poligon tumpuk/duplikat dibuang otomatis oleh server.`)
+        if (editRevision === revAtSave) reloadGeometry = true
+      }
       if (ok.preserved_ids?.length && editRevision === revAtSave) {
         showToast(`ℹ️ ${ok.preserved_ids.length} poligon dari pengguna lain dipertahankan & dimuat ulang.`)
         reloadGeometry = true

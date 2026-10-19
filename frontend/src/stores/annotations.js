@@ -78,7 +78,8 @@ export const useAnnotationsStore = defineStore('annotations', {
           ok: true,
           id_map: idMap,
           count: response.data?.count,
-          preserved_ids: response.data?.preserved_ids || []
+          preserved_ids: response.data?.preserved_ids || [],
+          dropped_duplicates: response.data?.dropped_duplicates || 0
         }
       } catch (err) {
         console.error('Failed to save annotations:', err)
