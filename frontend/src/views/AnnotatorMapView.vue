@@ -2769,8 +2769,15 @@
                 Server saat ini <b class="font-mono">{{ offlinePreview.current_polygons }}</b> poligon →
                 diganti <b class="font-mono">{{ offlinePreview.file_polygons }}</b> poligon dari berkas.
               </div>
-              <ul v-if="offlinePreview.warnings?.length" class="list-disc pl-5 text-[11px] text-amber-900 space-y-0.5">
-                <li v-for="w in offlinePreview.warnings" :key="w">{{ w }}</li>
+              <ul v-if="offlinePreview.warnings?.length" class="space-y-1.5">
+                <li
+                  v-for="w in offlinePreview.warnings"
+                  :key="w.code"
+                  class="p-2 rounded-xl bg-white/70 border border-amber-200 text-[11px] text-amber-900"
+                >
+                  <div class="font-bold">{{ w.message }}</div>
+                  <div class="text-slate-600"><b>Saran:</b> {{ w.solution }}</div>
+                </li>
               </ul>
               <div v-if="offlinePreview.match === 'other_year'" class="p-2.5 rounded-xl bg-rose-50 border border-rose-200 space-y-1.5">
                 <div class="text-[11px] font-bold text-rose-700">
@@ -2791,14 +2798,16 @@
 
             <div
               v-if="offlineMessage"
-              class="p-2.5 rounded-xl border text-[11px] font-bold"
-              :class="offlineError ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'"
+              class="p-3 rounded-2xl border text-[11px] space-y-1"
+              :class="offlineError ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'"
             >
-              {{ offlineMessage }}
+              <div v-if="offlineError" class="font-bold text-rose-700">Gagal karena:</div>
+              <div class="font-bold" :class="offlineError ? 'text-rose-800' : 'text-emerald-700'">{{ offlineMessage }}</div>
+              <div v-if="offlineSolution" class="text-slate-700"><b>{{ offlineError ? 'Solusi:' : 'Catatan:' }}</b> {{ offlineSolution }}</div>
               <button
                 v-if="offlineOpenTargetId"
                 @click="openOfflineTarget"
-                class="ml-2 underline cursor-pointer"
+                class="underline font-bold text-emerald-700 cursor-pointer"
               >Buka grid {{ offlineYear }}</button>
             </div>
           </div>
@@ -6692,6 +6701,7 @@ const showOfflineModal = ref(false)
 const offlineBusy = ref(false)
 const offlineMessage = ref('')
 const offlineError = ref(false)
+const offlineSolution = ref('')
 const offlinePreview = ref(null)
 const offlineFileInput = ref(null)
 const offlineYear = ref(null)
@@ -6728,20 +6738,43 @@ const offlineYears = computed(() => {
 })
 const offlineRasterAvailable = computed(() => (availableRasterYears.value || []).includes(offlineYear.value))
 
+// `msg` can be a string or { message, solution } (what failed + how to fix it)
 const setOfflineMessage = (msg, isError = false) => {
-  offlineMessage.value = msg
+  if (msg && typeof msg === 'object') {
+    offlineMessage.value = msg.message || ''
+    offlineSolution.value = msg.solution || ''
+  } else {
+    offlineMessage.value = msg || ''
+    offlineSolution.value = ''
+  }
   offlineError.value = isError
 }
 
-// Blob responses carry errors as a Blob too; read the FastAPI `detail` out of it.
+// Turns any failure into { message, solution }. Blob responses carry the error as a Blob too.
+// The server sends { code, message, solution } for import problems; other failures get a generic fix by HTTP status.
 const offlineErrorText = async (err) => {
+  const status = err.response?.status
   const data = err.response?.data
+  let detail = null
   try {
-    const text = data instanceof Blob ? await data.text() : null
-    const detail = text ? JSON.parse(text).detail : data?.detail
-    if (detail) return typeof detail === 'string' ? detail : JSON.stringify(detail)
+    const parsed = data instanceof Blob ? JSON.parse(await data.text()) : data
+    detail = parsed?.detail ?? null
   } catch (_) {}
-  return err.message || 'Terjadi kesalahan.'
+  if (detail && typeof detail === 'object' && detail.message) {
+    return { message: detail.message, solution: detail.solution || '' }
+  }
+  const message = typeof detail === 'string' ? detail : (err.message || 'Terjadi kesalahan.')
+  if (!err.response) {
+    return { message: err.code === 'ECONNABORTED' ? 'Server terlalu lama merespons.' : 'Tidak dapat terhubung ke server.',
+             solution: 'Periksa koneksi internet lalu coba lagi. Untuk berkas besar, tunggu beberapa saat sebelum mengulang.' }
+  }
+  const solutions = {
+    401: 'Sesi login berakhir. Masuk kembali, lalu ulangi.',
+    403: 'Hanya pemilik grid (atau admin/reviewer) yang dapat mengubahnya, dan grid berstatus SUBMITTED/APPROVED terkunci. Minta reviewer mengembalikan grid ke REVISION_NEEDED bila perlu diubah.',
+    404: 'Data tidak ditemukan. Pastikan grid sudah memiliki poligon (untuk unduh SHP) atau citra tahun tersebut tersedia.',
+    413: 'Area atau berkas terlalu besar. Gunakan layer grid ini saja.',
+  }
+  return { message, solution: solutions[status] || 'Coba lagi. Jika terulang, hubungi admin dengan menyebutkan pesan di atas.' }
 }
 
 const saveBlobAs = (blob, filename) => {
@@ -6843,6 +6876,9 @@ const confirmOfflineImport = async () => {
     const res = await api.importGridShp(target.id, offlineChosenFile, false, offlineAllowOtherYear.value)
     const dropped = res.data.dropped_duplicates ? ` (${res.data.dropped_duplicates} poligon tumpuk dibuang)` : ''
     const doneText = `${res.data.saved_count} poligon dari Shapefile menimpa grid ${target.grid_code}${dropped}.`
+    const doneHint = res.data.dropped_duplicates
+      ? 'Poligon yang saling tumpuk otomatis dibuang. Jalankan Topology Checker di QGIS/ArcGIS sebelum mengunggah agar tidak ada yang terbuang.'
+      : 
     resetOfflineImport()
     if (isCurrent) {
       await clearTaskDraft(target.id)
@@ -6850,12 +6886,12 @@ const confirmOfflineImport = async () => {
       showDraftRestorePrompt.value = false
       hasUnsavedChanges.value = false
       await loadTaskData(target.id)
-      showToast(`✅ ${doneText}`)
+      showToast(`✅ ${doneText}${doneHint ? ' ' + doneHint : ''}`)
       showOfflineModal.value = false
     } else {
       // Another year's grid: the open map is untouched; offer to switch to it
       offlineOpenTargetId.value = target.id
-      setOfflineMessage(`✅ ${doneText}`)
+      setOfflineMessage({ message: `✅ ${doneText}`, solution: doneHint })
     }
   } catch (err) {
     setOfflineMessage(await offlineErrorText(err), true)

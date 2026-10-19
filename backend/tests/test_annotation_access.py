@@ -224,3 +224,65 @@ def test_import_rejects_file_mostly_outside_grid(db, tmp_path):
     with pytest.raises(HTTPException) as e:
         import_grid_shapefile(g.id, _upload(_zip_gdf(gdf, tmp_path)), True, False, db, owner)
     assert e.value.status_code == 400
+
+
+def _detail(exc):
+    d = exc.value.detail
+    assert isinstance(d, dict) and d["message"] and d["solution"]
+    return d
+
+
+def test_import_errors_explain_cause_and_solution(db, tmp_path):
+    import zipfile
+    import geopandas as gpd
+    from fastapi import UploadFile
+    from app.api.grid_transfer import import_grid_shapefile
+    from shapely.geometry import box as sbox
+
+    owner, g = _grid_with_polys(db)
+
+    def zip_of(names, name="x.zip"):
+        zp = tmp_path / name
+        with zipfile.ZipFile(zp, "w") as zf:
+            for n in names:
+                zf.writestr(n, "x")
+        return UploadFile(file=open(zp, "rb"), filename=name)
+
+    with pytest.raises(HTTPException) as e:
+        import_grid_shapefile(g.id, zip_of(["data.gpkg"]), True, False, db, owner)
+    assert _detail(e)["code"] == "UNSUPPORTED_FORMAT"
+    with pytest.raises(HTTPException) as e:
+        import_grid_shapefile(g.id, zip_of(["a.shp", "a.prj"], "m.zip"), True, False, db, owner)
+    assert _detail(e)["code"] == "MISSING_PARTS"
+    bad = tmp_path / "bad.zip"
+    bad.write_bytes(b"not a zip")
+    with pytest.raises(HTTPException) as e:
+        import_grid_shapefile(g.id, UploadFile(file=open(bad, "rb"), filename="bad.zip"), True, False, db, owner)
+    assert _detail(e)["code"] == "NOT_ZIP"
+
+    gdf = gpd.GeoDataFrame({"KODE_PL": [999]}, geometry=[sbox(100.0, 0.0, 100.005, 0.005)], crs="EPSG:4326")
+    with pytest.raises(HTTPException) as e:
+        import_grid_shapefile(g.id, _upload(_zip_gdf(gdf, tmp_path)), True, False, db, owner)
+    d = _detail(e)
+    assert d["code"] == "BAD_CLASS" and "0 = " in d["solution"]  # lists the valid codes
+
+
+def test_import_null_class_becomes_zero_with_warning_and_drops_z(db, tmp_path):
+    import geopandas as gpd
+    from shapely.geometry import Polygon as P
+    from app.api.grid_transfer import import_grid_shapefile
+    from app.db.models import Annotation
+
+    owner, g = _grid_with_polys(db)
+    poly_z = P([(100.0, 0.0, 5), (100.005, 0.0, 5), (100.005, 0.005, 5), (100.0, 0.005, 5)])
+    gdf = gpd.GeoDataFrame({"KODE_PL": [None]}, geometry=[poly_z], crs="EPSG:4326")
+    zp = _zip_gdf(gdf, tmp_path)
+
+    preview = import_grid_shapefile(g.id, _upload(zp), True, False, db, owner)
+    codes = {w["code"] for w in preview["warnings"]}
+    assert "NULL_CLASS" in codes and all(w["solution"] for w in preview["warnings"])
+
+    import_grid_shapefile(g.id, _upload(zp), False, False, db, owner)
+    ann = db.query(Annotation).filter(Annotation.task_grid_id == g.id).one()
+    assert ann.class_id == 0
+    assert all(len(c) == 2 for c in json.loads(ann.geom_geojson)["coordinates"][0])  # no Z

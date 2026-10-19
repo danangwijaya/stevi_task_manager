@@ -3,6 +3,7 @@ export land-cover polygons as shapefile, export the Sentinel-2 raster clipped to
 and import an edited shapefile back (preview first, then overwrite)."""
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -13,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import geopandas as gpd
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
+from shapely import force_2d
 from shapely.geometry import MultiPolygon, Polygon, box, mapping, shape
 from shapely.validation import make_valid
 from sqlalchemy.orm import Session
@@ -218,49 +220,87 @@ def export_grid_raster(
 
 # ─── SHAPEFILE IMPORT (overwrite) ────────────────────────────────────────────
 
+def _problem(status: int, code: str, message: str, solution: str) -> HTTPException:
+    """Blocking error: what failed (`message`) and how to fix it (`solution`), rendered by the frontend."""
+    return HTTPException(status_code=status, detail={"code": code, "message": message, "solution": solution})
+
+
+def _warn(code: str, message: str, solution: str) -> Dict[str, str]:
+    """Non-blocking finding shown in the preview."""
+    return {"code": code, "message": message, "solution": solution}
+
+
+UNSUPPORTED_FORMATS = (".gdb", ".gpkg", ".geojson", ".json", ".kml", ".kmz")
+
+
 def _read_uploaded_shapefile(upload: UploadFile, temp_dir: str) -> gpd.GeoDataFrame:
     raw = upload.file.read(MAX_UPLOAD_BYTES + 1)
     if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Berkas terlalu besar (maks 50 MB).")
+        raise _problem(413, "FILE_TOO_LARGE", "Berkas lebih besar dari 50 MB.",
+                       "Unggah hanya layer penutupan lahan grid ini (hasil unduhan dari aplikasi), bukan seluruh proyek.")
     zip_path = os.path.join(temp_dir, "upload.zip")
     with open(zip_path, "wb") as f:
         f.write(raw)
     try:
         with zipfile.ZipFile(zip_path) as zf:
-            shp_names = [n for n in zf.namelist() if n.lower().endswith(".shp") and not n.startswith("__MACOSX")]
-            if len(shp_names) != 1:
-                raise HTTPException(status_code=400, detail="Zip harus berisi tepat satu berkas .shp.")
+            names = [n for n in zf.namelist() if not n.startswith("__MACOSX")]
+            lowered = [n.lower().rstrip("/") for n in names]
+            shp_names = [n for n in names if n.lower().endswith(".shp")]
+            if not shp_names:
+                other = [n for n in lowered if n.endswith(UNSUPPORTED_FORMATS) or ".gdb/" in n]
+                if other:
+                    raise _problem(400, "UNSUPPORTED_FORMAT",
+                                   "Zip berisi format selain Shapefile (misalnya File Geodatabase, GeoPackage, atau GeoJSON).",
+                                   "Ekspor layer ke Shapefile dulu: QGIS → klik kanan layer → Export → Save Features As → ESRI Shapefile; "
+                                   "ArcGIS → Export Features → format Shapefile. Lalu zip ulang.")
+                raise _problem(400, "NO_SHP", "Tidak ada berkas .shp di dalam zip.",
+                               "Zip harus berisi .shp, .shx, dan .dbf (disarankan juga .prj) dari satu layer.")
+            if len(shp_names) > 1:
+                raise _problem(400, "MULTIPLE_SHP", f"Zip berisi {len(shp_names)} berkas .shp.",
+                               "Masukkan hanya satu layer (satu set .shp/.shx/.dbf/.prj) ke dalam zip.")
             stem = os.path.splitext(os.path.basename(shp_names[0]))[0]
+            present = {os.path.splitext(n)[1].lower() for n in names if os.path.splitext(os.path.basename(n))[0] == stem}
+            missing = [e for e in (".shx", ".dbf") if e not in present]
+            if missing:
+                raise _problem(400, "MISSING_PARTS", f"Berkas pendamping hilang: {', '.join(missing)}.",
+                               "Shapefile terdiri dari beberapa berkas. Pilih semua berkas dengan nama yang sama "
+                               f"({stem}.shp, .shx, .dbf, .prj) lalu kompres bersama.")
             # Extract by basename only (ignores paths in the zip) and only known shapefile parts
-            for n in zf.namelist():
+            for n in names:
                 ext = os.path.splitext(n)[1].lower()
                 if ext in SHP_PARTS and os.path.splitext(os.path.basename(n))[0] == stem:
-                    with zf.open(n) as s, open(os.path.join(temp_dir, "in" + ext), "wb") as d:
-                        shutil.copyfileobj(s, d)
+                    with zf.open(n) as src_f, open(os.path.join(temp_dir, "in" + ext), "wb") as d:
+                        shutil.copyfileobj(src_f, d)
     except zipfile.BadZipFile:
-        raise HTTPException(status_code=400, detail="Berkas bukan zip yang valid.")
+        raise _problem(400, "NOT_ZIP", "Berkas bukan zip yang valid.",
+                       "Kompres berkas Shapefile menjadi .zip (klik kanan → Compress / Send to → Compressed folder). "
+                       "Mengganti ekstensi saja tidak cukup.")
     try:
         return gpd.read_file(os.path.join(temp_dir, "in.shp"))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Shapefile tidak dapat dibaca: {e}")
+        logger.warning(f"Shapefile import: unreadable file: {e}")
+        raise _problem(400, "UNREADABLE", "Shapefile tidak dapat dibaca (berkas mungkin rusak atau tidak lengkap).",
+                       "Ekspor ulang layer ke Shapefile dari QGIS/ArcGIS, lalu unggah kembali.")
 
 
 def _prepare_import(gdf: gpd.GeoDataFrame, task: TaskGrid, existing_ids: set) -> Dict[str, Any]:
-    """Validates the shapefile and converts it to save-ready features. Raises 400 on blocking problems."""
-    warnings: List[str] = []
+    """Validates the shapefile and converts it to save-ready features.
+    Raises a structured 400 on blocking problems; returns non-blocking findings as `warnings`."""
+    warnings: List[Dict[str, str]] = []
     gdf.columns = [str(c).upper() if c != "geometry" else c for c in gdf.columns]
     source = _classify_source(gdf, task)
     if source["match"] == "other_grid":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Berkas ini berasal dari grid lain ({source['source_grid_code']}), bukan {task.grid_code}. "
-                   f"Pilih grid yang sesuai atau gunakan berkas hasil unduhan grid ini.",
-        )
+        raise _problem(400, "OTHER_GRID",
+                       f"Berkas ini berasal dari grid lain ({source['source_grid_code']}), bukan {task.grid_code}.",
+                       "Pilih grid yang sesuai di aplikasi, atau gunakan berkas hasil unduhan dari grid ini.")
     if "KODE_PL" not in gdf.columns:
-        raise HTTPException(status_code=400, detail="Kolom KODE_PL (kode kelas penutupan lahan) tidak ditemukan.")
+        raise _problem(400, "NO_KODE_PL", "Kolom KODE_PL (kode kelas penutupan lahan) tidak ditemukan.",
+                       "Tambahkan kolom angka bernama KODE_PL dan isi kode kelasnya, atau edit berkas hasil unduhan "
+                       "aplikasi tanpa menghapus kolom tersebut.")
 
     if gdf.crs is None:
-        warnings.append("Berkas tidak memiliki .prj; diasumsikan EPSG:4326 (WGS84).")
+        warnings.append(_warn("NO_PRJ", "Berkas tidak memiliki .prj; sistem koordinat diasumsikan WGS84 (EPSG:4326).",
+                              "Jika poligon tampak bergeser atau hilang, ekspor ulang dengan menyertakan berkas .prj."))
         gdf = gdf.set_crs("EPSG:4326")
     else:
         gdf = gdf.to_crs("EPSG:4326")
@@ -272,17 +312,23 @@ def _prepare_import(gdf: gpd.GeoDataFrame, task: TaskGrid, existing_ids: set) ->
     features: List[GeoJSONFeature] = []
     used_ids: set = set()
     bad_class_rows: List[int] = []
-    skipped_empty = skipped_outside = clipped = 0
+    skipped_empty = skipped_outside = skipped_non_polygon = clipped = null_class = 0
 
     for row_no, (_, row) in enumerate(gdf.iterrows(), start=1):
         geom = row.geometry
         if geom is None or geom.is_empty:
             skipped_empty += 1
             continue
-        try:
-            class_id = int(float(row["KODE_PL"]))
-        except (TypeError, ValueError):
-            class_id = None
+        geom = force_2d(geom)  # ArcGIS may write PolygonZ/M; the app stores 2D only
+        raw_class = row["KODE_PL"]
+        if raw_class is None or (isinstance(raw_class, float) and math.isnan(raw_class)):
+            class_id = 0  # new polygon without a class: keep it as "Belum Teridentifikasi"
+            null_class += 1
+        else:
+            try:
+                class_id = int(float(raw_class))
+            except (TypeError, ValueError):
+                class_id = None
         if class_id not in classes:
             bad_class_rows.append(row_no)
             continue
@@ -295,6 +341,9 @@ def _prepare_import(gdf: gpd.GeoDataFrame, task: TaskGrid, existing_ids: set) ->
             geom = geom.intersection(grid_box)
             clipped += 1
         parts = [g for g in getattr(geom, "geoms", [geom]) if isinstance(g, (Polygon, MultiPolygon)) and not g.is_empty]
+        if not parts:
+            skipped_non_polygon += 1
+            continue
         polys: List[Polygon] = []
         for g in parts:
             polys.extend(g.geoms if isinstance(g, MultiPolygon) else [g])
@@ -315,28 +364,38 @@ def _prepare_import(gdf: gpd.GeoDataFrame, task: TaskGrid, existing_ids: set) ->
             ))
 
     if bad_class_rows:
-        shown = ", ".join(map(str, bad_class_rows[:10]))
-        raise HTTPException(
-            status_code=400,
-            detail=f"KODE_PL tidak dikenal pada {len(bad_class_rows)} baris (baris ke-{shown}"
-                   f"{'…' if len(bad_class_rows) > 10 else ''}). Gunakan kode kelas yang valid.",
-        )
+        shown = ", ".join(map(str, bad_class_rows[:10])) + ("…" if len(bad_class_rows) > 10 else "")
+        valid_codes = ", ".join(f"{cid} = {name}" for cid, name in sorted(classes.items()))
+        raise _problem(400, "BAD_CLASS",
+                       f"KODE_PL tidak dikenal atau bukan angka pada {len(bad_class_rows)} baris (baris ke-{shown}).",
+                       f"Perbaiki nilai KODE_PL pada baris tersebut. Kode yang valid: {valid_codes}.")
     if not features:
-        raise HTTPException(status_code=400, detail="Tidak ada poligon valid di dalam batas grid pada berkas ini.")
+        raise _problem(400, "NO_POLYGONS", "Tidak ada poligon yang dapat diimpor di dalam batas grid.",
+                       "Pastikan layer bertipe Polygon (bukan titik/garis), berisi data, dan berada di area grid ini.")
     considered = len(features) + skipped_outside
     if skipped_outside and skipped_outside / considered > 0.5:
-        raise HTTPException(
-            status_code=400,
-            detail="Sebagian besar poligon berada di luar batas grid ini. Kemungkinan berkas berasal dari grid lain.",
-        )
+        raise _problem(400, "MOSTLY_OUTSIDE", "Sebagian besar poligon berada di luar batas grid ini.",
+                       "Kemungkinan berkas berasal dari grid lain atau sistem koordinatnya salah. "
+                       "Gunakan hasil unduhan grid ini, dan sertakan berkas .prj.")
+
     if source["match"] == "unknown":
-        warnings.append("Berkas tidak memiliki kolom GRID_CODE; kecocokan grid hanya diperiksa dari posisi poligon.")
+        warnings.append(_warn("NO_GRID_CODE", "Berkas tidak memiliki kolom GRID_CODE; kecocokan grid hanya diperiksa dari posisi poligon.",
+                              "Pastikan berkas memang dibuat untuk grid ini. Berkas hasil unduhan aplikasi selalu menyertakan kolom ini."))
+    if null_class:
+        warnings.append(_warn("NULL_CLASS", f"{null_class} poligon belum memiliki KODE_PL dan dijadikan kelas 0 (Belum Teridentifikasi).",
+                              "Isi KODE_PL di QGIS/ArcGIS lalu unggah ulang, atau beri kelas lewat panel poligon setelah impor."))
     if clipped:
-        warnings.append(f"{clipped} poligon melewati batas grid dan dipotong.")
+        warnings.append(_warn("CLIPPED", f"{clipped} poligon melewati batas grid dan dipotong.",
+                              "Jika tidak diinginkan, rapikan batas poligon di sepanjang tepi grid sebelum mengunggah."))
     if skipped_outside:
-        warnings.append(f"{skipped_outside} poligon di luar grid diabaikan.")
+        warnings.append(_warn("OUTSIDE_IGNORED", f"{skipped_outside} poligon berada di luar grid dan diabaikan.",
+                              "Hapus poligon di luar grid dari layer, atau periksa apakah berkas berasal dari grid yang benar."))
+    if skipped_non_polygon:
+        warnings.append(_warn("NON_POLYGON", f"{skipped_non_polygon} objek bukan poligon (titik/garis) dan diabaikan.",
+                              "Gunakan layer bertipe Polygon untuk penutupan lahan."))
     if skipped_empty:
-        warnings.append(f"{skipped_empty} baris tanpa geometri diabaikan.")
+        warnings.append(_warn("EMPTY_ROWS", f"{skipped_empty} baris tanpa geometri diabaikan.",
+                              "Hapus baris kosong dari tabel atribut."))
     return {"features": features, "warnings": warnings, **source}
 
 
@@ -376,11 +435,10 @@ def import_grid_shapefile(
     if dry_run:
         return {"dry_run": True, **summary}
     if summary["match"] == "other_year" and not allow_other_year:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Berkas berasal dari tahun lain ({summary['source_grid_code']}), target {task.grid_code}. "
-                   f"Konfirmasi eksplisit diperlukan untuk menimpa.",
-        )
+        raise _problem(409, "OTHER_YEAR",
+                       f"Berkas berasal dari tahun lain ({summary['source_grid_code']}), sedangkan target adalah {task.grid_code}.",
+                       "Jika memang ingin memakai poligon tahun lain sebagai dasar, centang persetujuan di pratinjau lalu timpa. "
+                       "Jika tidak, pilih tahun yang sesuai.")
 
     if existing_ids:
         create_grid_snapshot_from_db(
