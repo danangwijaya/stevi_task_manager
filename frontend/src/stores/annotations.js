@@ -9,7 +9,10 @@ export const useAnnotationsStore = defineStore('annotations', {
     loading: false,
     saving: false,
     dirty: false,
-    lastSaveError: null
+    lastSaveError: null,
+    // Per grid: server clock at last sync, and newest annotation change seen at that load
+    syncedAt: {},
+    annotationsUpdatedAt: {}
   }),
 
   actions: {
@@ -34,6 +37,8 @@ export const useAnnotationsStore = defineStore('annotations', {
       try {
         const response = await api.getGridAnnotations(taskGridId)
         this.currentFeatures = response.data.features || []
+        this.syncedAt[taskGridId] = response.data.server_time || null
+        this.annotationsUpdatedAt[taskGridId] = response.data.annotations_updated_at || null
         this.dirty = false
         return this.currentFeatures
       } catch (err) {
@@ -49,7 +54,7 @@ export const useAnnotationsStore = defineStore('annotations', {
       this.saving = true
       this.lastSaveError = null
       try {
-        const response = await api.saveGridAnnotations(taskGridId, features)
+        const response = await api.saveGridAnnotations(taskGridId, features, this.syncedAt[taskGridId] || null)
         const idMap = response.data?.id_map || null
         if (idMap && Array.isArray(features)) {
           features.forEach(f => {
@@ -67,8 +72,14 @@ export const useAnnotationsStore = defineStore('annotations', {
         } else {
           this.currentFeatures = features
         }
+        if (response.data?.server_time) this.syncedAt[taskGridId] = response.data.server_time
         this.dirty = false
-        return { ok: true, id_map: idMap, count: response.data?.count }
+        return {
+          ok: true,
+          id_map: idMap,
+          count: response.data?.count,
+          preserved_ids: response.data?.preserved_ids || []
+        }
       } catch (err) {
         console.error('Failed to save annotations:', err)
         this.lastSaveError = err.response?.data?.detail || err.message || 'Gagal menyimpan anotasi ke server.'

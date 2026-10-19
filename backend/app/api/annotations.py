@@ -15,13 +15,57 @@ from shapely.strtree import STRtree
 from app.db.session import get_db
 from app.db.models import Annotation, TaskGrid, User, LandCoverClass, TaskReviewPin, GridSnapshot, AuditLog
 from app.core.config import settings
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_active_admin
 from app.services.snapshot_service import create_grid_snapshot_from_db, restore_grid_snapshot, log_audit
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+PRIVILEGED_ROLES = ("admin", "dosen", "supervisi", "reviewer")
+LOCKED_STATUSES = ("SUBMITTED", "APPROVED")
+
+
+def _utc_iso(dt: datetime) -> str:
+    return dt.isoformat() + "Z"
+
+
+def _parse_client_time(value: Optional[str]) -> Optional[datetime]:
+    """Parses a server-issued `..Z` timestamp echoed back by the client (naive UTC)."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.rstrip("Z")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _require_grid_edit_access(db: Session, task_grid_id: int, user: User) -> TaskGrid:
+    """Returns the grid if `user` may modify its annotations, else raises 404/403.
+
+    Privileged roles may always edit. Annotators may edit only grids that are
+    unassigned or assigned to them, and not while SUBMITTED/APPROVED.
+    """
+    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task grid not found")
+
+    role = (user.role or "").strip().lower()
+    if role in PRIVILEGED_ROLES:
+        return task
+    if task.assigned_user_id is not None and task.assigned_user_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Grid ini telah ditugaskan ke {task.assignee.full_name if task.assignee else 'pengguna lain'}. Anda tidak dapat mengubah data pada grid ini."
+        )
+    if task.status in LOCKED_STATUSES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Grid berstatus {task.status} dan terkunci untuk penyuntingan."
+        )
+    return task
+
 
 class GeoJSONFeature(BaseModel):
     type: str = "Feature"
@@ -31,6 +75,9 @@ class GeoJSONFeature(BaseModel):
 
 class AnnotationSaveRequest(BaseModel):
     task_grid_id: int
+    # `server_time` the client received when it last synced this grid. Rows changed on the
+    # server after this instant are unknown to the client and are never deleted by this save.
+    synced_at: Optional[str] = None
     features: List[GeoJSONFeature]
 
 @router.get("/classes")
@@ -275,6 +322,7 @@ def get_grid_annotations(
         raise HTTPException(status_code=404, detail="Task grid not found")
         
     annotations = db.query(Annotation).options(joinedload(Annotation.author)).filter(Annotation.task_grid_id == task_grid_id).all()
+    last_modified = max((a.updated_at for a in annotations if a.updated_at), default=None)
     
     features = []
     for ann in annotations:
@@ -321,6 +369,8 @@ def get_grid_annotations(
         "type": "FeatureCollection",
         "task_grid_id": task_grid_id,
         "grid_code": task.grid_code,
+        "server_time": _utc_iso(datetime.utcnow()),
+        "annotations_updated_at": _utc_iso(last_modified) if last_modified else None,
         "features": features
     }
 
@@ -441,16 +491,7 @@ def save_grid_annotations(
     """
     Saves/syncs the polygons for the specified task grid.
     """
-    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task grid not found")
-
-    user_role = (current_user.role or "").strip().lower()
-    if task.assigned_user_id is not None and user_role not in ["admin", "dosen", "supervisi", "reviewer"] and task.assigned_user_id != current_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Grid ini telah ditugaskan ke {task.assignee.full_name if task.assignee else 'pengguna lain'}. Anda tidak dapat mengubah data pada grid ini."
-        )
+    task = _require_grid_edit_access(db, task_grid_id, current_user)
 
     # Auto-claim unassigned grid if annotator begins digitizing it
     if task.assigned_user_id is None:
@@ -476,7 +517,10 @@ def save_grid_annotations(
 
     for f in data.features:
         props = f.properties if f.properties else {}
-        class_id = int(props.get("class_id", 0)) if "class_id" in props else 0
+        try:
+            class_id = int(props.get("class_id") or 0)
+        except (TypeError, ValueError):
+            class_id = 0
         class_name = props.get("class_name", classes_dict.get(class_id, "Belum Teridentifikasi"))
         
         geom_dict = f.geometry
@@ -665,7 +709,6 @@ def save_grid_annotations(
             ann.class_name = class_name
             ann.geom_geojson = json.dumps(part_geojson)
             ann.area_sqm = area_sqm
-            ann.user_id = current_user.id
             retained_ids.add(fid)
             saved_annotations.append(ann)
             saved_with_ui.append((ann, ui_id))
@@ -690,9 +733,20 @@ def save_grid_annotations(
             detail="Gagal memproses geometri poligon. Simpan dibatalkan untuk melindungi data poligon."
         )
 
+    preserved_ids = []
     # Clean up annotations that were genuinely deleted by the user ONLY IF saved_annotations is non-empty
     if len(saved_annotations) > 0:
         to_delete_ids = list(set(existing_map.keys()) - retained_ids)
+        synced_at = _parse_client_time(data.synced_at)
+        if synced_at is not None:
+            # Rows modified after the client's last sync were never seen by it: keep them.
+            preserved_ids = [
+                i for i in to_delete_ids
+                if existing_map[i].updated_at and existing_map[i].updated_at > synced_at
+            ]
+            if preserved_ids:
+                preserved_set = set(preserved_ids)
+                to_delete_ids = [i for i in to_delete_ids if i not in preserved_set]
         if to_delete_ids:
             chunk_size = 500
             for i in range(0, len(to_delete_ids), chunk_size):
@@ -712,36 +766,29 @@ def save_grid_annotations(
         if ui_id and ann.id is not None:
             id_map[str(ui_id)] = ann.id
 
+    # Build the snapshot payload BEFORE commit: after commit every ORM attribute is expired
+    # and would trigger one SELECT per polygon.
+    snapshot_geojson = None
+    if len(saved_annotations) > 0:
+        snap_parts = []
+        for ann in saved_annotations + [existing_map[i] for i in preserved_ids]:
+            c_id_str = str(ann.id) if ann.id is not None else "null"
+            c_cls_str = str(ann.class_id) if ann.class_id is not None else "0"
+            c_name_safe = json.dumps(ann.class_name or "Belum Teridentifikasi")
+            c_area_str = str(round(ann.area_sqm or 0, 2))
+            geom_part = ann.geom_geojson or '{"type":"Polygon","coordinates":[]}'
+            snap_parts.append(
+                '{"type":"Feature","id":' + c_id_str + ',"properties":{"id":' + c_id_str + ',"class_id":' + c_cls_str + ',"class_name":' + c_name_safe + ',"area_sqm":' + c_area_str + '},"geometry":' + geom_part + '}'
+            )
+        snapshot_geojson = '{"type":"FeatureCollection","features":[' + ','.join(snap_parts) + ']}'
+    saved_count = len(saved_annotations) + len(preserved_ids)
+
     db.commit()
 
-    # Automatically record version snapshot using ZERO-QUERY direct string construction (0.01s instead of 2.0s)
-    if len(saved_annotations) > 0:
+    if snapshot_geojson is not None:
         try:
-            from app.services.snapshot_service import _prune_old_snapshots
-            snap_parts = []
-            for ann in saved_annotations:
-                c_id_str = str(ann.id) if ann.id is not None else "null"
-                c_cls_str = str(ann.class_id) if ann.class_id is not None else "0"
-                c_name_safe = json.dumps(ann.class_name or "Belum Teridentifikasi")
-                c_area_str = str(round(ann.area_sqm or 0, 2))
-                geom_part = ann.geom_geojson or '{"type":"Polygon","coordinates":[]}'
-                snap_parts.append(
-                    '{"type":"Feature","id":' + c_id_str + ',"properties":{"id":' + c_id_str + ',"class_id":' + c_cls_str + ',"class_name":' + c_name_safe + ',"area_sqm":' + c_area_str + '},"geometry":' + geom_part + '}'
-                )
-            geojson_str = '{"type":"FeatureCollection","features":[' + ','.join(snap_parts) + ']}'
-            last_version = db.query(func.max(GridSnapshot.version_number)).filter(GridSnapshot.task_grid_id == task_grid_id).scalar() or 0
-            snap = GridSnapshot(
-                task_grid_id=task_grid_id,
-                user_id=current_user.id,
-                version_number=last_version + 1,
-                note="Draf Disimpan",
-                features_count=len(saved_annotations),
-                geojson_data=geojson_str,
-                created_at=datetime.utcnow()
-            )
-            db.add(snap)
-            db.commit()
-            _prune_old_snapshots(db, task_grid_id, 20)
+            from app.services.snapshot_service import record_autosave_snapshot
+            record_autosave_snapshot(db, task_grid_id, current_user.id, snapshot_geojson, saved_count)
         except Exception as snap_err:
             logger.warning(f"Could not create version snapshot for grid {task_grid_id}: {snap_err}")
             db.rollback()
@@ -760,6 +807,8 @@ def save_grid_annotations(
         "message": f"Successfully saved {len(saved_annotations)} annotation polygons",
         "count": len(saved_annotations),
         "id_map": id_map,
+        "preserved_ids": preserved_ids,
+        "server_time": _utc_iso(datetime.utcnow()),
         "saved_features": []
     }
 
@@ -904,16 +953,23 @@ def copy_annotations_from_task(
     if not source_task:
         raise HTTPException(status_code=404, detail="Source task grid not found")
         
-    user_role = (current_user.role or "").strip().lower()
-    if user_role not in ["admin", "dosen", "supervisi", "reviewer"] and target_task.assigned_user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to edit this task")
+    _require_grid_edit_access(db, task_grid_id, current_user)
 
     source_annotations = db.query(Annotation).filter(Annotation.task_grid_id == source_task_id).all()
     if not source_annotations:
         raise HTTPException(status_code=400, detail="Grid sumber tidak memiliki poligon anotasi untuk disalin")
 
-    # Clear existing target annotations
-    db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).delete()
+    # Safeguard: snapshot before wipe, release review pins before deleting their annotations
+    create_grid_snapshot_from_db(
+        db=db,
+        task_grid_id=task_grid_id,
+        user_id=current_user.id,
+        note=f"Sebelum salin dari grid {source_task.grid_code} ({source_task.year})"
+    )
+    target_ids = [r[0] for r in db.query(Annotation.id).filter(Annotation.task_grid_id == task_grid_id).all()]
+    if target_ids:
+        db.query(TaskReviewPin).filter(TaskReviewPin.annotation_id.in_(target_ids)).update({"annotation_id": None}, synchronize_session=False)
+    db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).delete(synchronize_session=False)
 
     cloned = []
     for sa in source_annotations:
@@ -950,13 +1006,7 @@ def init_base_polygon(
     This is the starting point for the cut-polygon semantic segmentation workflow.
     Only works when the grid has NO existing annotations.
     """
-    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task grid not found")
-    
-    user_role = (current_user.role or "").strip().lower()
-    if user_role not in ["admin", "dosen", "supervisi", "reviewer"] and task.assigned_user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Grid ini bukan milik Anda")
+    task = _require_grid_edit_access(db, task_grid_id, current_user)
 
     existing_count = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).count()
     if existing_count > 0:
@@ -1268,9 +1318,7 @@ def auto_heal_topology(
     if options is None:
         options = AutoHealOptionsRequest()
         
-    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task grid not found")
+    task = _require_grid_edit_access(db, task_grid_id, current_user)
 
     annotations = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
     if not annotations:
@@ -1685,9 +1733,7 @@ def clean_slivers_endpoint(
     into their adjacent neighboring polygons with the longest shared boundary.
     Leaves NO gaps, voids, or holes behind.
     """
-    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task grid not found")
+    task = _require_grid_edit_access(db, task_grid_id, current_user)
 
     annotations = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
     if not annotations:
@@ -1808,6 +1854,7 @@ def resolve_overlap(
     from shapely.geometry import shape, mapping
     from shapely.validation import make_valid
     
+    _require_grid_edit_access(db, req.task_grid_id, current_user)
     ann_a = db.query(Annotation).filter(Annotation.id == req.ann_id_a, Annotation.task_grid_id == req.task_grid_id).first()
     ann_b = db.query(Annotation).filter(Annotation.id == req.ann_id_b, Annotation.task_grid_id == req.task_grid_id).first()
     
@@ -1952,6 +1999,7 @@ def repair_single_annotation_geometry(
     ann = db.query(Annotation).filter(Annotation.id == annotation_id).first()
     if not ann:
         raise HTTPException(status_code=404, detail="Annotation not found")
+    _require_grid_edit_access(db, ann.task_grid_id, current_user)
         
     try:
         s_geom = shape(json.loads(ann.geom_geojson))
@@ -2016,9 +2064,7 @@ def fill_grid_gaps(
     from shapely.geometry import box, shape, mapping
     from shapely.ops import unary_union
     
-    task = db.query(TaskGrid).filter(TaskGrid.id == task_grid_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task grid not found")
+    task = _require_grid_edit_access(db, task_grid_id, current_user)
         
     annotations = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
     if not annotations:
@@ -2431,6 +2477,7 @@ def update_annotation_class(
     ann = db.query(Annotation).filter(Annotation.id == annotation_id).first()
     if not ann:
         raise HTTPException(status_code=404, detail="Annotation not found")
+    _require_grid_edit_access(db, ann.task_grid_id, current_user)
         
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
     if data.class_id not in classes_dict:
@@ -2571,9 +2618,7 @@ def split_by_polygon(
     """
     from shapely.geometry import shape, mapping
     
-    task = db.query(TaskGrid).filter(TaskGrid.id == req.task_grid_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task grid not found")
+    task = _require_grid_edit_access(db, req.task_grid_id, current_user)
         
     try:
         cutter = shape(req.cutting_geom)
@@ -2988,8 +3033,29 @@ def split_by_polygon(
                     # Polygon is completely enclosed by cutter -> reclassify
                     split_occurred = True
                     target_cut_cid = new_class_id if (new_class_id and new_class_id in classes_dict and new_class_id > 0) else ann.class_id
+                    target_cut_cname = classes_dict.get(target_cut_cid, ann.class_name)
+                    if not req.persist:
+                        # Draft mode must not touch the database: hand back a replacement instead.
+                        target_ui = (req.target_feature.get("_uiId") or req.target_feature.get("properties", {}).get("_uiId")) if req.target_feature else None
+                        return {
+                            "message": "Poligon berhasil dipisah menjadi bagian independen!",
+                            "split_count": 1,
+                            "deleted_ids": [ann.id],
+                            "deleted_ui_id": target_ui,
+                            "created_features": [{
+                                "type": "Feature",
+                                "geometry": json.loads(ann.geom_geojson),
+                                "properties": {
+                                    "class_id": target_cut_cid,
+                                    "class_name": target_cut_cname,
+                                    "area_sqm": ann.area_sqm,
+                                    "author_name": current_user.full_name or "Unknown",
+                                }
+                            }],
+                            "updated_features": []
+                        }
                     ann.class_id = target_cut_cid
-                    ann.class_name = classes_dict.get(target_cut_cid, ann.class_name)
+                    ann.class_name = target_cut_cname
                     ann.user_id = current_user.id
                     new_created_count += 1
                     updated_annotations_list.append(ann)
@@ -3062,9 +3128,7 @@ def split_by_line(
     from shapely.geometry import shape, mapping
     from shapely.ops import split
     
-    task = db.query(TaskGrid).filter(TaskGrid.id == req.task_grid_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task grid not found")
+    task = _require_grid_edit_access(db, req.task_grid_id, current_user)
         
     try:
         blade = shape(req.line_geom)
@@ -3507,6 +3571,16 @@ def split_by_line(
     }
 
 
+def _ensure_single_merged_part(merged_polys, detail):
+    """Merged result must be one polygon. Extra parts above noise level mean the
+    inputs are disjoint; rejecting is safer than silently dropping them."""
+    merged_polys.sort(key=lambda p: p.area, reverse=True)
+    for extra in merged_polys[1:]:
+        if extra.area * (111320.0 ** 2) > 5.0:
+            raise HTTPException(status_code=400, detail=detail)
+    return merged_polys[0]
+
+
 @router.post("/merge")
 def merge_polygons(
     req: MergePolygonsRequest,
@@ -3522,6 +3596,8 @@ def merge_polygons(
     classes_dict = {c["id"]: c["name"] for c in settings.LAND_COVER_CLASSES}
 
     if req.features and len(req.features) >= 2:
+        if req.task_grid_id:
+            _require_grid_edit_access(db, req.task_grid_id, current_user)
         geoms = []
         for f in req.features:
             try:
@@ -3556,18 +3632,10 @@ def merge_polygons(
                 detail="Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bersentuhan yang dapat digabungkan."
             )
 
-        if len(merged_polys) > 1:
-            merged_polys.sort(key=lambda p: p.area, reverse=True)
-            total_merged_area = sum(p.area for p in merged_polys)
-            second_area_sqm = merged_polys[1].area * (111320.0 ** 2)
-            # Only fail if the second polygon is genuinely significant (> 5 sqm and > 2% of total area)
-            if second_area_sqm > 5.0 and (merged_polys[1].area / total_merged_area) > 0.02:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bersentuhan yang dapat digabungkan."
-                )
-
-        final_merged = merged_polys[0]
+        final_merged = _ensure_single_merged_part(
+            merged_polys,
+            "Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bersentuhan yang dapat digabungkan."
+        )
         created_feat = {
             "type": "Feature",
             "geometry": mapping(final_merged),
@@ -3613,6 +3681,12 @@ def merge_polygons(
     
     if len(annotations) < 2:
         raise HTTPException(status_code=404, detail="Poligon yang dipilih tidak ditemukan.")
+
+    grid_ids = {a.task_grid_id for a in annotations}
+    if len(grid_ids) != 1:
+        raise HTTPException(status_code=400, detail="Poligon yang digabungkan harus berada pada grid yang sama.")
+    merge_grid_id = grid_ids.pop()
+    _require_grid_edit_access(db, merge_grid_id, current_user)
     if req.target_class_id and req.target_class_id in classes_dict:
         target_class_id = req.target_class_id
         target_class_name = classes_dict[target_class_id]
@@ -3653,19 +3727,11 @@ def merge_polygons(
             detail="Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bertampalan atau berbatasan langsung yang dapat digabungkan."
         )
 
-    if len(merged_polys) > 1:
-        merged_polys.sort(key=lambda p: p.area, reverse=True)
-        total_merged_area = sum(p.area for p in merged_polys)
-        second_area_sqm = merged_polys[1].area * (111320.0 ** 2)
-        # Only fail if the second polygon is genuinely significant (> 5 sqm and > 2% of total area)
-        if second_area_sqm > 5.0 and (merged_polys[1].area / total_merged_area) > 0.02:
-            raise HTTPException(
-                status_code=400,
-                detail="Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bertampalan atau berbatasan langsung yang dapat digabungkan."
-            )
-
     # Strictly 1 singlepart merged polygon
-    final_merged_poly = merged_polys[0]
+    final_merged_poly = _ensure_single_merged_part(
+        merged_polys,
+        "Poligon yang dipilih tidak bersebelahan atau tidak bersentuhan. Hanya poligon yang bertampalan atau berbatasan langsung yang dapat digabungkan."
+    )
 
     ann_ids = [ann.id for ann in annotations]
     if not req.persist:
@@ -3692,7 +3758,7 @@ def merge_polygons(
 
     area_sqm = final_merged_poly.area * (111320.0 ** 2)
     m_ann = Annotation(
-        task_grid_id=req.task_grid_id,
+        task_grid_id=merge_grid_id,
         user_id=current_user.id,
         class_id=target_class_id,
         class_name=target_class_name,
@@ -3764,6 +3830,7 @@ def smart_delete_polygon(
     Deletes a polygon by absorbing / merging it into an adjacent neighboring polygon,
     ensuring no void/hole/gap is left behind in the land cover training dataset.
     """
+    _require_grid_edit_access(db, task_grid_id, current_user)
     target = db.query(Annotation).filter(
         Annotation.id == req.annotation_id,
         Annotation.task_grid_id == task_grid_id
@@ -4145,7 +4212,7 @@ def ai_segment_proposal(
 @router.post("/fix-multipolygons")
 def fix_all_multipolygons_api(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_active_admin)
 ) -> Any:
     """
     Self-heal database migration endpoint:

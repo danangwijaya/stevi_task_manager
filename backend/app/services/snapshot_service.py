@@ -132,6 +132,46 @@ def create_grid_snapshot_from_features(
         db.rollback()
         return None
 
+AUTOSAVE_NOTE = "Draf Disimpan"
+AUTOSAVE_COALESCE_SECONDS = 300
+
+
+def record_autosave_snapshot(db: Session, task_grid_id: int, user_id: Optional[int], geojson_str: str, features_count: int) -> None:
+    """Records the post-save snapshot. Consecutive autosaves by the same user within
+    AUTOSAVE_COALESCE_SECONDS update the latest snapshot in place, so frequent
+    autosaves do not push meaningful history out of the retention window."""
+    last = (
+        db.query(GridSnapshot)
+        .filter(GridSnapshot.task_grid_id == task_grid_id)
+        .order_by(GridSnapshot.version_number.desc())
+        .first()
+    )
+    now = datetime.utcnow()
+    if (
+        last is not None
+        and last.note == AUTOSAVE_NOTE
+        and last.user_id == user_id
+        and last.created_at is not None
+        and (now - last.created_at).total_seconds() < AUTOSAVE_COALESCE_SECONDS
+    ):
+        last.geojson_data = geojson_str
+        last.features_count = features_count
+        last.created_at = now
+        db.commit()
+        return
+    db.add(GridSnapshot(
+        task_grid_id=task_grid_id,
+        user_id=user_id,
+        version_number=(last.version_number if last else 0) + 1,
+        note=AUTOSAVE_NOTE,
+        features_count=features_count,
+        geojson_data=geojson_str,
+        created_at=now
+    ))
+    db.commit()
+    _prune_old_snapshots(db, task_grid_id, 20)
+
+
 def _prune_old_snapshots(db: Session, task_grid_id: int, max_revisions: int):
     """Keeps the newest max_revisions snapshots and deletes older ones."""
     try:

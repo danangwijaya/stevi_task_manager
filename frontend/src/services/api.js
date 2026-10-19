@@ -99,8 +99,9 @@ export default {
   getAllAnnotationsFeatures: (params) => api.get('/annotations/all-features', { params }),
   getGridAnnotations: (taskGridId) => api.get(`/annotations/grid/${taskGridId}`),
   getNeighborAnnotations: (taskGridId) => api.get(`/annotations/grid/${taskGridId}/neighbors-features`),
-  saveGridAnnotations: (taskGridId, features) => api.post(`/annotations/grid/${taskGridId}`, {
+  saveGridAnnotations: (taskGridId, features, syncedAt = null) => api.post(`/annotations/grid/${taskGridId}`, {
     task_grid_id: taskGridId,
+    synced_at: syncedAt,
     features: features
   }, { timeout: 180000 }), // 3 minutes timeout for massive multi-thousand polygon grids
   deleteAnnotation: (annId) => api.delete(`/annotations/${annId}`),

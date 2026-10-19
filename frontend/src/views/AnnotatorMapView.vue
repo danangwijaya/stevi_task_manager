@@ -3298,7 +3298,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import L from 'leaflet'
 import '@geoman-io/leaflet-geoman-free'
 import {
@@ -4015,7 +4015,11 @@ const batchDeleteSelectedPolygons = async () => {
       historyIndex.value = -1
       showToast('🗑️ Seluruh poligon grid berhasil dikosongkan!')
     } else {
-      await annotationsStore.saveGridAnnotations(selectedTaskId.value, remaining)
+      const saved = await annotationsStore.saveGridAnnotations(selectedTaskId.value, remaining)
+      if (!saved) {
+        alert(`⚠️ Gagal menyimpan penghapusan poligon:\n${annotationsStore.lastSaveError || 'Terjadi kesalahan saat menyimpan ke server.'}`)
+        return
+      }
       showToast(`🗑️ ${count} poligon berhasil dihapus & diserap ke tetangga!`)
     }
     try { await loadTaskData(selectedTaskId.value, true) } catch (_) {}
@@ -4188,7 +4192,7 @@ const undo = async () => {
   historyIndex.value--
   const snapshot = JSON.parse(JSON.stringify(history.value[historyIndex.value]))
   restoreFeaturesToMap(snapshot)
-  hasUnsavedChanges.value = true
+  markDirty()
   showToast('Undo: Perubahan dibatalkan')
   queueOfflineDraftSave()
 }
@@ -4198,7 +4202,7 @@ const redo = async () => {
   historyIndex.value++
   const snapshot = JSON.parse(JSON.stringify(history.value[historyIndex.value]))
   restoreFeaturesToMap(snapshot)
-  hasUnsavedChanges.value = true
+  markDirty()
   showToast('Redo: Perubahan diterapkan kembali')
   queueOfflineDraftSave()
 }
@@ -4871,6 +4875,15 @@ onMounted(async () => {
   }
 })
 
+// Flush unsaved edits to the server before leaving; ask the user only if that fails.
+onBeforeRouteLeave(async () => {
+  if (!hasUnsavedChanges.value || !selectedTaskId.value || !features.value?.length) return true
+  if (serverAutoSaveTimer) { clearTimeout(serverAutoSaveTimer); serverAutoSaveTimer = null }
+  const saved = await saveAnnotations(false, false)
+  if (saved) return true
+  return confirm('Perubahan belum tersimpan ke server (draf tetap ada di browser ini). Tetap tinggalkan halaman?')
+})
+
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('keyup', handleKeyup)
@@ -5375,6 +5388,12 @@ const setDigitizeMode = (mode, force = false) => {
 
 // ─── OFFLINE DRAFT & BACKGROUND CLOUD AUTO-SAVE ─────────────
 let serverAutoSaveTimer = null
+// Bumped on every user edit so a save can tell whether new edits arrived while its request was in flight
+let editRevision = 0
+const markDirty = () => {
+  editRevision++
+  hasUnsavedChanges.value = true
+}
 const isCloudSaving = ref(false)
 const cloudSavedAt = ref(null)
 const hasUnsavedChanges = ref(false)
@@ -5390,16 +5409,24 @@ const handleBeforeUnload = (e) => {
 const queueServerAutoSave = () => {
   // Never auto-save whole grid while user is inside topology surgery studio
   if (showTopologySurgeryModal.value) return
-  hasUnsavedChanges.value = true
+  markDirty()
   if (serverAutoSaveTimer) clearTimeout(serverAutoSaveTimer)
   // Auto-save to cloud server after 20 seconds of user idle time
+  const scheduledTaskId = selectedTaskId.value
   serverAutoSaveTimer = setTimeout(async () => {
-    if (!selectedTaskId.value || !features.value || features.value.length === 0) return
+    serverAutoSaveTimer = null
+    // Grid switched since scheduling: features.value now belongs to another grid
+    if (!scheduledTaskId || selectedTaskId.value !== scheduledTaskId) return
+    if (!features.value || features.value.length === 0) return
     if (showTopologySurgeryModal.value) return
-    if (annotationsStore.saving || isCloudSaving.value) return
+    if (annotationsStore.saving || isCloudSaving.value) {
+      queueServerAutoSave() // another save is running: retry instead of dropping this one
+      return
+    }
     isCloudSaving.value = true
+    const revAtSave = editRevision
     try {
-      const ok = await annotationsStore.saveGridAnnotations(selectedTaskId.value, features.value)
+      const ok = await annotationsStore.saveGridAnnotations(scheduledTaskId, features.value)
       if (ok) {
         if (ok.id_map && typeof ok.id_map === 'object' && featureGroup) {
           featureGroup.eachLayer(l => {
@@ -5414,7 +5441,16 @@ const queueServerAutoSave = () => {
           })
         }
         cloudSavedAt.value = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        hasUnsavedChanges.value = false
+        if (editRevision === revAtSave) {
+          hasUnsavedChanges.value = false
+          if (draftAutoSaveTimer) { clearTimeout(draftAutoSaveTimer); draftAutoSaveTimer = null }
+          await clearTaskDraft(scheduledTaskId)
+          localDraftStatus.value = null
+          if (ok.preserved_ids?.length && selectedTaskId.value === scheduledTaskId) {
+            showToast(`ℹ️ ${ok.preserved_ids.length} poligon dari pengguna lain dipertahankan & dimuat ulang.`)
+            await loadTaskData(scheduledTaskId, true)
+          }
+        }
       }
     } catch (err) {
       console.warn('Gagal background auto-save ke cloud:', err)
@@ -5426,11 +5462,13 @@ const queueServerAutoSave = () => {
 
 const queueOfflineDraftSave = () => {
   if (!selectedTaskId.value || !features.value) return
-  hasUnsavedChanges.value = true
+  markDirty()
   if (draftAutoSaveTimer) clearTimeout(draftAutoSaveTimer)
+  const draftTaskId = selectedTaskId.value
   draftAutoSaveTimer = setTimeout(async () => {
+    if (selectedTaskId.value !== draftTaskId) return
     try {
-      await saveTaskDraft(selectedTaskId.value, features.value)
+      await saveTaskDraft(draftTaskId, features.value, { baseSyncedAt: annotationsStore.syncedAt[draftTaskId] || null })
       localDraftStatus.value = {
         updatedAt: new Date().toISOString(),
         polygonCount: features.value.length
@@ -5447,9 +5485,13 @@ const restoreOfflineDraft = () => {
   const draftFeats = pendingDraftToRestore.value.features || []
   restoreFeaturesToMap(draftFeats)
   pushHistory()
-  hasUnsavedChanges.value = true
+  markDirty()
   showDraftRestorePrompt.value = false
-  showToast(`✓ Draf lokal offline (${draftFeats.length} poligon) berhasil dipulihkan! Klik 'Simpan' untuk mengirim ke server.`)
+  if (pendingDraftToRestore.value.conflict) {
+    showToast('⚠️ Data di server berubah sejak draf ini dibuat. Periksa hasil pulihan sebelum menyimpan; poligon baru dari pihak lain tetap dipertahankan server.')
+  } else {
+    showToast(`✓ Draf lokal offline (${draftFeats.length} poligon) berhasil dipulihkan! Klik 'Simpan' untuk mengirim ke server.`)
+  }
 }
 
 const restoreOfflineDraftFromModal = async () => {
@@ -5462,7 +5504,7 @@ const restoreOfflineDraftFromModal = async () => {
     }
     restoreFeaturesToMap(draft.features)
     pushHistory()
-    hasUnsavedChanges.value = true
+    markDirty()
     showHistoryModal.value = false
     showToast(`✅ Berhasil memulihkan ${draft.features.length} poligon dari draf lokal browser! Klik 'Simpan' untuk mengirim ke server.`)
   } catch (err) {
@@ -5788,9 +5830,15 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
       const fid = l.feature?.id ?? l.feature?.properties?.id
       if (fid !== undefined && fid !== null && upMap.has(String(fid))) {
         const uf = upMap.get(String(fid))
+        // Keep the UI identity and apply the server geometry too (e.g. neighbor that absorbed a deleted polygon)
+        uf._uiId = l.feature?._uiId ?? l._uiId ?? uf._uiId
+        if (uf.geometry?.type === 'Polygon' && l.setLatLngs) {
+          l.setLatLngs(L.GeoJSON.coordsToLatLngs(uf.geometry.coordinates, 1))
+        }
         l.feature = uf
         const cls = classesMap[uf.properties?.class_id]
         const color = cls?.color || '#9CA3AF'
+        uf.properties = { ...uf.properties, color }
         if (l.setStyle) {
           l.setStyle({ color, fillColor: color, fillOpacity: polygonOpacity.value, weight: 2 })
         }
@@ -5842,7 +5890,7 @@ const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures
   clickedFeatureIdx.value = null
   selectedPolyUiIds.value.clear()
   if (selectedTaskId.value) {
-    saveTaskDraft(selectedTaskId.value, features.value).catch(() => {})
+    saveTaskDraft(selectedTaskId.value, features.value, { baseSyncedAt: annotationsStore.syncedAt[selectedTaskId.value] || null }).catch(() => {})
   }
   pushHistory()
   return true
@@ -9340,15 +9388,25 @@ const loadTaskData = async (taskId, preserveHistory = false) => {
         updatedAt: rawDraftTime,
         polygonCount: draft.features.length
       }
-      const draftTime = rawDraftTime ? new Date(rawDraftTime).getTime() : 0
-      const serverTime = task.updated_at ? new Date(task.updated_at).getTime() : 0
+      const baseSyncedAt = draft.meta?.baseSyncedAt
+      let restorable
+      if (baseSyncedAt) {
+        // A draft is only kept while it holds edits not yet on the server (successful saves clear it),
+        // so it is restorable; it conflicts if the server changed after the draft's sync base.
+        const serverChangedAt = annotationsStore.annotationsUpdatedAt[taskId]
+        draft.conflict = !!serverChangedAt && Date.parse(serverChangedAt) > Date.parse(baseSyncedAt)
+        restorable = true
+      } else {
+        // Legacy draft without sync base: fall back to comparing against the task timestamp
+        const draftTime = rawDraftTime ? new Date(rawDraftTime).getTime() : 0
+        const serverTime = task.updated_at ? new Date(task.updated_at).getTime() : 0
+        restorable = draftTime > (serverTime + 15000)
+      }
 
-      // Only prompt restore if draft is genuinely newer than server state (e.g. browser crashed before saving)
-      if (draftTime > (serverTime + 15000)) {
+      if (restorable) {
         pendingDraftToRestore.value = draft
         showDraftRestorePrompt.value = true
       } else {
-        // Server state is newer or equal: safely clear outdated local draft to prevent corrupt cache resurrection
         await clearTaskDraft(taskId)
         localDraftStatus.value = null
         showDraftRestorePrompt.value = false
@@ -9993,23 +10051,28 @@ const saveAnnotations = async (reloadGeometry = false, isManual = true) => {
       }
     }
 
+    const revAtSave = editRevision
     const ok = await annotationsStore.saveGridAnnotations(selectedTaskId.value, features.value)
     if (ok) {
       if (isManual) {
         showToast('Semua poligon draf berhasil disimpan!')
       }
-      hasUnsavedChanges.value = false
       cloudSavedAt.value = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      if (serverAutoSaveTimer) {
-        clearTimeout(serverAutoSaveTimer)
-        serverAutoSaveTimer = null
-      }
-      if (draftAutoSaveTimer) {
-        clearTimeout(draftAutoSaveTimer)
-        draftAutoSaveTimer = null
+      // Only treat the grid as clean if nothing was edited while the request was in flight;
+      // otherwise keep the dirty flag and the pending autosave/draft timers.
+      if (editRevision === revAtSave) {
+        hasUnsavedChanges.value = false
+        if (serverAutoSaveTimer) {
+          clearTimeout(serverAutoSaveTimer)
+          serverAutoSaveTimer = null
+        }
+        if (draftAutoSaveTimer) {
+          clearTimeout(draftAutoSaveTimer)
+          draftAutoSaveTimer = null
+        }
       }
       await tasksStore.fetchTaskDetail(selectedTaskId.value)
-      if (selectedTaskId.value) {
+      if (selectedTaskId.value && editRevision === revAtSave) {
         await clearTaskDraft(selectedTaskId.value)
         localDraftStatus.value = null
         showDraftRestorePrompt.value = false
@@ -10053,6 +10116,11 @@ const saveAnnotations = async (reloadGeometry = false, isManual = true) => {
         }
       }
 
+      if (ok.preserved_ids?.length && editRevision === revAtSave) {
+        showToast(`ℹ️ ${ok.preserved_ids.length} poligon dari pengguna lain dipertahankan & dimuat ulang.`)
+        reloadGeometry = true
+      }
+
       if (reloadGeometry) {
         try {
           await loadTaskData(selectedTaskId.value, true)
@@ -10087,8 +10155,8 @@ const submitForReview = async () => {
 
   syncFeaturesFromMap()
 
-  // Save first
-  await saveAnnotations()
+  // Save first; abort on failure, otherwise the reload below would overwrite local edits with stale server data
+  if (!(await saveAnnotations())) return
 
   // CRITICAL: Reload features so local featureGroup layers and features.value have fresh DB IDs
   try {
