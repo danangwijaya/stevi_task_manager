@@ -286,3 +286,33 @@ def test_import_null_class_becomes_zero_with_warning_and_drops_z(db, tmp_path):
     ann = db.query(Annotation).filter(Annotation.task_grid_id == g.id).one()
     assert ann.class_id == 0
     assert all(len(c) == 2 for c in json.loads(ann.geom_geojson)["coordinates"][0])  # no Z
+
+
+# ─── merge: seam slivers must close, real islands must stay ──────────────────
+
+def _merge(*geoms):
+    from app.api.annotations import _merge_polygons_robust
+    return _merge_polygons_robust(list(geoms))
+
+
+def test_merge_closes_sliver_between_polygon_and_neighbour_hole():
+    """A polygon sitting in another polygon's hole leaves a ~1 m seam sliver: the merge must weld it."""
+    from shapely.geometry import box as sbox, Polygon as P
+    w = 1.0 / 111320.0  # 1 m in degrees
+    ring_hole = sbox(0.0010, 0.0010, 0.0030, 0.0030)
+    outer = P(sbox(0, 0, 0.004, 0.004).exterior.coords, [ring_hole.exterior.coords])
+    inner = sbox(0.0010 + w, 0.0010 + w, 0.0030, 0.0030)  # leaves a 1 m sliver on two sides of the hole
+    merged = _merge(outer, inner)
+    assert merged.geom_type == "Polygon"
+    assert len(merged.interiors) == 0, "seam sliver was kept as a hole"
+
+
+def test_merge_keeps_hole_that_other_polygon_occupies():
+    """An island of a non-selected polygon inside the hole must not be covered by the merged polygon."""
+    from shapely.geometry import box as sbox, Polygon as P
+    hole = sbox(0.0010, 0.0010, 0.0020, 0.0020)
+    outer = P(sbox(0, 0, 0.004, 0.004).exterior.coords, [hole.exterior.coords])
+    neighbour = sbox(0.004, 0, 0.006, 0.004)
+    merged = _merge(outer, neighbour)
+    assert merged.geom_type == "Polygon" and len(merged.interiors) == 1
+    assert P(merged.interiors[0]).area > 0.9 * hole.area

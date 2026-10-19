@@ -2403,7 +2403,12 @@ def _merge_polygons_robust(geoms, snap_tol=3e-5, min_hole_sqm=1.5):
             raw_union = unary_union(valid_geoms)
             diff_holes = unary_union(orig_holes).difference(raw_union)
             if diff_holes and not diff_holes.is_empty:
-                preserved_holes = diff_holes
+                # Keep only substantial leftovers (islands of other polygons, real voids). Parts thinner than
+                # the closing width are seam slivers between the merged polygons: closing must weld those,
+                # otherwise the merged polygon is cut open again along every seam.
+                opened = diff_holes.buffer(-snap_tol, join_style=2).buffer(snap_tol, join_style=2)
+                if opened and not opened.is_empty:
+                    preserved_holes = opened
     except Exception:
         preserved_holes = None
 
