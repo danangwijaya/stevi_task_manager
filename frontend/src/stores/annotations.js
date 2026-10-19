@@ -72,7 +72,11 @@ export const useAnnotationsStore = defineStore('annotations', {
         } else {
           this.currentFeatures = features
         }
-        if (response.data?.server_time) this.syncedAt[taskGridId] = response.data.server_time
+        // When the server kept rows this client never received (preserved_ids), do NOT move the sync point forward:
+        // the next save would treat those rows as known and delete them. It stays until the grid is reloaded.
+        if (response.data?.server_time && !(response.data.preserved_ids?.length)) {
+          this.syncedAt[taskGridId] = response.data.server_time
+        }
         this.dirty = false
         return {
           ok: true,
