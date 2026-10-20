@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, Text, DateTime, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Boolean, Float, Text, DateTime, ForeignKey, Index, text, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -109,6 +109,13 @@ class Annotation(Base):
     area_sqm = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Key the client assigns to a polygon it creates; makes re-sent inserts idempotent (delta save)
+    client_uid = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        Index("uq_annotations_grid_client_uid", "task_grid_id", "client_uid", unique=True,
+              postgresql_where=text("client_uid IS NOT NULL"), sqlite_where=text("client_uid IS NOT NULL")),
+    )
 
     # Relationships
     task_grid = relationship("TaskGrid", back_populates="annotations")

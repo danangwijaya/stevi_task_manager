@@ -88,8 +88,18 @@ def ensure_schema_migrations(db: Session):
             except Exception as e:
                 logger.debug(f"Schema migration note for task_grids.{col_name}: {e}")
 
+        logger.info("Ensuring annotations table schema migrations...")
+        try:
+            if is_pg:
+                db.execute(text("ALTER TABLE annotations ADD COLUMN IF NOT EXISTS client_uid VARCHAR(64);"))
+            else:
+                db.execute(text("ALTER TABLE annotations ADD COLUMN client_uid VARCHAR(64);"))
+        except Exception as e:
+            logger.debug(f"Schema migration note for annotations.client_uid: {e}")
+
         # Ensure performance indexes exist on annotations and task_grids
         indexes = [
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_annotations_grid_client_uid ON annotations (task_grid_id, client_uid) WHERE client_uid IS NOT NULL;",
             "CREATE INDEX IF NOT EXISTS ix_annotations_task_grid_id ON annotations (task_grid_id);",
             "CREATE INDEX IF NOT EXISTS ix_annotations_user_id ON annotations (user_id);",
             "CREATE INDEX IF NOT EXISTS ix_annotations_class_id ON annotations (class_id);",
