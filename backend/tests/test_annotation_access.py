@@ -367,3 +367,28 @@ def test_hole_occupancy_separates_empty_holes_from_islands(db):
     by_ring = {h["ring"]: h["occupied"] for h in res["holes"]}
     assert by_ring == {1: True, 2: False}
     assert res["empty_count"] == 1 and res["occupied_count"] == 1
+
+
+def test_resending_unsaved_features_without_ids_does_not_duplicate(db):
+    """A client that never learned the ids of rows it created (lost response, two overlapping saves)
+    resends the same polygons without ids. The server must not keep both copies."""
+    from datetime import datetime, timedelta
+    from app.api.annotations import save_grid_annotations, AnnotationSaveRequest, GeoJSONFeature
+    from app.db.models import Annotation
+
+    owner = _user(db, "own", "annotator")
+    g = _grid(db, assigned_user_id=owner.id, status="IN_PROGRESS")
+    square = {"type": "Polygon", "coordinates": [[[0, 0], [0.002, 0], [0.002, 0.002], [0, 0.002], [0, 0]]]}
+    other = {"type": "Polygon", "coordinates": [[[0.01, 0], [0.012, 0], [0.012, 0.002], [0.01, 0.002], [0.01, 0]]]}
+    synced = (datetime.utcnow() - timedelta(minutes=5)).isoformat() + "Z"   # the client's last sync, before both saves
+
+    def payload():
+        return AnnotationSaveRequest(task_grid_id=g.id, synced_at=synced, features=[
+            GeoJSONFeature(geometry=square, properties={"class_id": 1, "class_name": "x"}),
+            GeoJSONFeature(geometry=other, properties={"class_id": 2, "class_name": "y"}),
+        ])
+
+    save_grid_annotations(g.id, payload(), db, owner)     # first save: rows are created, client does not learn their ids
+    save_grid_annotations(g.id, payload(), db, owner)     # the client sends the same polygons again, still without ids
+    n = db.query(Annotation).filter(Annotation.task_grid_id == g.id).count()
+    assert n == 2, f"{n} rows in the grid: the same two polygons were stored twice"

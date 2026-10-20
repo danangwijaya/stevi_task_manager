@@ -703,6 +703,31 @@ def save_grid_annotations(
 
     saved_annotations = []
     saved_with_ui = []
+
+    # Idempotent re-send: rows created after the client's last sync are protected from deletion below. If the
+    # client never learned their ids (lost response, overlapping saves) it sends the same polygons again without
+    # ids, which would store every polygon twice. Adopt such a row instead of inserting a copy.
+    adoptable = []
+    sync_point = _parse_client_time(data.synced_at)
+    if sync_point is not None:
+        claimed = {c["fid"] for c in accepted if c["fid"] is not None and c["fid"] in existing_map}
+        for a in existing_anns:
+            if a.id in claimed or not a.updated_at or a.updated_at <= sync_point:
+                continue
+            try:
+                adoptable.append((a, shape(json.loads(a.geom_geojson))))
+            except Exception:
+                continue
+
+    def _adopt_identical(poly, class_id):
+        for k, (row, g) in enumerate(adoptable):
+            if row.class_id != class_id or not g.intersects(poly):
+                continue
+            union_area = g.union(poly).area
+            if union_area > 0 and g.intersection(poly).area / union_area >= 0.98:
+                return adoptable.pop(k)[0]
+        return None
+
     for cand in accepted:
         poly_part = cand["poly"]
         part_geojson = mapping(poly_part)
@@ -723,6 +748,15 @@ def save_grid_annotations(
             saved_annotations.append(ann)
             saved_with_ui.append((ann, ui_id))
         else:
+            adopted = _adopt_identical(poly_part, class_id) if adoptable else None
+            if adopted is not None:
+                adopted.class_name = class_name
+                adopted.geom_geojson = json.dumps(part_geojson)
+                adopted.area_sqm = area_sqm
+                retained_ids.add(adopted.id)
+                saved_annotations.append(adopted)
+                saved_with_ui.append((adopted, ui_id))
+                continue
             ann = Annotation(
                 task_grid_id=task_grid_id,
                 user_id=current_user.id,
