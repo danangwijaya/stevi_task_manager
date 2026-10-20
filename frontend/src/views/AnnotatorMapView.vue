@@ -4238,7 +4238,16 @@ const batchMergeSelectedPolygons = async () => {
       return
     }
   } catch (apiErr) {
-    console.warn('Backend mergePolygons fallback to client turf union:', apiErr)
+    // The server answered and refused (for example 400 "poligon tidak bersebelahan"): show its reason.
+    // Retrying with a different algorithm in the browser reported "berhasil" for polygons that do not touch,
+    // and the result fell apart again when the grid was reloaded.
+    if (apiErr?.response) {
+      const detail = apiErr.response.data?.detail
+      alert(typeof detail === 'string' && detail ? detail : 'Server menolak penggabungan poligon ini.')
+      return
+    }
+    // No answer at all (network down, timeout): the browser union is the only way to keep working
+    console.warn('Backend mergePolygons unreachable, falling back to client turf union:', apiErr)
   }
 
   try {
