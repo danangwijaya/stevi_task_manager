@@ -1,5 +1,21 @@
 import { defineStore } from 'pinia'
 import api from '../services/api'
+import { useAuthStore } from './auth'
+import { buildBaseline, computeDelta, applyResponse, rebase, numericId } from '../services/deltaSave'
+
+// What the server is known to hold per grid (Map id -> { hash, version }). Kept outside Pinia state on purpose:
+// it is bookkeeping for the next save, not something the UI renders, and it can hold thousands of entries.
+const baselines = new Map()
+
+// Delta save is on for admins by default and opt-in/out per browser with localStorage 'geostevia_delta_save' = '1' / '0'.
+// Widening the rollout later means changing this one function.
+const deltaSaveEnabled = () => {
+  let flag = null
+  try { flag = localStorage.getItem('geostevia_delta_save') } catch (_) {}
+  if (flag === '1') return true
+  if (flag === '0') return false
+  return useAuthStore().isAdmin
+}
 
 export const useAnnotationsStore = defineStore('annotations', {
   state: () => ({
@@ -37,6 +53,7 @@ export const useAnnotationsStore = defineStore('annotations', {
       try {
         const response = await api.getGridAnnotations(taskGridId)
         this.currentFeatures = response.data.features || []
+        baselines.set(taskGridId, buildBaseline(this.currentFeatures))
         this.syncedAt[taskGridId] = response.data.server_time || null
         this.annotationsUpdatedAt[taskGridId] = response.data.annotations_updated_at || null
         this.dirty = false
@@ -50,10 +67,46 @@ export const useAnnotationsStore = defineStore('annotations', {
       }
     },
 
+    // Called by the map after the server changed rows on its own (smart delete neighbours)
+    rebaseFeatures(taskGridId, features) {
+      const base = baselines.get(taskGridId)
+      if (base) rebase(base, features)
+    },
+
+    // Sends only what changed. Returns the same shape as the full save plus `conflicts`, `rejected`,
+    // `extra_features`; returns null when a delta cannot be computed safely (the caller falls back to the full save).
+    async saveGridChanges(taskGridId, features) {
+      const base = baselines.get(taskGridId)
+      const delta = computeDelta(features, base)
+      if (delta.fallback) return null
+      if (!delta.upserts.length && !delta.deletes.length) {
+        return { ok: true, id_map: {}, count: 0, preserved_ids: [], dropped_duplicates: 0, conflicts: [], rejected: [], extra_features: [], nothing: true }
+      }
+      const response = await api.saveGridChanges(taskGridId, { upserts: delta.upserts, deletes: delta.deletes })
+      const out = applyResponse(base, delta.sent, response.data)
+      this.currentFeatures = features
+      if (response.data?.server_time) this.syncedAt[taskGridId] = response.data.server_time
+      this.dirty = false
+      return {
+        ok: true,
+        id_map: out.idMap,
+        count: delta.upserts.length,
+        preserved_ids: [],
+        dropped_duplicates: 0,
+        conflicts: out.conflicts,
+        rejected: out.rejected,
+        extra_features: out.extraFeatures
+      }
+    },
+
     async saveGridAnnotations(taskGridId, features) {
       this.saving = true
       this.lastSaveError = null
       try {
+        if (deltaSaveEnabled() && Array.isArray(features)) {
+          const viaDelta = await this.saveGridChanges(taskGridId, features)
+          if (viaDelta) return viaDelta
+        }
         const response = await api.saveGridAnnotations(taskGridId, features, this.syncedAt[taskGridId] || null)
         const idMap = response.data?.id_map || null
         if (idMap && Array.isArray(features)) {
@@ -78,6 +131,13 @@ export const useAnnotationsStore = defineStore('annotations', {
           this.syncedAt[taskGridId] = response.data.server_time
         }
         this.dirty = false
+        // Only trust the baseline when every polygon now has a database id; otherwise (e.g. the server dropped a
+        // duplicate the screen still shows) the next save must be a full one, or that polygon would be inserted again.
+        if (Array.isArray(features) && features.every(f => numericId(f) !== null) && !response.data?.dropped_duplicates) {
+          baselines.set(taskGridId, buildBaseline(features))
+        } else {
+          baselines.delete(taskGridId)
+        }
         return {
           ok: true,
           id_map: idMap,

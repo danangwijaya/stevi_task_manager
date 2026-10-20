@@ -111,6 +111,9 @@ export default {
     })
   },
   getNeighborAnnotations: (taskGridId) => api.get(`/annotations/grid/${taskGridId}/neighbors-features`),
+  // Delta save: only changed polygons and named deletes (see services/deltaSave.js)
+  saveGridChanges: (taskGridId, payload) =>
+    api.post(`/annotations/grid/${taskGridId}/changes`, payload, { timeout: 180000 }),
   saveGridAnnotations: (taskGridId, features, syncedAt = null) => api.post(`/annotations/grid/${taskGridId}`, {
     task_grid_id: taskGridId,
     synced_at: syncedAt,

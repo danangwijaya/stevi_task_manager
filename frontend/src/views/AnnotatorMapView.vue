@@ -5615,6 +5615,7 @@ const queueServerAutoSave = () => {
     try {
       const ok = await annotationsStore.saveGridAnnotations(scheduledTaskId, features.value)
       if (ok) {
+        if (selectedTaskId.value === scheduledTaskId) applyDeltaOutcome(ok)
         if (ok.id_map && typeof ok.id_map === 'object' && featureGroup) {
           featureGroup.eachLayer(l => {
             const uId = l._uiId || l.feature?._uiId || l.feature?.properties?._uiId
@@ -5947,8 +5948,13 @@ const openLeaderboardModal = async () => {
 
 // ─── HIGH-PERFORMANCE DELTA STATE UPDATER ─────────────────
 // Avoids full network re-fetch & complete DOM teardown of 800+ polygons
-const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures = [], deletedUiIds = []) => {
+const applyDeltaUpdate = (deletedIds = [], createdFeatures = [], updatedFeatures = [], deletedUiIds = [], rebaseUpdated = true) => {
   if (!featureGroup || !map) return false
+
+  // Rows the server rewrote itself (e.g. smart-delete neighbours) become the new baseline of the delta save
+  if (rebaseUpdated && updatedFeatures && updatedFeatures.length > 0 && selectedTaskId.value) {
+    annotationsStore.rebaseFeatures(selectedTaskId.value, updatedFeatures)
+  }
 
   const classesMap = {}
   annotationsStore.classes.forEach(c => { classesMap[c.id] = c })
@@ -10413,6 +10419,31 @@ const syncFeaturesFromMap = () => {
   features.value = accepted
 }
 
+// Delta save outcome: rows another user changed meanwhile ("server wins": replace the local copy),
+// extra parts created by the server, and polygons the server refused.
+const applyDeltaOutcome = (ok) => {
+  if (!ok) return
+  const conflicts = ok.conflicts || []
+  const extra = ok.extra_features || []
+  if (conflicts.length || extra.length) {
+    const have = new Set((features.value || []).map(f => String(f.id ?? f.properties?.id)))
+    const updated = []
+    const created = [...extra]
+    conflicts.forEach(c => {
+      const sf = c.server_feature
+      if (!sf) return
+      ;(have.has(String(sf.id)) ? updated : created).push(sf)
+    })
+    applyDeltaUpdate([], created, updated, [], false)
+    if (conflicts.length) {
+      showToast(`${conflicts.length} poligon diperbarui dari server karena diubah pihak lain. Perubahan Anda pada poligon itu tidak disimpan`)
+    }
+  }
+  if (ok.rejected?.length) {
+    showToast(`${ok.rejected.length} poligon ditolak server: ${ok.rejected[0].reason}`)
+  }
+}
+
 const saveAnnotations = async (reloadGeometry = false, isManual = true) => {
   if (typeof reloadGeometry !== 'boolean') {
     reloadGeometry = false
@@ -10449,6 +10480,7 @@ const saveAnnotations = async (reloadGeometry = false, isManual = true) => {
     const revAtSave = editRevision
     const ok = await annotationsStore.saveGridAnnotations(selectedTaskId.value, features.value)
     if (ok) {
+      applyDeltaOutcome(ok)
       if (isManual) {
         showToast('Semua poligon draf berhasil disimpan!')
       }

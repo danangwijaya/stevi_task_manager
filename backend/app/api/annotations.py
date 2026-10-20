@@ -348,7 +348,8 @@ def get_grid_annotations(
                             "user_id": ann.user_id,
                             "author_name": ann.author.full_name if ann.author else "Unknown",
                             "area_sqm": p.area * (111320.0 ** 2),
-                            "created_at": ann.created_at.isoformat() if ann.created_at else None
+                            "created_at": ann.created_at.isoformat() if ann.created_at else None,
+                            "version": _utc_iso(ann.updated_at) if ann.updated_at else None
                         }
                     })
             else:
@@ -363,7 +364,8 @@ def get_grid_annotations(
                         "user_id": ann.user_id,
                         "author_name": ann.author.full_name if ann.author else "Unknown",
                         "area_sqm": ann.area_sqm,
-                        "created_at": ann.created_at.isoformat() if ann.created_at else None
+                        "created_at": ann.created_at.isoformat() if ann.created_at else None,
+                            "version": _utc_iso(ann.updated_at) if ann.updated_at else None
                     }
                 })
         except Exception:
