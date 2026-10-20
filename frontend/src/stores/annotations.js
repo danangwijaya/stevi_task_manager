@@ -7,14 +7,16 @@ import { buildBaseline, computeDelta, applyResponse, rebase, numericId } from '.
 // it is bookkeeping for the next save, not something the UI renders, and it can hold thousands of entries.
 const baselines = new Map()
 
-// Delta save is on for admins by default and opt-in/out per browser with localStorage 'geostevia_delta_save' = '1' / '0'.
-// Widening the rollout later means changing this one function.
+// Delta save is on for admins and the pilot mappers below by default, and opt-in/out per browser with localStorage
+// 'geostevia_delta_save' = '1' / '0'. Widening the rollout later means changing this one function.
+const DELTA_PILOT_USER_IDS = [23, 28]   // Nurul Halimah, Tita Amalia Sudarma
 const deltaSaveEnabled = () => {
   let flag = null
   try { flag = localStorage.getItem('geostevia_delta_save') } catch (_) {}
   if (flag === '1') return true
   if (flag === '0') return false
-  return useAuthStore().isAdmin
+  const auth = useAuthStore()
+  return auth.isAdmin || DELTA_PILOT_USER_IDS.includes(auth.user?.id)
 }
 
 export const useAnnotationsStore = defineStore('annotations', {
