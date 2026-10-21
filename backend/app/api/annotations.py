@@ -493,6 +493,60 @@ def get_neighbors_annotations(
         "features": features
     }
 
+NEAR_DUPLICATE_IOU = 0.9     # two polygons of one grid that overlap this much are the same polygon drawn twice
+MAX_DUPLICATE_WARNINGS = 20
+
+
+def _near_duplicate_pairs(rows, focus_ids):
+    """Pairs of near-identical polygons (IoU >= NEAR_DUPLICATE_IOU) where at least one is in `focus_ids`.
+
+    `rows` are all rows of one grid (anything with .id, .class_id and .geom_geojson). Only the polygons just written
+    are compared, against everything else, so a save that adds nothing new costs nothing. Nothing is changed or
+    rejected here: which of the two is right is the mapper's decision (the classes often differ).
+    """
+    import shapely
+
+    if not focus_ids:
+        return []
+    geoms = shapely.from_geojson([r.geom_geojson or "" for r in rows], on_invalid="ignore")
+    areas = shapely.area(geoms)
+    tree = STRtree(geoms)
+    index = {r.id: n for n, r in enumerate(rows)}
+    pairs = []
+    seen = set()
+    for fid in focus_ids:
+        i = index.get(fid)
+        if i is None or geoms[i] is None or areas[i] <= 0:
+            continue
+        for j in tree.query(geoms[i], predicate="intersects"):
+            j = int(j)
+            if j == i or geoms[j] is None or areas[j] <= 0:
+                continue
+            key = (min(i, j), max(i, j))
+            if key in seen:
+                continue
+            seen.add(key)
+            if min(areas[i], areas[j]) / max(areas[i], areas[j]) < NEAR_DUPLICATE_IOU:
+                continue                                    # IoU can never reach the threshold: skip the expensive intersection
+            try:
+                a, b = geoms[i], geoms[j]
+                a = a if a.is_valid else a.buffer(0)
+                b = b if b.is_valid else b.buffer(0)
+                inter = a.intersection(b).area
+            except Exception:
+                continue
+            iou = inter / (areas[i] + areas[j] - inter)
+            if iou >= NEAR_DUPLICATE_IOU:
+                pairs.append({
+                    "ids": [rows[key[0]].id, rows[key[1]].id],
+                    "class_ids": [rows[key[0]].class_id, rows[key[1]].class_id],
+                    "iou": round(float(iou), 4),
+                    "area_sqm": round(float(max(areas[i], areas[j])) * (111320.0 ** 2), 1),
+                })
+    pairs.sort(key=lambda p: p["iou"], reverse=True)
+    return pairs[:MAX_DUPLICATE_WARNINGS]
+
+
 @router.post("/grid/{task_grid_id}")
 def save_grid_annotations(
     task_grid_id: int,
@@ -828,6 +882,7 @@ def save_grid_annotations(
             )
         snapshot_geojson = '{"type":"FeatureCollection","features":[' + ','.join(snap_parts) + ']}'
     saved_count = len(saved_annotations) + len(preserved_ids)
+    new_insert_ids = [ann.id for ann in saved_annotations if ann.id is not None and ann.id not in existing_map]
 
     db.commit()
 
@@ -848,6 +903,20 @@ def save_grid_annotations(
             task_grid_id=task_grid_id,
         )
 
+    duplicate_warnings = []
+    if new_insert_ids:
+        try:
+            grid_rows = db.query(Annotation.id, Annotation.class_id, Annotation.geom_geojson).filter(Annotation.task_grid_id == task_grid_id).all()
+            duplicate_warnings = _near_duplicate_pairs(grid_rows, set(new_insert_ids))
+            if duplicate_warnings:
+                log_audit(db=db, user_id=current_user.id, action="DUPLICATE_SUSPECT", entity_type="task_grid", entity_id=task_grid_id,
+                          task_grid_id=task_grid_id,
+                          details=json.dumps({"mode": "full", "pairs": duplicate_warnings, "new_ids": new_insert_ids[:50],
+                                              "payload_features": len(data.features), "preserved": len(preserved_ids)}))
+        except Exception as dup_err:
+            logger.warning(f"Duplicate check failed for grid {task_grid_id}: {dup_err}")
+            db.rollback()
+
     # Return lightweight confirmation + id_map to synchronize frontend _uiId with real DB IDs
     return {
         "message": f"Successfully saved {len(saved_annotations)} annotation polygons",
@@ -855,6 +924,7 @@ def save_grid_annotations(
         "id_map": id_map,
         "preserved_ids": preserved_ids,
         "dropped_duplicates": dropped_dups_count,
+        "duplicate_warnings": duplicate_warnings,
         "server_time": _utc_iso(datetime.utcnow()),
         "saved_features": []
     }

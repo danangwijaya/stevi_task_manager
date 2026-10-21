@@ -123,3 +123,49 @@ def test_bad_geometry_is_reported_not_dropped_silently(db):
                          geometry={"type": "Polygon", "coordinates": [[[0, 0], [0.002, 0], [0.004, 0], [0, 0]]]})
     out = save_grid_changes(g.id, GridChangesRequest(upserts=[flat, feat(0.01, "ok")]), db, owner)
     assert [r["client_uid"] for r in out["rejected"]] == ["t"] and set(out["id_map"]) == {"ok"}
+
+
+def _rows_of(*polys):
+    from types import SimpleNamespace
+    from shapely.geometry import box, mapping
+    return [SimpleNamespace(id=i + 1, class_id=1, geom_geojson=json.dumps(mapping(p))) for i, p in enumerate(polys)]
+
+
+def test_near_duplicate_pairs_finds_the_same_polygon_drawn_twice():
+    from shapely.geometry import box
+    from app.api.annotations import _near_duplicate_pairs
+    a, shifted = box(0, 0, 1, 1), box(0.02, 0, 1.02, 1)             # IoU about 0.96
+    pairs = _near_duplicate_pairs(_rows_of(a, shifted), {2})
+    assert [p["ids"] for p in pairs] == [[1, 2]] and pairs[0]["iou"] >= 0.9
+
+
+def test_near_duplicate_pairs_ignores_neighbours_contained_and_half_overlapping_polygons():
+    from shapely.geometry import box
+    from app.api.annotations import _near_duplicate_pairs
+    rows = _rows_of(box(0, 0, 1, 1), box(1, 0, 2, 1),               # touching neighbours
+                    box(0.2, 0.2, 0.4, 0.4),                        # island inside the first one
+                    box(5, 5, 6, 6), box(5.5, 5, 6.5, 6))           # half overlapping, IoU 0.33
+    assert _near_duplicate_pairs(rows, {1, 2, 3, 4, 5}) == []
+
+
+def test_near_duplicate_pairs_only_looks_at_the_polygons_just_written():
+    from shapely.geometry import box
+    from app.api.annotations import _near_duplicate_pairs
+    rows = _rows_of(box(0, 0, 1, 1), box(0.01, 0, 1.01, 1))
+    assert _near_duplicate_pairs(rows, set()) == []
+    assert len(_near_duplicate_pairs(rows, {1})) == 1
+
+
+def test_delta_save_reports_a_near_identical_polygon_without_removing_anything(db):
+    from app.db.models import AuditLog
+    u = _user(db, "m")
+    g = _grid(db, u)
+    first = save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="a")]), db, u)
+    assert first["duplicate_warnings"] == []
+    out = save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="b", cls=2)]), db, u)   # same footprint, other class
+    assert len(out["duplicate_warnings"]) == 1
+    w = out["duplicate_warnings"][0]
+    assert sorted(w["ids"]) == sorted([first["id_map"]["a"], out["id_map"]["b"]]) and w["iou"] >= 0.99
+    assert db.query(Annotation).filter(Annotation.task_grid_id == g.id).count() == 2       # nothing was removed
+    audit = db.query(AuditLog).filter(AuditLog.task_grid_id == g.id, AuditLog.action == "DUPLICATE_SUSPECT").all()
+    assert len(audit) == 1 and json.loads(audit[0].details)["pairs"][0]["ids"] == w["ids"]

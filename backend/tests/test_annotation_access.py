@@ -423,3 +423,24 @@ def test_topology_separates_open_holes_from_holes_filled_by_other_polygons(db):
 def shape_area(geojson):
     from shapely.geometry import shape
     return shape(geojson).area
+
+
+def test_full_save_reports_a_new_polygon_that_duplicates_a_preserved_row(db):
+    """The full save already drops duplicates inside one payload; a duplicate of a row it had to keep is only reported."""
+    from datetime import datetime, timedelta
+    from app.api.annotations import save_grid_annotations, AnnotationSaveRequest, GeoJSONFeature
+    from app.db.models import Annotation, AuditLog
+
+    owner = _user(db, "own", "annotator")
+    g = _grid(db, assigned_user_id=owner.id, status="IN_PROGRESS")
+    a = {"type": "Polygon", "coordinates": [[[0, 0], [0.002, 0], [0.002, 0.002], [0, 0.002], [0, 0]]]}
+    b = {"type": "Polygon", "coordinates": [[[0.0001, 0], [0.0021, 0], [0.0021, 0.002], [0.0001, 0.002], [0.0001, 0]]]}   # 5% shifted, IoU 0.905
+    save_grid_annotations(g.id, AnnotationSaveRequest(task_grid_id=g.id, features=[
+        GeoJSONFeature(geometry=a, properties={"class_id": 1, "class_name": "x"})]), db, owner)
+    stale = (datetime.utcnow() - timedelta(minutes=5)).isoformat() + "Z"          # this client never saw the first row
+    out = save_grid_annotations(g.id, AnnotationSaveRequest(task_grid_id=g.id, synced_at=stale, features=[
+        GeoJSONFeature(geometry=b, properties={"class_id": 2, "class_name": "y"})]), db, owner)
+    assert len(out["preserved_ids"]) == 1
+    assert len(out["duplicate_warnings"]) == 1 and out["duplicate_warnings"][0]["iou"] >= 0.9
+    assert db.query(Annotation).filter(Annotation.task_grid_id == g.id).count() == 2      # both kept
+    assert db.query(AuditLog).filter(AuditLog.task_grid_id == g.id, AuditLog.action == "DUPLICATE_SUSPECT").count() == 1

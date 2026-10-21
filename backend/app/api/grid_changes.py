@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.api.annotations import (
     _extract_polygons,
+    _near_duplicate_pairs,
     _parse_client_time,
     _require_grid_edit_access,
     _utc_iso,
@@ -206,9 +207,14 @@ def save_grid_changes(
             versions[a.id] = _utc_iso(a.updated_at)
         extra_features = [_feature_json(a, current_user.full_name) for a in db.query(Annotation).filter(Annotation.id.in_(extra_ids)).all()] if extra_ids else []
 
+    duplicate_warnings: List[Dict[str, Any]] = []
     if touched or deleted:
         try:
             snap_rows = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
+            try:
+                duplicate_warnings = _near_duplicate_pairs(snap_rows, set(new_ids))
+            except Exception as dup_err:
+                logger.warning(f"Duplicate check failed for grid {task_grid_id}: {dup_err}")
             features = [{"type": "Feature", "id": a.id,
                          "properties": {"id": a.id, "class_id": a.class_id, "class_name": a.class_name, "area_sqm": round(a.area_sqm or 0, 2)},
                          "geometry": json.loads(a.geom_geojson)} for a in snap_rows]
@@ -220,6 +226,13 @@ def save_grid_changes(
         log_audit(db=db, user_id=current_user.id, action="SAVE_ANNOTATIONS", entity_type="task_grid",
                   entity_id=task_grid_id, task_grid_id=task_grid_id,
                   details=json.dumps({"mode": "delta", "upserts": len(touched), "deletes": len(deleted), "conflicts": len(conflicts)}))
+        if duplicate_warnings:
+            log_audit(db=db, user_id=current_user.id, action="DUPLICATE_SUSPECT", entity_type="task_grid",
+                      entity_id=task_grid_id, task_grid_id=task_grid_id,
+                      details=json.dumps({"mode": "delta", "pairs": duplicate_warnings,
+                                          "upsert_ids": [u.id for u in req.upserts if u.id is not None][:50],
+                                          "upsert_new": sum(1 for u in req.upserts if u.id is None),
+                                          "deleted_ids": deleted[:50], "conflict_ids": [c["id"] for c in conflicts][:50]}))
 
     return {
         "id_map": id_map,
@@ -229,5 +242,6 @@ def save_grid_changes(
         "conflicts": conflicts,
         "rejected": rejected,
         "extra_features": extra_features,
+        "duplicate_warnings": duplicate_warnings,
         "server_time": _utc_iso(datetime.utcnow()),
     }

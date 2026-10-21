@@ -99,7 +99,8 @@ export const useAnnotationsStore = defineStore('annotations', {
         dropped_duplicates: 0,
         conflicts: out.conflicts,
         rejected: out.rejected,
-        extra_features: out.extraFeatures
+        extra_features: out.extraFeatures,
+        duplicate_warnings: response.data?.duplicate_warnings || []
       }
     },
 
@@ -147,7 +148,8 @@ export const useAnnotationsStore = defineStore('annotations', {
           id_map: idMap,
           count: response.data?.count,
           preserved_ids: response.data?.preserved_ids || [],
-          dropped_duplicates: response.data?.dropped_duplicates || 0
+          dropped_duplicates: response.data?.dropped_duplicates || 0,
+          duplicate_warnings: response.data?.duplicate_warnings || []
         }
       } catch (err) {
         console.error('Failed to save annotations:', err)

@@ -5024,9 +5024,11 @@ const classCounts = computed(() => {
   return counts
 })
 
-const showToast = (msg) => {
+let toastTimer = null
+const showToast = (msg, ms = 3500) => {
   toastMessage.value = msg
-  setTimeout(() => { toastMessage.value = '' }, 3500)
+  clearTimeout(toastTimer)      // an older toast's timer must not clear this one early
+  toastTimer = setTimeout(() => { toastMessage.value = '' }, ms)
 }
 
 const onNetworkOnline = () => {
@@ -10498,7 +10500,16 @@ const applyDeltaOutcome = (ok) => {
   if (ok.rejected?.length) {
     showToast(`${ok.rejected.length} poligon ditolak server: ${ok.rejected[0].reason}`)
   }
+  if (ok.duplicate_warnings?.length) {
+    const w = ok.duplicate_warnings[0]
+    const more = ok.duplicate_warnings.length > 1 ? ` (+${ok.duplicate_warnings.length - 1} pasangan lain)` : ''
+    showToast(`⚠️ Poligon #${w.ids[0]} dan #${w.ids[1]} hampir identik (${Math.round(w.iou * 100)}% tumpuk)${more}. Hapus salah satunya, lalu jalankan Cek Topologi.`, 9000)
+  }
 }
+
+// A save that came back with something to tell the mapper (conflict, rejection, duplicate) must not be hidden
+// behind the plain "saved" toast
+const saveHasWarnings = (ok) => !!(ok.conflicts?.length || ok.rejected?.length || ok.duplicate_warnings?.length)
 
 const saveAnnotations = async (reloadGeometry = false, isManual = true) => {
   if (typeof reloadGeometry !== 'boolean') {
@@ -10537,7 +10548,7 @@ const saveAnnotations = async (reloadGeometry = false, isManual = true) => {
     const ok = await annotationsStore.saveGridAnnotations(selectedTaskId.value, features.value)
     if (ok) {
       applyDeltaOutcome(ok)
-      if (isManual) {
+      if (isManual && !saveHasWarnings(ok)) {
         showToast('Semua poligon draf berhasil disimpan!')
       }
       cloudSavedAt.value = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
