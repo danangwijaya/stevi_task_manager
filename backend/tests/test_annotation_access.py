@@ -392,3 +392,34 @@ def test_resending_unsaved_features_without_ids_does_not_duplicate(db):
     save_grid_annotations(g.id, payload(), db, owner)     # the client sends the same polygons again, still without ids
     n = db.query(Annotation).filter(Annotation.task_grid_id == g.id).count()
     assert n == 2, f"{n} rows in the grid: the same two polygons were stored twice"
+
+
+def test_topology_separates_open_holes_from_holes_filled_by_other_polygons(db):
+    import json
+    from shapely.geometry import Polygon, mapping
+    from app.db.models import Annotation
+    from app.api.annotations import validate_topology
+
+    u = _user(db, "rv", "reviewer")
+    g = _grid(db, assigned_user_id=u.id, status="IN_PROGRESS")
+    island, open_hole = box(0.2, 0.2, 0.3, 0.3), box(0.6, 0.6, 0.62, 0.62)
+    donut = Polygon(box(0.1, 0.1, 0.9, 0.9).exterior.coords, [island.exterior.coords, open_hole.exterior.coords])
+
+    def add(geom, cid):
+        db.add(Annotation(task_grid_id=g.id, user_id=u.id, class_id=cid, class_name="c", geom_geojson=json.dumps(mapping(geom)), area_sqm=1))
+
+    add(donut, 1)
+    add(island, 2)                     # sits exactly in the first hole
+    db.commit()
+
+    out = validate_topology(g.id, db, u)
+    assert out["hole_summary"] == {"polygons_with_holes": 1, "holes": 2, "filled": 1, "open": 1,
+                                   "open_area_sqm": pytest.approx(open_hole.area * 111320.0 ** 2, rel=1e-6)}
+    empty = [w for w in out["warnings"] if w["type"] == "EMPTY_HOLE"]
+    assert len(empty) == 1 and empty[0]["annotation_id"] == 1
+    assert shape_area(empty[0]["geometry"]) == pytest.approx(open_hole.area, rel=1e-6)
+
+
+def shape_area(geojson):
+    from shapely.geometry import shape
+    return shape(geojson).area

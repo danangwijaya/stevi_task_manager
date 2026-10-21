@@ -473,9 +473,18 @@
               Ditemukan <span class="underline decoration-rose-400 font-mono text-rose-700 font-extrabold">{{ topologyResult.errors.length }} Masalah Topologi</span>
             </span>
             <span class="text-rose-700/80 text-[11px] font-normal hidden md:inline ml-1.5">(Tumpang tindih, celah batas, atau simpul melilit)</span>
+            <span v-if="holeSummaryText" class="text-rose-800 text-[11px] font-normal ml-1.5" :title="holeSummaryText">· {{ holeSummaryText }}</span>
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
+          <button
+            v-if="openHoleWarnings.length"
+            @click="focusNextOpenHole"
+            class="px-2.5 py-1.5 bg-white hover:bg-rose-100/70 text-rose-800 border border-rose-200 rounded-md text-xs font-medium flex items-center gap-1 shadow-2xs cursor-pointer transition-colors"
+            title="Sorot lubang kosong berikutnya (diurutkan dari yang terbesar)"
+          >
+            <span>{{ openHoleButtonLabel }}</span>
+          </button>
           <button
             @click="openTopologySurgeryModal"
             class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
@@ -519,11 +528,24 @@
       >
         <div class="flex items-center gap-2">
           <CheckCircle2 :size="14" class="text-emerald-600" />
-          <span><b>Topologi Valid!</b> Coverage {{ topologyResult.coverage_percent }}% — {{ topologyResult.polygon_count }} poligon tervalidasi.</span>
+          <span>
+            <b>Topologi Valid!</b> Coverage {{ topologyResult.coverage_percent }}% — {{ topologyResult.polygon_count }} poligon tervalidasi.
+            <span v-if="holeSummaryText" class="text-emerald-800">· {{ holeSummaryText }}</span>
+          </span>
         </div>
-        <button @click="topologyResult = null" class="text-emerald-400 hover:text-emerald-600 cursor-pointer">
-          <X :size="14" />
-        </button>
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            v-if="openHoleWarnings.length"
+            @click="focusNextOpenHole"
+            class="px-2.5 py-1 bg-white hover:bg-emerald-100/70 text-emerald-900 border border-emerald-200 rounded-md text-xs font-medium cursor-pointer transition-colors"
+            title="Sorot lubang kosong berikutnya (diurutkan dari yang terbesar)"
+          >
+            {{ openHoleButtonLabel }}
+          </button>
+          <button @click="topologyResult = null" class="text-emerald-400 hover:text-emerald-600 cursor-pointer">
+            <X :size="14" />
+          </button>
+        </div>
       </div>
 
       <!-- Smart Multi-Year Copy Banner (Shown when current grid has 0 annotations, but another year has annotations) -->
@@ -7170,6 +7192,31 @@ const executeFillGaps = async () => {
 }
 
 // Focus error on map with extreme zoom (< 50m)
+// Holes (rings inside a polygon): filled by other polygons is normal; "open" ones still need mapping
+const openHoleWarnings = computed(() => (topologyResult.value?.warnings || []).filter(w => w.type === 'EMPTY_HOLE' && w.geometry))
+const holeSummaryText = computed(() => {
+  const h = topologyResult.value?.hole_summary
+  if (!h || !h.holes) return ''
+  const filled = `${h.filled} terisi poligon lain (wajar)`
+  if (!h.open) return `${h.holes} lubang, semuanya terisi poligon lain (wajar)`
+  const ha = (h.open_area_sqm / 10000).toFixed(2)
+  return `${h.open} lubang masih kosong (${ha} ha), ${filled}`
+})
+// the server lists at most the 50 largest open holes; the summary counts all of them
+const openHoleButtonLabel = computed(() => {
+  const shown = openHoleWarnings.value.length
+  const total = topologyResult.value?.hole_summary?.open || shown
+  return total > shown ? `Lubang kosong (${shown} terbesar)` : `Lubang kosong (${shown})`
+})
+let openHoleCursor = 0
+const focusNextOpenHole = () => {
+  const list = openHoleWarnings.value
+  if (!list.length) return
+  const w = list[openHoleCursor % list.length]
+  openHoleCursor++
+  focusErrorPolygon({ type: w.type, geometry: w.geometry, message: w.message })
+}
+
 const focusErrorPolygon = (err) => {
   if (!err) return
   activeTopologyError.value = err

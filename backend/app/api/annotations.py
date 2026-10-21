@@ -1107,6 +1107,64 @@ def init_base_polygon(
     }
 
 
+HOLE_OPEN_MIN_SQM = 10.0     # an uncovered part of a hole smaller than this counts as filled (digitising noise)
+MAX_HOLE_WARNINGS = 50
+
+
+def _analyze_holes(polys):
+    """Report the holes (interior rings) of the polygons in `polys` ([{"geom", "ann"}]).
+
+    A hole is "filled" when other polygons cover it, which is the normal way to map an island or an enclave inside a
+    larger polygon. It is "open" when part of it is covered by nothing: that is a gap in disguise and must be mapped.
+    Returns (summary, warnings); warnings are non-blocking, like the GAP ones.
+    """
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+
+    geoms = [sp["geom"] for sp in polys]
+    tree = STRtree(geoms) if geoms else None
+    sqm = 111320.0 ** 2
+    summary = {"polygons_with_holes": 0, "holes": 0, "filled": 0, "open": 0, "open_area_sqm": 0.0}
+    open_holes = []
+    for i, sp in enumerate(polys):
+        g = sp["geom"]
+        parts = list(g.geoms) if hasattr(g, "geoms") else [g]
+        holes = [Polygon(ring) for part in parts if part.geom_type == "Polygon" for ring in part.interiors]
+        if not holes:
+            continue
+        summary["polygons_with_holes"] += 1
+        for hole in holes:
+            summary["holes"] += 1
+            others = [geoms[j] for j in tree.query(hole, predicate="intersects") if j != i]
+            uncovered = hole.difference(unary_union(others)) if others else hole
+            uncovered_sqm = uncovered.area * sqm
+            if uncovered_sqm < HOLE_OPEN_MIN_SQM:
+                summary["filled"] += 1
+                continue
+            summary["open"] += 1
+            summary["open_area_sqm"] += uncovered_sqm
+            open_holes.append((uncovered_sqm, sp["ann"], uncovered))
+    summary["open_area_sqm"] = round(summary["open_area_sqm"], 2)
+
+    open_holes.sort(key=lambda h: h[0], reverse=True)
+    warnings = []
+    for area_sqm, ann, uncovered in open_holes[:MAX_HOLE_WARNINGS]:
+        warnings.append({
+            "type": "EMPTY_HOLE",
+            "annotation_id": ann.id,
+            "class_name": ann.class_name,
+            "area_sqm": round(area_sqm, 2),
+            "geometry": mapping(uncovered),
+            "message": f"Poligon #{ann.id} ({ann.class_name}) memiliki lubang kosong {round(area_sqm, 1)} m² yang belum dipetakan. Isi dengan poligon atau tutup lubangnya.",
+        })
+    if len(open_holes) > MAX_HOLE_WARNINGS:
+        warnings.append({
+            "type": "EMPTY_HOLE_OVERFLOW",
+            "message": f"Ditemukan total {len(open_holes)} lubang kosong. Menampilkan {MAX_HOLE_WARNINGS} terbesar.",
+        })
+    return summary, warnings
+
+
 @router.post("/grid/{task_grid_id}/validate-topology")
 def validate_topology(
     task_grid_id: int,
@@ -1268,6 +1326,10 @@ def validate_topology(
                 "message": f"Ditemukan total {micro_overlap_count} tumpang tindih mikro tepi yang ditoleransi."
             })
 
+    # 2b. Holes: filled by other polygons (fine) or open (still to be mapped)
+    hole_summary, hole_warnings = _analyze_holes(valid_polys)
+    warnings.extend(hole_warnings)
+
     # 3 & 4. Gap detection and coverage
     coverage_percent = 0.0
     try:
@@ -1326,6 +1388,7 @@ def validate_topology(
         "polygon_count": len(annotations),
         "total_errors": total_error_count,
         "total_overlaps": overlap_count,
+        "hole_summary": hole_summary,
         "errors": errors,
         "warnings": warnings
     }
