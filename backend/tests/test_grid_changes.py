@@ -169,3 +169,25 @@ def test_delta_save_reports_a_near_identical_polygon_without_removing_anything(d
     assert db.query(Annotation).filter(Annotation.task_grid_id == g.id).count() == 2       # nothing was removed
     audit = db.query(AuditLog).filter(AuditLog.task_grid_id == g.id, AuditLog.action == "DUPLICATE_SUSPECT").all()
     assert len(audit) == 1 and json.loads(audit[0].details)["pairs"][0]["ids"] == w["ids"]
+
+
+def test_audit_records_deletes_of_rows_that_no_longer_exist(db):
+    from app.db.models import AuditLog
+    u = _user(db, "m")
+    g = _grid(db, u)
+    save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="a")]), db, u)
+    out = save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.3, uid="b")], deletes=[DeleteRef(id=999999)]), db, u)
+    assert 999999 in out["deleted"]                                                  # the delete is still satisfied
+    details = [json.loads(a.details) for a in db.query(AuditLog).filter(AuditLog.task_grid_id == g.id, AuditLog.action == "SAVE_ANNOTATIONS").all()]
+    assert any(d.get("gone_deletes") == [999999] for d in details)
+
+
+def test_duplicate_audit_names_the_client_uids_and_deletes_of_missing_rows(db):
+    from app.db.models import AuditLog
+    u = _user(db, "m")
+    g = _grid(db, u)
+    save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="first")]), db, u)
+    save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="second")], deletes=[DeleteRef(id=424242)]), db, u)
+    audit = db.query(AuditLog).filter(AuditLog.task_grid_id == g.id, AuditLog.action == "DUPLICATE_SUSPECT").one()
+    d = json.loads(audit.details)
+    assert d["upsert_uids"] == ["second"] and d["gone_delete_ids"] == [424242]

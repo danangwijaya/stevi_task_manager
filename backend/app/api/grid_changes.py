@@ -174,10 +174,12 @@ def save_grid_changes(
             extra_new.append(e_row)
 
     deleted: List[int] = []
+    gone_ids: List[int] = []                         # deletes of rows that did not exist: a client with a stale id sends these
     for d in req.deletes:
         row = by_id.get(d.id)
         if row is None:
             deleted.append(d.id)                     # already gone: the delete is satisfied
+            gone_ids.append(d.id)
             continue
         if _changed_since(row, d.version):
             conflicts.append({"id": row.id, "client_uid": None, "reason": "changed", "server_feature": _feature_json(row)})
@@ -225,14 +227,19 @@ def save_grid_changes(
             db.rollback()
         log_audit(db=db, user_id=current_user.id, action="SAVE_ANNOTATIONS", entity_type="task_grid",
                   entity_id=task_grid_id, task_grid_id=task_grid_id,
-                  details=json.dumps({"mode": "delta", "upserts": len(touched), "deletes": len(deleted), "conflicts": len(conflicts)}))
+                  details=json.dumps({"mode": "delta", "upserts": len(touched), "deletes": len(deleted), "conflicts": len(conflicts),
+                                      **({"gone_deletes": gone_ids[:20]} if gone_ids else {})}))
         if duplicate_warnings:
             log_audit(db=db, user_id=current_user.id, action="DUPLICATE_SUSPECT", entity_type="task_grid",
                       entity_id=task_grid_id, task_grid_id=task_grid_id,
                       details=json.dumps({"mode": "delta", "pairs": duplicate_warnings,
                                           "upsert_ids": [u.id for u in req.upserts if u.id is not None][:50],
                                           "upsert_new": sum(1 for u in req.upserts if u.id is None),
-                                          "deleted_ids": deleted[:50], "conflict_ids": [c["id"] for c in conflicts][:50]}))
+                                          "upsert_uids": [u.client_uid for u in req.upserts if u.client_uid][:20],
+                                          "upsert_versions": {str(u.id): u.version for u in req.upserts if u.id is not None}
+                                          if sum(1 for u in req.upserts if u.id is not None) <= 20 else None,
+                                          "deleted_ids": deleted[:50], "gone_delete_ids": gone_ids[:20],
+                                          "conflict_ids": [c["id"] for c in conflicts][:50]}))
 
     return {
         "id_map": id_map,
