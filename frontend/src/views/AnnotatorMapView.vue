@@ -253,7 +253,7 @@
     <!-- CENTER: GIS Map Workspace -->
     <main class="flex-1 flex flex-col relative h-full overflow-hidden">
       <!-- Top Floating Map Header Action Bar -->
-      <div class="bg-white/95 border-b border-slate-200 px-4 py-2 flex items-center justify-between gap-3 z-10 backdrop-blur-md shrink-0 shadow-xs">
+      <div class="bg-white/95 border-b border-slate-200 px-4 py-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 z-10 backdrop-blur-md shrink-0 shadow-xs">
         <div class="flex items-center gap-3">
           <span class="font-mono text-xs font-extrabold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1.5">
             <Crosshair :size="13" class="text-rose-600" />
@@ -281,7 +281,7 @@
         </div>
 
         <!-- Action Buttons -->
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center justify-end gap-2">
           <!-- Undo & Redo Group -->
           <div class="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
             <button
@@ -496,7 +496,7 @@
           <button
             @click="handleCleanSlivers"
             :disabled="isCleaningSlivers"
-            class="px-2.5 py-1.5 bg-white hover:bg-rose-100/70 text-rose-800 border border-rose-200 rounded-md text-xs font-medium hidden lg:flex items-center gap-1 shadow-2xs cursor-pointer transition-colors"
+            class="px-2.5 py-1.5 bg-white hover:bg-rose-100/70 text-rose-800 border border-rose-200 rounded-md text-xs font-medium hidden lg:!flex items-center gap-1 shadow-2xs cursor-pointer transition-colors"
             title="Rapatkan sliver celah batas"
           >
             <Sparkles :size="12" :class="{ 'animate-spin': isCleaningSlivers }" />
@@ -505,7 +505,7 @@
           <button
             @click="handleAutoHeal"
             :disabled="isHealingTopology"
-            class="px-2.5 py-1.5 bg-white hover:bg-rose-100/70 text-rose-800 border border-rose-200 rounded-md text-xs font-medium hidden sm:flex items-center gap-1 shadow-2xs cursor-pointer transition-colors"
+            class="px-2.5 py-1.5 bg-white hover:bg-rose-100/70 text-rose-800 border border-rose-200 rounded-md text-xs font-medium hidden sm:!flex items-center gap-1 shadow-2xs cursor-pointer transition-colors"
             title="Koreksi otomatis cepat"
           >
             <Wand2 :size="12" :class="{ 'animate-spin': isHealingTopology }" />
