@@ -80,3 +80,31 @@ test('rebase keeps the hash but drops the version so a later edit cannot raise a
   assert.deepEqual(baseline.get(1), { hash: featureHash(moved), version: null })
   assert.equal(computeDelta([moved], baseline).upserts.length, 0)
 })
+
+const idless = (f, uid) => { const g = clone(f); g.id = null; g.properties.id = null; g._uiId = uid; return g }
+
+test('polygons that lost their id but equal a baseline polygon get that id back instead of delete + insert', () => {
+  // production case: a restored local draft showed 230 saved polygons without ids and the delta replaced all of them
+  const loaded = [served(1, 0.1), served(2, 0.2), served(3, 0.3)]
+  const d = computeDelta([idless(loaded[0], 'u1'), clone(loaded[1]), idless(loaded[2], 'u3')], buildBaseline(loaded))
+  assert.deepEqual([d.upserts.length, d.deletes.length], [0, 0])
+  assert.deepEqual(d.adopted, { u1: 1, u3: 3 })
+})
+
+test('an id-less polygon that really differs is still inserted, and its old row is deleted', () => {
+  const loaded = [served(1, 0.1), served(2, 0.2)]
+  const edited = idless(loaded[1], 'u2')
+  edited.properties.class_id = 7
+  const d = computeDelta([clone(loaded[0]), edited], buildBaseline(loaded))
+  assert.deepEqual(d.adopted, {})
+  assert.deepEqual(d.upserts.map((u) => u.client_uid), ['u2'])
+  assert.deepEqual(d.deletes.map((x) => x.id), [2])
+})
+
+test('two identical id-less copies adopt one baseline id, the other is inserted', () => {
+  const loaded = [served(1, 0.1)]
+  const d = computeDelta([idless(loaded[0], 'a'), idless(loaded[0], 'b')], buildBaseline(loaded))
+  assert.deepEqual(d.adopted, { a: 1 })
+  assert.deepEqual(d.upserts.map((u) => u.client_uid), ['b'])
+  assert.equal(d.deletes.length, 0)
+})

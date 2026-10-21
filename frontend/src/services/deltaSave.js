@@ -52,35 +52,55 @@ export const buildBaseline = (features) => {
 }
 
 // Returns { fallback: reason } when the delta cannot be computed safely (the caller then uses the full save),
-// otherwise { upserts, deletes, sent } where `sent` remembers what was hashed at send time.
+// otherwise { upserts, deletes, sent, adopted } where `sent` remembers what was hashed at send time and `adopted`
+// maps client_uid -> database id for polygons that lost their id on screen but are identical to a baseline polygon.
 export const computeDelta = (features, baseline) => {
   if (!baseline) return { fallback: 'no-baseline' }
   if (!features.length && baseline.size) return { fallback: 'empty-features' }   // never turn "nothing on screen" into "delete all"
   const upserts = []
   const sent = []
   const seen = new Set()
+  const fresh = []                    // polygons without a database id: inserted, unless they turn out to be an id-less copy
   for (const f of features) {
     const raw = rawId(f)
     const id = numericId(f)
     if (raw !== undefined && raw !== null && id === null) return { fallback: 'non-numeric-id' }   // legacy exploded multipart ids
     const hash = featureHash(f)
-    const props = { class_id: f.properties?.class_id ?? 0 }
     if (id !== null) {
       seen.add(id)
       const b = baseline.get(id)
       if (b && b.hash === hash) continue
-      upserts.push({ id, version: b ? b.version : null, geometry: f.geometry, properties: props })
+      upserts.push({ id, version: b ? b.version : null, geometry: f.geometry, properties: { class_id: f.properties?.class_id ?? 0 } })
       sent.push({ id, uid: null, hash, feature: f })
     } else {
       const uid = clientUid(f)
       if (!uid || uid.length > 64) return { fallback: 'no-client-uid' }
-      upserts.push({ client_uid: uid, geometry: f.geometry, properties: props })
-      sent.push({ id: null, uid, hash, feature: f })
+      fresh.push({ f, uid, hash })
     }
+  }
+  // A restored local draft (or any state rebuilt without ids) shows the same polygons again as "new" while the baseline
+  // still holds them: delete + insert would only churn their ids. Hand each one its old id back instead.
+  const unclaimed = new Map()         // hash -> baseline ids no longer on screen
+  for (const [id, b] of baseline) {
+    if (seen.has(id)) continue
+    if (!unclaimed.has(b.hash)) unclaimed.set(b.hash, [])
+    unclaimed.get(b.hash).push(id)
+  }
+  const adopted = {}
+  for (const { f, uid, hash } of fresh) {
+    const candidates = unclaimed.get(hash)
+    if (candidates && candidates.length) {
+      const id = candidates.shift()
+      seen.add(id)
+      adopted[uid] = id
+      continue
+    }
+    upserts.push({ client_uid: uid, geometry: f.geometry, properties: { class_id: f.properties?.class_id ?? 0 } })
+    sent.push({ id: null, uid, hash, feature: f })
   }
   const deletes = []
   for (const [id, b] of baseline) if (!seen.has(id)) deletes.push({ id, version: b.version })
-  return { upserts, deletes, sent }
+  return { upserts, deletes, sent, adopted }
 }
 
 // Folds the server response into the baseline and the in-memory features. Returns what the view must apply.

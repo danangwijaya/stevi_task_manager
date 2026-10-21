@@ -82,10 +82,12 @@ export const useAnnotationsStore = defineStore('annotations', {
       const delta = computeDelta(features, base)
       if (delta.fallback) return null
       if (!delta.upserts.length && !delta.deletes.length) {
-        return { ok: true, id_map: {}, count: 0, preserved_ids: [], dropped_duplicates: 0, conflicts: [], rejected: [], extra_features: [], nothing: true }
+        // `id_map` still carries adopted ids so the view can give them back to the layers
+        return { ok: true, id_map: delta.adopted, count: 0, preserved_ids: [], dropped_duplicates: 0, conflicts: [], rejected: [], extra_features: [], nothing: true }
       }
       const response = await api.saveGridChanges(taskGridId, { upserts: delta.upserts, deletes: delta.deletes })
       const out = applyResponse(base, delta.sent, response.data)
+      Object.assign(out.idMap, delta.adopted)
       this.currentFeatures = features
       if (response.data?.server_time) this.syncedAt[taskGridId] = response.data.server_time
       this.dirty = false
