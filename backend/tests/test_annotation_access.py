@@ -444,3 +444,24 @@ def test_full_save_reports_a_new_polygon_that_duplicates_a_preserved_row(db):
     assert len(out["duplicate_warnings"]) == 1 and out["duplicate_warnings"][0]["iou"] >= 0.9
     assert db.query(Annotation).filter(Annotation.task_grid_id == g.id).count() == 2      # both kept
     assert db.query(AuditLog).filter(AuditLog.task_grid_id == g.id, AuditLog.action == "DUPLICATE_SUSPECT").count() == 1
+
+
+def test_full_save_adopts_an_edited_copy_of_a_preserved_row_of_the_same_class(db):
+    """The client lost the ids of rows it saved earlier and then edited them a little: the rows are updated in place."""
+    from datetime import datetime, timedelta
+    from app.api.annotations import save_grid_annotations, AnnotationSaveRequest, GeoJSONFeature
+    from app.db.models import Annotation
+
+    owner = _user(db, "own", "annotator")
+    g = _grid(db, assigned_user_id=owner.id, status="IN_PROGRESS")
+    a = {"type": "Polygon", "coordinates": [[[0, 0], [0.002, 0], [0.002, 0.002], [0, 0.002], [0, 0]]]}
+    b = {"type": "Polygon", "coordinates": [[[0.0001, 0], [0.0021, 0], [0.0021, 0.002], [0.0001, 0.002], [0.0001, 0]]]}   # IoU 0.905
+    save_grid_annotations(g.id, AnnotationSaveRequest(task_grid_id=g.id, features=[
+        GeoJSONFeature(geometry=a, properties={"class_id": 1, "class_name": "x"})]), db, owner)
+    first = db.query(Annotation).filter(Annotation.task_grid_id == g.id).one().id
+    stale = (datetime.utcnow() - timedelta(minutes=5)).isoformat() + "Z"
+    out = save_grid_annotations(g.id, AnnotationSaveRequest(task_grid_id=g.id, synced_at=stale, features=[
+        GeoJSONFeature(geometry=b, properties={"class_id": 1, "class_name": "x"})]), db, owner)
+    rows = db.query(Annotation).filter(Annotation.task_grid_id == g.id).all()
+    assert [r.id for r in rows] == [first] and out["preserved_ids"] == [] and out["duplicate_warnings"] == []
+    assert json.loads(rows[0].geom_geojson)["coordinates"][0][0][0] == 0.0001           # the edited geometry won

@@ -762,7 +762,8 @@ def save_grid_annotations(
 
     # Idempotent re-send: rows created after the client's last sync are protected from deletion below. If the
     # client never learned their ids (lost response, overlapping saves) it sends the same polygons again without
-    # ids, which would store every polygon twice. Adopt such a row instead of inserting a copy.
+    # ids, which would store every polygon twice. Adopt such a row instead of inserting a copy: also when the polygon
+    # was edited a little since (IoU >= NEAR_DUPLICATE_IOU), otherwise the stale row is kept next to its edited copy.
     adoptable = []
     sync_point = _parse_client_time(data.synced_at)
     if sync_point is not None:
@@ -780,7 +781,7 @@ def save_grid_annotations(
             if row.class_id != class_id or not g.intersects(poly):
                 continue
             union_area = g.union(poly).area
-            if union_area > 0 and g.intersection(poly).area / union_area >= 0.98:
+            if union_area > 0 and g.intersection(poly).area / union_area >= NEAR_DUPLICATE_IOU:
                 return adoptable.pop(k)[0]
         return None
 
