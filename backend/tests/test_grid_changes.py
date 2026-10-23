@@ -221,3 +221,22 @@ def test_two_identical_new_polygons_in_one_request_keep_the_first(db):
     out = save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="x"), feat(0.1, uid="y")]), db, u)
     assert list(out["id_map"]) == ["x"] and [r["client_uid"] for r in out["rejected"]] == ["y"]
     assert len(rows(db, g)) == 1
+
+
+def test_delta_save_writes_the_client_context_to_the_audit_trail(db):
+    from app.db.models import AuditLog
+    u = _user(db, "m")
+    g = _grid(db, u)
+    ctx = {"tab": "ab12cd", "ops": [{"op": "split_poly", "ago": 4}], "no_id": 0}
+    save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="a")], ctx=ctx), db, u)
+    save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.3, uid="b")]), db, u)             # an old client sends none
+    audits = [json.loads(a.details) for a in db.query(AuditLog).filter(AuditLog.task_grid_id == g.id, AuditLog.action == "SAVE_ANNOTATIONS").order_by(AuditLog.id)]
+    assert audits[0]["ctx"] == ctx and "ctx" not in audits[1]
+
+
+def test_audit_ctx_is_trimmed_so_it_cannot_bloat_an_audit_row():
+    from app.api.annotations import _audit_ctx
+    assert _audit_ctx("junk") is None and _audit_ctx({"tab": "x"}) == {"tab": "x"}
+    big = {"tab": "x", "ops": [{"op": "o" * 100, "ago": n} for n in range(100)]}
+    out = _audit_ctx(big)
+    assert out["truncated"] is True and len(out["ops"]) == 6 and len(json.dumps(out)) <= 2000

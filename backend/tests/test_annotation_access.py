@@ -465,3 +465,19 @@ def test_full_save_adopts_an_edited_copy_of_a_preserved_row_of_the_same_class(db
     rows = db.query(Annotation).filter(Annotation.task_grid_id == g.id).all()
     assert [r.id for r in rows] == [first] and out["preserved_ids"] == [] and out["duplicate_warnings"] == []
     assert json.loads(rows[0].geom_geojson)["coordinates"][0][0][0] == 0.0001           # the edited geometry won
+
+
+def test_full_save_audit_records_the_counts_and_client_context(db):
+    from app.api.annotations import save_grid_annotations, AnnotationSaveRequest, GeoJSONFeature
+    from app.db.models import AuditLog
+
+    owner = _user(db, "own", "annotator")
+    g = _grid(db, assigned_user_id=owner.id, status="IN_PROGRESS")
+    a = {"type": "Polygon", "coordinates": [[[0, 0], [0.002, 0], [0.002, 0.002], [0, 0.002], [0, 0]]]}
+    ctx = {"tab": "ab12cd", "ops": [{"op": "undo", "ago": 3}], "no_id": 1}
+    save_grid_annotations(g.id, AnnotationSaveRequest(task_grid_id=g.id, ctx=ctx, features=[
+        GeoJSONFeature(geometry=a, properties={"class_id": 1, "class_name": "x"})]), db, owner)
+    audit = db.query(AuditLog).filter(AuditLog.task_grid_id == g.id, AuditLog.action == "SAVE_ANNOTATIONS").one()
+    d = json.loads(audit.details)
+    assert d["mode"] == "full" and d["payload"] == 1 and d["no_id"] == 1 and d["new"] == 1 and d["adopted"] == 0
+    assert d["ctx"] == ctx

@@ -3583,6 +3583,7 @@ import { useAnnotationsStore } from '../stores/annotations'
 import api from '../services/api'
 import { imageMapLayer } from 'esri-leaflet'
 import { saveTaskDraft, getTaskDraft, clearTaskDraft } from '../services/offlineStorage'
+import { noteOp, markGridLoaded } from '../services/saveContext'
 
 const route = useRoute()
 const router = useRouter()
@@ -4067,6 +4068,7 @@ const resetCurrentGridAnnotations = async () => {
 }
 
 const batchDeleteSelectedPolygons = async () => {
+  noteOp('batch_delete')
   if (selectedPolyUiIds.value.size === 0 || !selectedTaskId.value) return
   const count = selectedPolyUiIds.value.size
   const toDelete = features.value.filter(f => selectedPolyUiIds.value.has(f._uiId))
@@ -4236,6 +4238,7 @@ const batchDeleteSelectedPolygons = async () => {
 }
 
 const batchMergeSelectedPolygons = async () => {
+  noteOp('batch_merge')
   if (selectedPolyUiIds.value.size < 2 || !selectedTaskId.value) return
   const toMerge = features.value.filter(f => selectedPolyUiIds.value.has(f._uiId))
   if (toMerge.length < 2) return
@@ -4406,6 +4409,7 @@ const pushHistory = (markUnsaved = true) => {
 }
 
 const undo = async () => {
+  noteOp('undo')
   if (!canUndo.value) return
   historyIndex.value--
   const snapshot = JSON.parse(history.value[historyIndex.value])
@@ -4416,6 +4420,7 @@ const undo = async () => {
 }
 
 const redo = async () => {
+  noteOp('redo')
   if (!canRedo.value) return
   historyIndex.value++
   const snapshot = JSON.parse(history.value[historyIndex.value])
@@ -5702,6 +5707,7 @@ const queueOfflineDraftSave = () => {
 }
 
 const restoreOfflineDraft = () => {
+  noteOp('restore_draft')
   if (!pendingDraftToRestore.value) return
   const draftFeats = pendingDraftToRestore.value.features || []
   restoreFeaturesToMap(draftFeats)
@@ -5716,6 +5722,7 @@ const restoreOfflineDraft = () => {
 }
 
 const restoreOfflineDraftFromModal = async () => {
+  noteOp('restore_draft_modal')
   if (!selectedTaskId.value) return
   try {
     const draft = await getTaskDraft(selectedTaskId.value)
@@ -6444,6 +6451,7 @@ const cleanLineCoordinates = (lineGeom) => {
 
 // Handle Line Split
 const handleSplitByLine = async (lineGeom) => {
+  noteOp('split_line')
   if (!selectedTaskId.value) return
 
   // Detect target polygon under cut line
@@ -6497,6 +6505,7 @@ const handleSplitByLine = async (lineGeom) => {
 
 // Handle Polygon Cut / Split
 const handleSplitByPolygon = async (cuttingGeom) => {
+  noteOp('split_poly')
   if (!selectedTaskId.value) return
 
   const { feat: targetFeat, annId: targetAnnId } = findTargetPolygonForCut(cuttingGeom)
@@ -6620,6 +6629,7 @@ const cleanPolygonSpikesAndRings = (featureOrGeom) => {
 
 // Handle Merge Polygons
 const executeMerge = async () => {
+  noteOp('merge')
   if (selectedForMerge.value.length < 2 || !selectedTaskId.value) return
   mergeLoading.value = true
 
@@ -7133,6 +7143,7 @@ const openAssignClassModal = (annId, currentClassId = 0) => {
 }
 
 const executeAssignClass = async () => {
+  noteOp('assign_class')
   if (!assignClassModalData.value.annotation_id) return
   if (!(await flushUnsavedChanges())) return
   assignClassModalData.value.isAssigning = true
@@ -8242,6 +8253,7 @@ const executeSurgeryClip = async (action) => {
 }
 
 const executeSurgeryMerge = async () => {
+  noteOp('surgery_merge')
   if (!selectedTaskId.value) return
   surgeryIsProcessing.value = true
   const err = surgeryCurrentError.value
@@ -8279,6 +8291,7 @@ const executeSurgeryMerge = async () => {
 }
 
 const executeSurgeryHeal = async () => {
+  noteOp('surgery_heal')
   const err = surgeryCurrentError.value
   const targetId = err?.annotation_id || err?.annotation_ids?.[0]
   if (!targetId || !selectedTaskId.value) return
@@ -8299,6 +8312,7 @@ const executeSurgeryHeal = async () => {
 }
 
 const executeSurgeryDelete = async (polyId) => {
+  noteOp('surgery_delete')
   if (!polyId || !selectedTaskId.value) return
   if (!confirm(`Hapus poligon #${polyId} dari database?`)) return
   surgeryIsProcessing.value = true
@@ -8341,6 +8355,7 @@ const resetSurgeryZoom = () => {
 }
 
 const handleAutoHealRemaining = async () => {
+  noteOp('auto_heal_rest')
   if (!selectedTaskId.value) return
   surgeryIsProcessing.value = true
   try {
@@ -8444,6 +8459,7 @@ const handleCleanSlivers = async () => {
 }
 
 const handleAutoHeal = async () => {
+  noteOp('auto_heal')
   if (!selectedTaskId.value) return
   if (!confirm('Rapikan geometri grid ini? Sistem akan menggunakan konfigurasi perbaikan cepat standar.')) return
 
@@ -8544,6 +8560,7 @@ const updateLayerGeometry = (layer, geom) => {
 }
 
 const applyAutoClipAndHealOnEdit = (editedLayer) => {
+  noteOp('edit_vertices')
   if (!enableLiveAutoClip.value && !enableTopologicalEditing.value) {
     // When both live auto-clip and topological editing are disabled, sync geometry safely
     syncFeaturesFromMap()
@@ -9132,6 +9149,7 @@ const openClassPickerPopup = (layer, feat, idx, latlng, overlappingIndices = [])
 }
 
 const reassignClassToClickedPolygon = async (cls) => {
+  noteOp('reassign_class')
   if (clickedFeatureIdx.value === null || !features.value) return
   const targetFeat = features.value[clickedFeatureIdx.value]
   if (!targetFeat) return
@@ -9374,6 +9392,7 @@ const handleSmartDeleteSelected = () => {
 }
 
 const executeSmartDelete = async (targetFeat, targetIdx) => {
+  noteOp('smart_delete')
   if (!selectedTaskId.value) return
   if (features.value.length <= 1) {
     alert('⚠️ Poligon ini adalah satu-satunya poligon di dalam grid tile.\n\nTidak dapat dihapus karena akan membuat seluruh grid kosong bolong!\nJika ingin mengganti tutupan lahan, silakan gunakan menu Ubah Kelas atau Potong Poligon.')
@@ -9727,6 +9746,8 @@ const onTaskChange = async () => {
 }
 
 const loadTaskData = async (taskId, preserveHistory = false) => {
+  if (preserveHistory) noteOp('reload')
+  else markGridLoaded(taskId, 'server')
   const task = await tasksStore.fetchTaskDetail(taskId)
   if (!task || !map) return
 

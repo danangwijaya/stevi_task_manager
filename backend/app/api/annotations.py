@@ -79,6 +79,7 @@ class AnnotationSaveRequest(BaseModel):
     # server after this instant are unknown to the client and are never deleted by this save.
     synced_at: Optional[str] = None
     features: List[GeoJSONFeature]
+    ctx: Optional[Dict[str, Any]] = None        # what the mapper did since the page loaded; only written to the audit trail
 
 @router.get("/classes")
 def get_classes() -> Any:
@@ -493,6 +494,19 @@ def get_neighbors_annotations(
         "features": features
     }
 
+def _audit_ctx(ctx):
+    """The client's breadcrumbs (`ctx` of a save request) trimmed to a size that is safe to store in an audit row."""
+    if not isinstance(ctx, dict):
+        return None
+    try:
+        if len(json.dumps(ctx, default=str)) <= 2000:
+            return ctx
+        short = {**{k: v for k, v in ctx.items() if k != "ops"}, "ops": (ctx.get("ops") or [])[-6:], "truncated": True}
+        return short if len(json.dumps(short, default=str)) <= 2000 else {"truncated": True}
+    except Exception:
+        return None
+
+
 NEAR_DUPLICATE_IOU = 0.9     # two polygons of one grid that overlap this much are the same polygon drawn twice
 MAX_DUPLICATE_WARNINGS = 20
 
@@ -776,6 +790,8 @@ def save_grid_annotations(
             except Exception:
                 continue
 
+    adopted_count = 0
+
     def _adopt_identical(poly, class_id):
         for k, (row, g) in enumerate(adoptable):
             if row.class_id != class_id or not g.intersects(poly):
@@ -807,6 +823,7 @@ def save_grid_annotations(
         else:
             adopted = _adopt_identical(poly_part, class_id) if adoptable else None
             if adopted is not None:
+                adopted_count += 1
                 adopted.class_name = class_name
                 adopted.geom_geojson = json.dumps(part_geojson)
                 adopted.area_sqm = area_sqm
@@ -902,6 +919,10 @@ def save_grid_annotations(
             entity_type="task_grid",
             entity_id=task_grid_id,
             task_grid_id=task_grid_id,
+            details=json.dumps({"mode": "full", "payload": len(data.features),
+                                "no_id": sum(1 for c in candidates if c["fid"] is None), "new": len(new_insert_ids),
+                                "adopted": adopted_count, "preserved": len(preserved_ids), "dropped": dropped_dups_count,
+                                **({"ctx": _audit_ctx(data.ctx)} if data.ctx else {})}),
         )
 
     duplicate_warnings = []
@@ -913,7 +934,8 @@ def save_grid_annotations(
                 log_audit(db=db, user_id=current_user.id, action="DUPLICATE_SUSPECT", entity_type="task_grid", entity_id=task_grid_id,
                           task_grid_id=task_grid_id,
                           details=json.dumps({"mode": "full", "pairs": duplicate_warnings, "new_ids": new_insert_ids[:50],
-                                              "payload_features": len(data.features), "preserved": len(preserved_ids)}))
+                                              "payload_features": len(data.features), "preserved": len(preserved_ids),
+                                              **({"ctx": _audit_ctx(data.ctx)} if data.ctx else {})}))
         except Exception as dup_err:
             logger.warning(f"Duplicate check failed for grid {task_grid_id}: {dup_err}")
             db.rollback()

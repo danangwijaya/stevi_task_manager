@@ -2,10 +2,17 @@ import { defineStore } from 'pinia'
 import api from '../services/api'
 import { useAuthStore } from './auth'
 import { buildBaseline, computeDelta, applyResponse, rebase, numericId } from '../services/deltaSave'
+import { buildContext, noteOp } from '../services/saveContext'
 
 // What the server is known to hold per grid (Map id -> { hash, version }). Kept outside Pinia state on purpose:
 // it is bookkeeping for the next save, not something the UI renders, and it can hold thousands of entries.
 const baselines = new Map()
+
+// Breadcrumbs sent with every save (stored in the audit trail): what the mapper did and how many polygons have no database id
+const saveCtx = (features) => buildContext({
+  features: features.length,
+  no_id: features.filter((f) => numericId(f) === null).length,
+})
 
 // Delta save is on for admins and the pilot mappers below by default, and opt-in/out per browser with localStorage
 // 'geostevia_delta_save' = '1' / '0'. Widening the rollout later means changing this one function.
@@ -80,12 +87,15 @@ export const useAnnotationsStore = defineStore('annotations', {
     async saveGridChanges(taskGridId, features) {
       const base = baselines.get(taskGridId)
       const delta = computeDelta(features, base)
-      if (delta.fallback) return null
+      if (delta.fallback) {
+        noteOp('delta_fallback', { why: delta.fallback })
+        return null
+      }
       if (!delta.upserts.length && !delta.deletes.length) {
         // `id_map` still carries adopted ids so the view can give them back to the layers
         return { ok: true, id_map: delta.adopted, count: 0, preserved_ids: [], dropped_duplicates: 0, conflicts: [], rejected: [], extra_features: [], nothing: true }
       }
-      const response = await api.saveGridChanges(taskGridId, { upserts: delta.upserts, deletes: delta.deletes })
+      const response = await api.saveGridChanges(taskGridId, { upserts: delta.upserts, deletes: delta.deletes, ctx: saveCtx(features) })
       const out = applyResponse(base, delta.sent, response.data)
       Object.assign(out.idMap, delta.adopted)
       this.currentFeatures = features
@@ -112,7 +122,7 @@ export const useAnnotationsStore = defineStore('annotations', {
           const viaDelta = await this.saveGridChanges(taskGridId, features)
           if (viaDelta) return viaDelta
         }
-        const response = await api.saveGridAnnotations(taskGridId, features, this.syncedAt[taskGridId] || null)
+        const response = await api.saveGridAnnotations(taskGridId, features, this.syncedAt[taskGridId] || null, Array.isArray(features) ? saveCtx(features) : undefined)
         const idMap = response.data?.id_map || null
         if (idMap && Array.isArray(features)) {
           features.forEach(f => {

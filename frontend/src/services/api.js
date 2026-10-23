@@ -114,10 +114,11 @@ export default {
   // Delta save: only changed polygons and named deletes (see services/deltaSave.js)
   saveGridChanges: (taskGridId, payload) =>
     api.post(`/annotations/grid/${taskGridId}/changes`, payload, { timeout: 180000 }),
-  saveGridAnnotations: (taskGridId, features, syncedAt = null) => api.post(`/annotations/grid/${taskGridId}`, {
+  saveGridAnnotations: (taskGridId, features, syncedAt = null, ctx = undefined) => api.post(`/annotations/grid/${taskGridId}`, {
     task_grid_id: taskGridId,
     synced_at: syncedAt,
-    features: features
+    features: features,
+    ctx: ctx
   }, { timeout: 180000 }), // 3 minutes timeout for massive multi-thousand polygon grids
   deleteAnnotation: (annId) => api.delete(`/annotations/${annId}`),
   initBasePolygon: (taskGridId) => api.post(`/annotations/grid/${taskGridId}/init-base`),

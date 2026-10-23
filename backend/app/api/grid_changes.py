@@ -18,6 +18,7 @@ from shapely.geometry import mapping, shape
 from sqlalchemy.orm import Session
 
 from app.api.annotations import (
+    _audit_ctx,
     _extract_polygons,
     _near_duplicate_pairs,
     _parse_client_time,
@@ -54,6 +55,7 @@ class DeleteRef(BaseModel):
 class GridChangesRequest(BaseModel):
     upserts: List[ChangeFeature] = []
     deletes: List[DeleteRef] = []
+    ctx: Optional[Dict[str, Any]] = None        # what the mapper did since the page loaded; only written to the audit trail
 
 
 def _feature_json(row: Annotation, author_name: Optional[str] = None) -> Dict[str, Any]:
@@ -269,6 +271,7 @@ def save_grid_changes(
         log_audit(db=db, user_id=current_user.id, action="SAVE_ANNOTATIONS", entity_type="task_grid",
                   entity_id=task_grid_id, task_grid_id=task_grid_id,
                   details=json.dumps({"mode": "delta", "upserts": len(touched), "deletes": len(deleted), "conflicts": len(conflicts),
+                                      **({"ctx": _audit_ctx(req.ctx)} if req.ctx else {}),
                                       **({"dropped_duplicates": [{"uid": d["client_uid"], "of": d["duplicate_of"]} for d in dropped][:20]} if dropped else {}),
                                       **({"gone_deletes": gone_ids[:20]} if gone_ids else {})}))
         if duplicate_warnings:
@@ -281,7 +284,8 @@ def save_grid_changes(
                                           "upsert_versions": {str(u.id): u.version for u in req.upserts if u.id is not None}
                                           if sum(1 for u in req.upserts if u.id is not None) <= 20 else None,
                                           "deleted_ids": deleted[:50], "gone_delete_ids": gone_ids[:20],
-                                          "conflict_ids": [c["id"] for c in conflicts][:50]}))
+                                          "conflict_ids": [c["id"] for c in conflicts][:50],
+                                          **({"ctx": _audit_ctx(req.ctx)} if req.ctx else {})}))
 
     return {
         "id_map": id_map,
