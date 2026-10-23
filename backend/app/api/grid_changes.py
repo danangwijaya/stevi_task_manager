@@ -89,6 +89,39 @@ def _clean_parts(geometry: Dict[str, Any]):
     return _extract_polygons(s_geom, min_area_sqm=0.1)
 
 
+def _drop_redundant_inserts(db: Session, task_grid_id: int, inserted: List[Annotation]):
+    """Removes rows inserted by this request that repeat a polygon the grid already holds (same class, IoU >= NEAR_DUPLICATE_IOU).
+
+    Cuts and class changes are computed on the client, and a delete that loses a version conflict leaves the old row in
+    place while its replacement is inserted: that is how stacks of identical giants built up. Rows that were already stored
+    are never removed here; when both copies are new the later one goes. Different classes are kept and only reported
+    (`duplicate_warnings`), because which class is right is the mapper's decision. Returns the rejection entries for
+    the client and the ids of the removed rows.
+    """
+    if not inserted:
+        return [], set()
+    new_ids = {r.id for r in inserted}
+    rows = db.query(Annotation).filter(Annotation.task_grid_id == task_grid_id).all()
+    by_id = {r.id: r for r in rows}
+    dropped: Dict[int, int] = {}                      # removed id -> id of the copy that stays
+    for pair in _near_duplicate_pairs(rows, new_ids):
+        a, b = (by_id[i] for i in pair["ids"])
+        if a.class_id != b.class_id:
+            continue
+        victim = max((r for r in (a, b) if r.id in new_ids), key=lambda r: r.id)
+        keep = b if victim is a else a
+        if victim.id in dropped or keep.id in dropped:
+            continue
+        dropped[victim.id] = keep.id
+    rejected = []
+    for victim_id, keep_id in dropped.items():
+        victim = by_id[victim_id]
+        rejected.append({"id": None, "client_uid": victim.client_uid, "duplicate_of": keep_id,
+                         "reason": f"Salinan hampir identik dari poligon #{keep_id} (kelas sama), tidak disimpan."})
+        db.delete(victim)
+    return rejected, set(dropped)
+
+
 @router.post("/grid/{task_grid_id}/changes")
 def save_grid_changes(
     task_grid_id: int,
@@ -122,6 +155,7 @@ def save_grid_changes(
     conflicts: List[Dict[str, Any]] = []
     rejected: List[Dict[str, Any]] = []
     extra_new: List[Annotation] = []      # additional rows when a cleaned polygon splits into several parts
+    inserted: List[Annotation] = []       # every row this request creates, extra parts included
     id_map: Dict[str, int] = {}
 
     for u in req.upserts:
@@ -158,6 +192,7 @@ def save_grid_changes(
                              class_id=class_id, class_name=class_name,
                              geom_geojson=json.dumps(mapping(first)), area_sqm=first.area * SQM_PER_DEG2)
             db.add(row)
+            inserted.append(row)
             if u.client_uid:
                 by_uid[u.client_uid] = row            # a duplicate uid later in this request updates this row
         else:
@@ -172,6 +207,7 @@ def save_grid_changes(
                                geom_geojson=json.dumps(mapping(extra)), area_sqm=extra.area * SQM_PER_DEG2)
             db.add(e_row)
             extra_new.append(e_row)
+            inserted.append(e_row)
 
     deleted: List[int] = []
     gone_ids: List[int] = []                         # deletes of rows that did not exist: a client with a stale id sends these
@@ -193,6 +229,11 @@ def save_grid_changes(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Permintaan yang sama sedang diproses. Ulangi simpan.")
+    dropped, dropped_ids = _drop_redundant_inserts(db, task_grid_id, inserted)
+    if dropped:
+        touched = [r for r in touched if r.id not in dropped_ids]
+        extra_new = [r for r in extra_new if r.id not in dropped_ids]
+        rejected.extend(dropped)
     # read ids BEFORE commit: after it every attribute is expired and would cost one query per row
     for r in touched + extra_new:
         if r.client_uid:
@@ -228,6 +269,7 @@ def save_grid_changes(
         log_audit(db=db, user_id=current_user.id, action="SAVE_ANNOTATIONS", entity_type="task_grid",
                   entity_id=task_grid_id, task_grid_id=task_grid_id,
                   details=json.dumps({"mode": "delta", "upserts": len(touched), "deletes": len(deleted), "conflicts": len(conflicts),
+                                      **({"dropped_duplicates": [{"uid": d["client_uid"], "of": d["duplicate_of"]} for d in dropped][:20]} if dropped else {}),
                                       **({"gone_deletes": gone_ids[:20]} if gone_ids else {})}))
         if duplicate_warnings:
             log_audit(db=db, user_id=current_user.id, action="DUPLICATE_SUSPECT", entity_type="task_grid",

@@ -187,7 +187,37 @@ def test_duplicate_audit_names_the_client_uids_and_deletes_of_missing_rows(db):
     u = _user(db, "m")
     g = _grid(db, u)
     save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="first")]), db, u)
-    save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="second")], deletes=[DeleteRef(id=424242)]), db, u)
+    save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="second", cls=2)], deletes=[DeleteRef(id=424242)]), db, u)
     audit = db.query(AuditLog).filter(AuditLog.task_grid_id == g.id, AuditLog.action == "DUPLICATE_SUSPECT").one()
     d = json.loads(audit.details)
     assert d["upsert_uids"] == ["second"] and d["gone_delete_ids"] == [424242]
+
+
+def test_same_class_copy_of_a_stored_polygon_is_not_inserted(db):
+    """A cut whose delete lost a version conflict leaves the old row behind: its replacement must not stack on it."""
+    u = _user(db, "m")
+    g = _grid(db, u)
+    first = save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="a")]), db, u)
+    out = save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="b"), feat(0.5, uid="c")]), db, u)
+    assert "b" not in out["id_map"] and "c" in out["id_map"]
+    assert out["rejected"][0]["client_uid"] == "b" and out["rejected"][0]["duplicate_of"] == first["id_map"]["a"]
+    assert [r.id for r in rows(db, g)] == [first["id_map"]["a"], out["id_map"]["c"]]
+
+
+def test_replacement_of_a_deleted_polygon_is_accepted(db):
+    """The normal cut: the old polygon is deleted in the same request, so the near-identical remainder is not a copy."""
+    u = _user(db, "m")
+    g = _grid(db, u)
+    first = save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="a")]), db, u)
+    aid = first["id_map"]["a"]
+    out = save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="b")],
+                                                     deletes=[DeleteRef(id=aid, version=first["versions"][str(aid)])]), db, u)
+    assert out["rejected"] == [] and [r.id for r in rows(db, g)] == [out["id_map"]["b"]]
+
+
+def test_two_identical_new_polygons_in_one_request_keep_the_first(db):
+    u = _user(db, "m")
+    g = _grid(db, u)
+    out = save_grid_changes(g.id, GridChangesRequest(upserts=[feat(0.1, uid="x"), feat(0.1, uid="y")]), db, u)
+    assert list(out["id_map"]) == ["x"] and [r["client_uid"] for r in out["rejected"]] == ["y"]
+    assert len(rows(db, g)) == 1
