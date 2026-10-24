@@ -9,6 +9,7 @@ import AdminPanelView from '../views/AdminPanelView.vue'
 import ExportDatasetView from '../views/ExportDatasetView.vue'
 import ExploreProjectsView from '../views/ExploreProjectsView.vue'
 import LoginView from '../views/LoginView.vue'
+import { versionState } from '../services/versionCheck'
 
 const routes = [
   {
@@ -92,6 +93,14 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
+  // A newer build is deployed: leave through a full page load so the next page runs the new code. The map's own
+  // beforeunload prompt still protects unsaved work.
+  if (versionState.newVersion && from.matched.length && to.fullPath !== from.fullPath) {
+    window.location.assign(router.resolve(to).href)
+    next(false)
+    return
+  }
+
   const token = localStorage.getItem('geoai_token')
   const userRaw = localStorage.getItem('geoai_user')
 
