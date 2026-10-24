@@ -9195,14 +9195,9 @@ const reassignClassToClickedPolygon = async (cls) => {
   queueOfflineDraftSave()
   showToast(`Kelas Poligon #${clickedFeatureIdx.value + 1} diubah → ${cls.name}`)
 
-  // 3. Fast direct save in background only if real numeric database ID
-  if (targetFeat.id && typeof targetFeat.id === 'number') {
-    try {
-      await api.updateAnnotationClass(targetFeat.id, cls.id)
-    } catch (err) {
-      console.warn('Update class API error:', err)
-    }
-  }
+  // The class travels with the next autosave or Save like every other edit. A direct PUT here changed the row's
+  // updated_at behind the save's back: a polygon cut or deleted afterwards was then treated as someone else's change
+  // (kept by the full save, a lost conflict in the delta save) and stacked up next to its replacement.
 }
 
 // ── HOLE / LUBANG MANAGEMENT FOR SELECTED POLYGON ──────
