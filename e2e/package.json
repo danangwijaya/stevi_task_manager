@@ -1,0 +1,7 @@
+{
+  "name": "geostevia-e2e",
+  "private": true,
+  "description": "Browser tests that drive the real map against a local backend (SQLite) and the Vite dev server",
+  "scripts": { "test": "playwright test" },
+  "devDependencies": { "@playwright/test": "1.49.1" }
+}
