@@ -6,7 +6,7 @@
 
 Backups go to ~/backups_auto (geoai_YYYYmmdd_HHMM.dump + .json, newest 7 files and the newest of each of the last 4 weeks are kept;
 the manual backup_*.dump files in ~ are never touched). A backup counts only when `pg_restore -l` can read it and its sha256 is
-recorded. Offsite copy: set OFFSITE_RSYNC (user@host:/dir/) or OFFSITE_RCLONE (remote:dir) in ~/.geostevia_backup.env. The Telegram
+recorded. Offsite copy: set OFFSITE_RSYNC (user@host:/dir/) or OFFSITE_RCLONE (remote:dir, plus OFFSITE_KEEP_DAYS, default 8) in ~/.geostevia_backup.env. The Telegram
 report uses the token and chat id of ~/.geostevia_monitor.env. Standard library only; it never changes the live database.
 """
 import hashlib
@@ -128,8 +128,11 @@ def offsite(path):
             subprocess.run(["rsync", "-a", "--partial", path, env["OFFSITE_RSYNC"]], check=True, timeout=3600, capture_output=True)
             return f"rsync ke {env['OFFSITE_RSYNC'].split(':')[0]}: berhasil"
         if env.get("OFFSITE_RCLONE"):
-            subprocess.run(["rclone", "copy", path, env["OFFSITE_RCLONE"]], check=True, timeout=3600, capture_output=True)
-            return f"rclone ke {env['OFFSITE_RCLONE'].split(':')[0]}: berhasil"
+            remote, keep_days = env["OFFSITE_RCLONE"], int(env.get("OFFSITE_KEEP_DAYS", "8"))
+            subprocess.run(["rclone", "copy", path, remote], check=True, timeout=7200, capture_output=True)
+            # a cloud drive has a small quota: only the newest days stay there (the local disk keeps the 7 daily and 4 weekly files)
+            subprocess.run(["rclone", "delete", remote, "--min-age", f"{keep_days}d", "--include", "geoai_*.dump"], check=True, timeout=1800, capture_output=True)
+            return f"rclone ke {remote.split(':')[0]}: berhasil (salinan lebih dari {keep_days} hari di sana dihapus)"
     except Exception as exc:
         return f"GAGAL: {type(exc).__name__}"
     return "belum dikonfigurasi (cadangan hanya ada di server ini)"

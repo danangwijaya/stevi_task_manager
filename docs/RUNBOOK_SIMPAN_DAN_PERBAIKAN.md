@@ -97,8 +97,11 @@ laporan 07:05, 13:05, dan 19:05 WIB, dan polling perintah tiap menit (`--poll`, 
   Berkas `backup_*.dump` manual di `~` tidak disentuh.
 - **Latihan pemulihan tiap Sabtu 19:30 UTC** (Minggu 02:30 WIB): memulihkan cadangan terbaru ke database sementara `geoai_restore_drill`,
   membandingkan jumlah baris dengan catatan saat cadangan, menghapus database sementara, lalu melapor. Cadangan yang belum pernah dipulihkan belum bisa dipercaya.
-- **Salinan di luar server**: isi `OFFSITE_RSYNC=user@host:/dir/` atau `OFFSITE_RCLONE=remote:dir` di `~/.geostevia_backup.env` (mode 600).
-  Sampai diisi, laporan menulis "belum dikonfigurasi".
+- **Salinan di luar server**: isi `OFFSITE_RSYNC=user@host:/dir/` atau `OFFSITE_RCLONE=remote:dir` (opsional `OFFSITE_KEEP_DAYS`, bawaan 8) di
+  `~/.geostevia_backup.env` (mode 600). Sampai diisi, laporan menulis "belum dikonfigurasi". Untuk Google Drive: remote `rclone` bertipe `drive`
+  dengan `root_folder_id` folder tujuan, dibungkus remote `crypt` supaya isi cadangan (hash sandi, data pengguna) terenkripsi sebelum keluar server;
+  kata sandi enkripsi wajib tersimpan juga di pengelola kata sandi, karena tanpa itu cadangan di Drive tidak bisa dibuka. Akun Google Drive biasa
+  memakai token OAuth (`rclone authorize "drive"` di komputer yang punya peramban); akun layanan tidak punya kuota di Drive pribadi.
 - Laporan harian Telegram menandai masalah bila cadangan terbaru tidak ada, tidak terverifikasi, atau lebih tua dari 30 jam.
 - Pemulihan sungguhan: `docker exec -i geoai_postgis pg_restore -U geoai_user --no-owner -d <database_baru> < berkas.dump` ke database baru dulu, jangan langsung menimpa
   database produksi.
