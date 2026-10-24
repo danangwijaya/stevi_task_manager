@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from app.main import app
+from tests.db_required import needs_db
 
 client = TestClient(app)
 
@@ -8,6 +9,7 @@ def test_root():
     assert response.status_code == 200
     assert "GEOSTEVIA" in response.json()["app"] or "GeoAI" in response.json()["app"]
 
+@needs_db
 def test_login_admin():
     response = client.post("/api/v1/auth/login", json={
         "username": "admin",
@@ -18,6 +20,7 @@ def test_login_admin():
     assert "access_token" in data
     assert data["role"] == "admin"
 
+@needs_db
 def test_login_student():
     response = client.post("/api/v1/auth/login", json={
         "username": "mahasiswa1",
@@ -39,6 +42,7 @@ def test_classes_list():
     assert "Pertambangan" in class_names
     assert "Di Luar Wilayah Sampel" in class_names
 
+@needs_db
 def test_tasks_summary_and_export():
     # Login
     auth_resp = client.post("/api/v1/auth/login", json={
@@ -55,6 +59,7 @@ def test_tasks_summary_and_export():
     assert stats["total_tasks"] > 0
     assert len(stats["student_contributions"]) == 10
 
+@needs_db
 def test_task_siblings_and_reset():
     # Admin login
     auth_resp = client.post("/api/v1/auth/login", json={
