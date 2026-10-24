@@ -481,3 +481,24 @@ def test_full_save_audit_records_the_counts_and_client_context(db):
     d = json.loads(audit.details)
     assert d["mode"] == "full" and d["payload"] == 1 and d["no_id"] == 1 and d["new"] == 1 and d["adopted"] == 0
     assert d["ctx"] == ctx
+
+
+def test_full_save_returns_ids_for_polygons_whose_ui_id_is_only_at_the_top_level_of_the_feature(db):
+    """A polygon made by a cut or merge carries `_uiId` beside `properties`, not inside it. The server used to drop it, so
+    the client never learned the row ids and every autosave deleted and re-inserted those polygons."""
+    from app.api.annotations import save_grid_annotations, AnnotationSaveRequest
+    from app.db.models import Annotation
+
+    owner = _user(db, "own", "annotator")
+    g = _grid(db, assigned_user_id=owner.id, status="IN_PROGRESS")
+    sq = lambda x: {"type": "Polygon", "coordinates": [[[x, 0], [x + 0.002, 0], [x + 0.002, 0.002], [x, 0.002], [x, 0]]]}
+    wire = [{"type": "Feature", "geometry": sq(0.0), "properties": {"class_id": 1, "class_name": "x"}, "_uiId": "f_tmp_1_1"},
+            {"type": "Feature", "geometry": sq(0.01), "properties": {"class_id": 1, "class_name": "x", "_uiId": "f_tmp_2_2"}, "_uiId": "f_tmp_2_2"}]
+    first = save_grid_annotations(g.id, AnnotationSaveRequest(**{"task_grid_id": g.id, "features": wire}), db, owner)
+    assert set(first["id_map"]) == {"f_tmp_1_1", "f_tmp_2_2"}
+    # the client now holds the ids: the next save keeps the same rows instead of replacing them
+    for f in wire:
+        f["id"] = first["id_map"][f["_uiId"]]
+    second = save_grid_annotations(g.id, AnnotationSaveRequest(**{"task_grid_id": g.id, "features": wire}), db, owner)
+    assert sorted(r.id for r in db.query(Annotation).filter(Annotation.task_grid_id == g.id)) == sorted(first["id_map"].values())
+    assert second["id_map"] == first["id_map"]

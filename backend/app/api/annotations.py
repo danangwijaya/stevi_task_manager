@@ -4,7 +4,7 @@ import os
 import math
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from shapely.geometry import shape, mapping, Polygon, MultiPolygon, box
@@ -68,10 +68,14 @@ def _require_grid_edit_access(db: Session, task_grid_id: int, user: User) -> Tas
 
 
 class GeoJSONFeature(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     type: str = "Feature"
     id: Optional[Union[int, str]] = None
     geometry: Dict[str, Any]
     properties: Dict[str, Any] = {}
+    # The map's key for a polygon it has not saved yet. Polygons made by a cut or merge carry it beside `properties`,
+    # others inside it; the server hands the row id back under this key (`id_map`).
+    ui_id: Optional[str] = Field(default=None, alias="_uiId")
 
 class AnnotationSaveRequest(BaseModel):
     task_grid_id: int
@@ -616,7 +620,7 @@ def save_grid_annotations(
 
             # Safely extract existing feature ID without throwing AttributeError
             raw_fid = getattr(f, "id", None) or props.get("id")
-            raw_ui_id = getattr(f, "_uiId", None) or props.get("_uiId")
+            raw_ui_id = f.ui_id or props.get("_uiId")
             fid = None
             if isinstance(raw_fid, int):
                 fid = raw_fid
