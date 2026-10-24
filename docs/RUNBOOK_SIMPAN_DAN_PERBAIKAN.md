@@ -89,6 +89,20 @@ laporan 07:05, 13:05, dan 19:05 WIB, dan polling perintah tiap menit (`--poll`, 
   isi token baru langsung di berkas itu lewat SSH, kirim `/periksa` untuk menguji.
 - Setelah mengubah skrip di repo, salin ulang ke VPS (`scp`), termasuk `fix/*.py` bila skrip perbaikan berubah.
 
+## 5b. Cadangan otomatis dan latihan pemulihan
+
+`backend/scripts/backup_db.py` (di host VPS, `~/geostevia_monitor/`), dijalankan `cron`:
+- **Harian 01:30 WIB** (18:30 UTC): `pg_dump -Fc` ke `~/backups_auto/geoai_YYYYmmdd_HHMM.dump`, dicek terbaca (`pg_restore -l`), sha256 dan jumlah baris
+  tabel utama dicatat di berkas `.json`, lalu laporan ke Telegram. Disimpan 7 berkas terbaru ditambah yang terbaru dari tiap 4 minggu terakhir.
+  Berkas `backup_*.dump` manual di `~` tidak disentuh.
+- **Latihan pemulihan tiap Sabtu 19:30 UTC** (Minggu 02:30 WIB): memulihkan cadangan terbaru ke database sementara `geoai_restore_drill`,
+  membandingkan jumlah baris dengan catatan saat cadangan, menghapus database sementara, lalu melapor. Cadangan yang belum pernah dipulihkan belum bisa dipercaya.
+- **Salinan di luar server**: isi `OFFSITE_RSYNC=user@host:/dir/` atau `OFFSITE_RCLONE=remote:dir` di `~/.geostevia_backup.env` (mode 600).
+  Sampai diisi, laporan menulis "belum dikonfigurasi".
+- Laporan harian Telegram menandai masalah bila cadangan terbaru tidak ada, tidak terverifikasi, atau lebih tua dari 30 jam.
+- Pemulihan sungguhan: `docker exec -i geoai_postgis pg_restore -U geoai_user --no-owner -d <database_baru> < berkas.dump` ke database baru dulu, jangan langsung menimpa
+  database produksi.
+
 ## 6. Deploy
 
 Hanya atas keputusan eksplisit; cek dulu siapa yang sedang menyimpan (`audit_logs`, 10 menit terakhir).

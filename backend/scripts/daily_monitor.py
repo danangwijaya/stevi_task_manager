@@ -69,6 +69,24 @@ def format_ops(ops, limit=4):
     return " > ".join(parts)
 
 
+BACKUP_LATEST = os.path.expanduser("~/backups_auto/latest.json")
+
+
+def backup_problem(latest, now, max_hours=30):
+    """None when the newest automatic backup is verified and recent, otherwise a sentence saying what is wrong."""
+    if not latest:
+        return "Belum ada cadangan otomatis (backup_db.py belum pernah berhasil)"
+    try:
+        age = (now - datetime.strptime(latest["at_utc"], "%Y-%m-%d %H:%M:%S")).total_seconds() / 3600
+    except (KeyError, ValueError):
+        return "Catatan cadangan terakhir rusak"
+    if not latest.get("verified"):
+        return "Cadangan terakhir tidak terverifikasi"
+    if age > max_hours:
+        return f"Cadangan otomatis terakhir berumur {age:.0f} jam (batas {max_hours} jam)"
+    return None
+
+
 def backend_errors(hours):
     out = subprocess.run(["docker", "logs", "--since", f"{hours}h", "geoai_backend"],
                          capture_output=True, text=True, timeout=120)
@@ -126,6 +144,14 @@ def build_report(hours):
         f"select count(*) filter (where (details::json->>'conflicts')::int > 0), coalesce(sum((details::json->>'conflicts')::int), 0), "
         f"count(*) filter (where (details::json->>'preserved')::int > 0), coalesce(sum((details::json->>'preserved')::int), 0) "
         f"from audit_logs where action = 'SAVE_ANNOTATIONS' and created_at > {since}")[0])
+
+    try:
+        latest_backup = json.load(open(BACKUP_LATEST))
+    except Exception:
+        latest_backup = None
+    backup_issue = backup_problem(latest_backup, datetime.now(timezone.utc).replace(tzinfo=None))
+    if backup_issue:
+        problems.append(backup_issue)
 
     errors = backend_errors(hours)
     if errors:

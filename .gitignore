@@ -55,3 +55,5 @@ Thumbs.db
 SSL/
 backend/data/vector/download_tiles*
 backend/data/vector/test_sumbar.geojson
+.env.save
+.env.*.save

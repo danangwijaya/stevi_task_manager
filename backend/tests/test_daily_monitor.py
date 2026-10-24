@@ -76,3 +76,14 @@ def test_fix_summary_keeps_the_numbers_and_trims_long_cluster_lists():
     assert "mode DRY RUN" in out and "stale copies to delete: 7" in out and "dan 2 kluster lain" in out
     assert "created" not in out.split("\n")[1] and "nothing written" not in out
     assert monitor.summarize_fix("o", "noise only").startswith("(tidak ada keluaran)")
+
+
+def test_backup_problem_names_a_missing_stale_or_unverified_backup_and_stays_quiet_when_fine():
+    from datetime import datetime
+    now = datetime(2026, 10, 24, 12, 0, 0)
+    fresh = {"at_utc": "2026-10-24 04:00:00", "verified": True}
+    assert monitor.backup_problem(fresh, now) is None
+    assert "Belum ada" in monitor.backup_problem(None, now)
+    assert "umur 40 jam" in monitor.backup_problem({"at_utc": "2026-10-22 20:00:00", "verified": True}, now)
+    assert "tidak terverifikasi" in monitor.backup_problem({"at_utc": "2026-10-24 04:00:00", "verified": False}, now)
+    assert "rusak" in monitor.backup_problem({"verified": True}, now)
