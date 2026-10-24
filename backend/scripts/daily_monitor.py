@@ -122,6 +122,11 @@ def build_report(hours):
              f"{format_ops((e['ctx'] or {}).get('ops')) or '-'}; poligon tanpa id {(e['ctx'] or {}).get('no_id', '?')}"
              f"/{(e['ctx'] or {}).get('features', '?')}" for e in events]
 
+    conf_saves, conf_rows, pres_saves, pres_rows = (int(x) for x in psql(
+        f"select count(*) filter (where (details::json->>'conflicts')::int > 0), coalesce(sum((details::json->>'conflicts')::int), 0), "
+        f"count(*) filter (where (details::json->>'preserved')::int > 0), coalesce(sum((details::json->>'preserved')::int), 0) "
+        f"from audit_logs where action = 'SAVE_ANNOTATIONS' and created_at > {since}")[0])
+
     errors = backend_errors(hours)
     if errors:
         problems.append(f"Backend mencatat {errors} error (Traceback/500) dalam {hours} jam")
@@ -132,6 +137,8 @@ def build_report(hours):
         head += f"\nJejak klien: {ctx_n} dari {save_n} simpan membawa ctx, {no_id_n} punya poligon tanpa id"
     elif save_n:
         head += "\nJejak klien: belum ada (klien belum hard refresh)"
+    head += (f"\nKonflik versi (delta): {conf_saves} simpan, {conf_rows} poligon | "
+             f"baris dipertahankan (penuh): {pres_saves} simpan, {pres_rows} baris")
     tail = ("\nJejak sebelum kembar:\n- " + "\n- ".join(trail)) if trail else ""
     if not problems:
         return head + "\nStatus: OK, tidak ada kembaran baru, raksasa bertumpuk, atau error." + tail
